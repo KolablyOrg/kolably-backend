@@ -3,11 +3,11 @@ FastAPI dependency injection helpers — auth & RBAC.
 """
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.core.enums import UserRole
 from app.core.security import verify_supabase_token
 from app.core.supabase import get_supabase_admin_client
-from app.core.enums import UserRole
 from app.schemas.user import UserInToken
 
 security = HTTPBearer()
@@ -21,24 +21,19 @@ async def get_current_user(
 
     Checks:
     1. JWT is valid and not expired
-    2. Email is verified (email_confirmed_at is set)
-    3. Profile exists in public.profiles
-    4. Account is active
+    2. Profile exists in public.profiles
+    3. Account is active
+
+    Note: email verification is enforced at login (Supabase Auth won't issue
+    sessions to unverified users when confirmation is enabled). The JWT itself
+    does not carry an email_confirmed_at claim.
     """
     token = credentials.credentials
 
     # 1. Verify Supabase JWT
     payload = verify_supabase_token(token)
 
-    # 2. Check email verification
-    email_confirmed = payload.get("email_confirmed_at")
-    if not email_confirmed:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email not verified. Please verify your email first.",
-        )
-
-    # 3. Load profile from DB
+    # 2. Load profile from DB
     auth_id = payload.get("sub")
     if not auth_id:
         raise HTTPException(
@@ -63,7 +58,7 @@ async def get_current_user(
 
     profile = result.data
 
-    # 4. Check active
+    # 3. Check active
     if not profile.get("is_active", False):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

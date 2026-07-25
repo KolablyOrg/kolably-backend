@@ -35,6 +35,15 @@ class CreatorUpdateRequest(BaseModel):
     profile_photo_url: str | None = None
 
 
+class CreatorSummary(BaseModel):
+    """Minimal creator info for nested responses."""
+    id: str
+    name: str
+    profile_photo_url: str | None = None
+    follower_count: int | None = None
+    niche: str | None = None
+
+
 class PortfolioItemResponse(BaseModel):
     id: str
     creator_id: str
