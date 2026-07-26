@@ -1,29 +1,16 @@
-"""
-Creator service — profile CRUD, discovery, Instagram integration.
-"""
-
 from fastapi import HTTPException, status
 
-from app.core.supabase import get_supabase_admin_client
+from app.repositories.creator_repo import CreatorRepository
 from app.schemas.creator import CreatorResponse
 
 
 async def get_creator_by_id(creator_id: str) -> CreatorResponse | None:
-    """Get a creator by ID with profile info."""
-    admin_client = get_supabase_admin_client()
+    repo = CreatorRepository()
+    data = await repo.get_by_id(creator_id)
 
-    result = (
-        admin_client.table("creators")
-        .select("*, profiles!creators_profile_id_fkey(email)")
-        .eq("id", creator_id)
-        .maybe_single()
-        .execute()
-    )
-
-    if not result.data:
+    if not data:
         return None
 
-    data = result.data
     profile = data.pop("profiles", {})
 
     return CreatorResponse(
@@ -53,27 +40,17 @@ async def list_creators(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    """List and filter creators with pagination."""
-    admin_client = get_supabase_admin_client()
+    repo = CreatorRepository()
+    rows, total = await repo.list_filtered(
+        search=search,
+        niche=niche,
+        city=city,
+        follower_min=follower_min,
+        follower_max=follower_max,
+        page=page,
+        page_size=page_size,
+    )
 
-    query = admin_client.table("creators").select("*", count="exact")
-
-    if search:
-        query = query.ilike("name", f"%{search}%")
-    if niche:
-        query = query.eq("niche", niche)
-    if city:
-        query = query.ilike("city", f"%{city}%")
-    if follower_min is not None:
-        query = query.gte("follower_count", follower_min)
-    if follower_max is not None:
-        query = query.lte("follower_count", follower_max)
-
-    start = (page - 1) * page_size
-    end = start + page_size - 1
-    result = query.range(start, end).execute()
-
-    rows = result.data or []
     items = []
     for row in rows:
         items.append({
@@ -95,7 +72,7 @@ async def list_creators(
 
     return {
         "items": items,
-        "total": result.count or 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
     }
@@ -107,23 +84,14 @@ async def get_creator_portfolio(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    """Get portfolio items for a creator."""
-    admin_client = get_supabase_admin_client()
-
-    query = (
-        admin_client.table("portfolio_items")
-        .select("*", count="exact")
-        .eq("creator_id", creator_id)
+    repo = CreatorRepository()
+    rows, total = await repo.list_portfolio(
+        creator_id=creator_id,
+        media_type=media_type,
+        page=page,
+        page_size=page_size,
     )
 
-    if media_type:
-        query = query.eq("media_type", media_type)
-
-    start = (page - 1) * page_size
-    end = start + page_size - 1
-    result = query.range(start, end).execute()
-
-    rows = result.data or []
     items = []
     for row in rows:
         items.append({
@@ -140,41 +108,26 @@ async def get_creator_portfolio(
 
     return {
         "items": items,
-        "total": result.count or 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
     }
 
 
 async def get_creator_stats(profile_id: str) -> dict:
-    """Get creator stats: active_collaborations_count."""
-    admin_client = get_supabase_admin_client()
+    repo = CreatorRepository()
+    creator_id = await repo.get_id_by_profile_id(profile_id)
 
-    creator_result = (
-        admin_client.table("creators")
-        .select("id")
-        .eq("profile_id", profile_id)
-        .maybe_single()
-        .execute()
-    )
-    if not creator_result.data:
+    if not creator_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Creator profile not found",
         )
 
-    creator_id = creator_result.data["id"]
-
-    collabs_result = (
-        admin_client.table("collaborations")
-        .select("id", count="exact")
-        .eq("creator_id", creator_id)
-        .eq("status", "active")
-        .execute()
-    )
+    active_count = await repo.count_active_collaborations(creator_id)
 
     return {
-        "active_collaborations_count": collabs_result.count or 0,
+        "active_collaborations_count": active_count,
         "engagement_growth_pct": None,
     }
 
@@ -184,36 +137,23 @@ async def list_saved_campaigns(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    """List saved campaigns for a creator."""
-    admin_client = get_supabase_admin_client()
+    repo = CreatorRepository()
+    creator_id = await repo.get_id_by_profile_id(profile_id)
 
-    creator_result = (
-        admin_client.table("creators")
-        .select("id")
-        .eq("profile_id", profile_id)
-        .maybe_single()
-        .execute()
-    )
-    if not creator_result.data:
+    if not creator_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Creator profile not found",
         )
 
-    creator_id = creator_result.data["id"]
-
-    query = (
-        admin_client.table("saved_campaigns")
-        .select("*, campaigns!saved_campaigns_campaign_id_fkey(*)", count="exact")
-        .eq("creator_id", creator_id)
+    rows, total = await repo.list_saved_campaigns(
+        creator_id=creator_id,
+        page=page,
+        page_size=page_size,
     )
 
-    start = (page - 1) * page_size
-    end = start + page_size - 1
-    result = query.range(start, end).execute()
-
     items = []
-    for row in result.data or []:
+    for row in rows:
         campaign = row.get("campaigns", {})
         if campaign:
             items.append({
@@ -234,7 +174,7 @@ async def list_saved_campaigns(
 
     return {
         "items": items,
-        "total": result.count or 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
     }

@@ -1,70 +1,38 @@
-"""
-Application service — apply, accept, reject.
-"""
-
 from fastapi import HTTPException, status
 
 from app.core.enums import ApplicationDirection
-from app.core.supabase import get_supabase_admin_client
+from app.repositories.application_repo import ApplicationRepository
+from app.repositories.business_repo import BusinessRepository
+from app.repositories.creator_repo import CreatorRepository
 from app.schemas.application import ApplicationWithCampaign, ApplicationWithCreator
 from app.schemas.business import BusinessSummary
 from app.schemas.campaign import CampaignSummary
 from app.schemas.creator import CreatorSummary
 
 
-def _get_creator_id_for_user(admin_client, profile_id: str) -> str:
-    """Look up `creators.id` from `profiles.id`."""
-    result = (
-        admin_client.table("creators")
-        .select("id")
-        .eq("profile_id", profile_id)
-        .maybe_single()
-        .execute()
-    )
-    if not result.data:
+async def _get_creator_id_for_user(profile_id: str) -> str:
+    repo = CreatorRepository()
+    creator_id = await repo.get_id_by_profile_id(profile_id)
+    if not creator_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Creator profile not found",
         )
-    return result.data["id"]
+    return creator_id
 
 
-def _get_business_id_for_user(admin_client, profile_id: str) -> str:
-    """Look up `businesses.id` from `profiles.id`."""
-    result = (
-        admin_client.table("businesses")
-        .select("id")
-        .eq("profile_id", profile_id)
-        .maybe_single()
-        .execute()
-    )
-    if not result.data:
+async def _get_business_id_for_user(profile_id: str) -> str:
+    repo = BusinessRepository()
+    business_id = await repo.get_id_by_profile_id(profile_id)
+    if not business_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Business profile not found",
         )
-    return result.data["id"]
-
-
-def _ensure_application_exists(admin_client, application_id: str) -> dict:
-    """Fetch an application and verify it exists. Returns the row."""
-    result = (
-        admin_client.table("campaign_applications")
-        .select("*")
-        .eq("id", application_id)
-        .maybe_single()
-        .execute()
-    )
-    if not result.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Application not found",
-        )
-    return result.data
+    return business_id
 
 
 def _row_to_application_response(row: dict) -> dict:
-    """Convert a Supabase applications row to a ApplicationResponse dict."""
     return {
         "id": row["id"],
         "campaign_id": row["campaign_id"],
@@ -80,9 +48,13 @@ def _row_to_application_response(row: dict) -> dict:
 
 
 async def get_application(application_id: str) -> dict:
-    """Get application details."""
-    admin_client = get_supabase_admin_client()
-    row = _ensure_application_exists(admin_client, application_id)
+    repo = ApplicationRepository()
+    row = await repo.get_by_id(application_id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
     return _row_to_application_response(row)
 
 
@@ -91,27 +63,17 @@ async def list_my_applications(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    """List all applications sent by the current creator."""
-    admin_client = get_supabase_admin_client()
-    creator_id = _get_creator_id_for_user(admin_client, profile_id)
+    creator_id = await _get_creator_id_for_user(profile_id)
 
-    query = (
-        admin_client.table("campaign_applications")
-        .select(
-            "*,",
-            "campaigns!campaign_applications_campaign_id_fkey(*),",
-            "businesses!campaigns_business_id_fkey(*,",
-            "profiles!businesses_profile_id_fkey(business_name, logo_url))",
-        )
-        .eq("creator_id", creator_id)
+    app_repo = ApplicationRepository()
+    rows, total = await app_repo.list_by_creator(
+        creator_id=creator_id,
+        page=page,
+        page_size=page_size,
     )
 
-    start = (page - 1) * page_size
-    end = start + page_size - 1
-    result = query.range(start, end).execute()
-
     items = []
-    for row in result.data or []:
+    for row in rows:
         campaign_data = row.pop("campaigns", {}) or {}
         business_data = row.pop("businesses", {}) or {}
         profile_data = business_data.pop("profiles", {}) or {}
@@ -156,7 +118,7 @@ async def list_my_applications(
 
     return {
         "items": items,
-        "total": result.count or 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
     }
@@ -168,30 +130,18 @@ async def list_business_applications(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    """List all applications for the business's campaigns."""
-    admin_client = get_supabase_admin_client()
-    business_id = _get_business_id_for_user(admin_client, profile_id)
+    business_id = await _get_business_id_for_user(profile_id)
 
-    query = (
-        admin_client.table("campaign_applications")
-        .select(
-            "*,",
-            "campaigns!campaign_applications_campaign_id_fkey(*, business_id),",
-            "creators!campaign_applications_creator_id_fkey(",
-            "id, name, profile_photo_url, follower_count, niche)",
-        )
-        .eq("campaigns.business_id", business_id)
+    app_repo = ApplicationRepository()
+    rows, total = await app_repo.list_by_business(
+        business_id=business_id,
+        status=status,
+        page=page,
+        page_size=page_size,
     )
 
-    if status:
-        query = query.eq("status", status)
-
-    start = (page - 1) * page_size
-    end = start + page_size - 1
-    result = query.range(start, end).execute()
-
     items = []
-    for row in result.data or []:
+    for row in rows:
         creator_data = row.pop("creators", {}) or {}
 
         creator_summary = CreatorSummary(
@@ -219,7 +169,7 @@ async def list_business_applications(
 
     return {
         "items": items,
-        "total": result.count or 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
     }

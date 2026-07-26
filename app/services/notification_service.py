@@ -1,9 +1,4 @@
-"""
-Notification service — get, mark read.
-"""
-
-
-from app.core.supabase import get_supabase_admin_client
+from app.repositories.notification_repo import NotificationRepository
 
 
 async def list_notifications(
@@ -11,22 +6,15 @@ async def list_notifications(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    """List notifications for the current user."""
-    admin_client = get_supabase_admin_client()
-
-    query = (
-        admin_client.table("notifications")
-        .select("*", count="exact")
-        .eq("profile_id", profile_id)
+    repo = NotificationRepository()
+    rows, total = await repo.list_by_profile(
+        profile_id=profile_id,
+        page=page,
+        page_size=page_size,
     )
 
-    start = (page - 1) * page_size
-    end = start + page_size - 1
-    result = query.range(start, end).execute()
-
-    items = []
-    for row in result.data or []:
-        items.append({
+    items = [
+        {
             "id": row["id"],
             "profile_id": row["profile_id"],
             "type": row["type"],
@@ -35,26 +23,19 @@ async def list_notifications(
             "related_id": row.get("related_id"),
             "is_read": row.get("is_read", False),
             "created_at": row["created_at"],
-        })
+        }
+        for row in rows
+    ]
 
     return {
         "items": items,
-        "total": result.count or 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
     }
 
 
 async def get_unread_count(profile_id: str) -> dict:
-    """Get unread count for the current user."""
-    admin_client = get_supabase_admin_client()
-
-    result = (
-        admin_client.table("notifications")
-        .select("id", count="exact")
-        .eq("profile_id", profile_id)
-        .eq("is_read", False)
-        .execute()
-    )
-
-    return {"unread_count": result.count or 0}
+    repo = NotificationRepository()
+    count = await repo.count_unread(profile_id)
+    return {"unread_count": count}

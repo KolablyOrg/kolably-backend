@@ -1,0 +1,101 @@
+from app.repositories.base import BaseRepository
+
+
+class BusinessRepository(BaseRepository):
+    async def get_by_id(self, business_id: str) -> dict | None:
+        return await self.select_one(
+            "businesses",
+            columns="*, profiles!businesses_profile_id_fkey(email, role)",
+            filters={"id": business_id},
+        )
+
+    async def get_by_profile_id(self, profile_id: str) -> dict | None:
+        return await self.select_one(
+            "businesses",
+            columns="*",
+            filters={"profile_id": profile_id},
+        )
+
+    async def get_id_by_profile_id(self, profile_id: str) -> str | None:
+        row = await self.select_one(
+            "businesses",
+            columns="id",
+            filters={"profile_id": profile_id},
+        )
+        return row["id"] if row else None
+
+    async def list_filtered(
+        self,
+        search: str | None = None,
+        category: str | None = None,
+        city: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
+        query = self._table("businesses").select("*", count="exact")
+
+        if search:
+            query = query.ilike("business_name", f"%{search}%")
+        if category:
+            query = query.eq("category", category)
+        if city:
+            query = query.ilike("city", f"%{city}%")
+
+        start = (page - 1) * page_size
+        end = start + page_size - 1
+        result = query.range(start, end).execute()
+
+        return result.data or [], result.count or 0
+
+    async def insert_business(self, data: dict) -> dict | None:
+        rows = await self.insert("businesses", data)
+        return rows[0] if rows else None
+
+    async def update_by_profile_id(self, profile_id: str, data: dict) -> dict | None:
+        rows = await self.update("businesses", data, {"profile_id": profile_id})
+        return rows[0] if rows else None
+
+    async def list_campaigns(
+        self,
+        business_id: str,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
+        query = (
+            self._table("campaigns")
+            .select("*", count="exact")
+            .eq("business_id", business_id)
+        )
+
+        if status:
+            query = query.eq("status", status)
+
+        start = (page - 1) * page_size
+        end = start + page_size - 1
+        result = query.range(start, end).execute()
+
+        return result.data or [], result.count or 0
+
+    async def get_campaign_ids(self, business_id: str) -> list[str]:
+        rows = await self.select(
+            "campaigns",
+            columns="id",
+            filters={"business_id": business_id},
+        )
+        return [r["id"] for r in rows]
+
+    async def get_collab_ids_for_campaigns(self, campaign_ids: list[str]) -> list[str]:
+        rows = await self.select(
+            "collaborations",
+            columns="id",
+            filters={"campaign_id": campaign_ids},
+        )
+        return [r["id"] for r in rows]
+
+    async def get_submissions_for_collabs(self, collab_ids: list[str]) -> list[dict]:
+        return await self.select(
+            "content_submissions",
+            columns="views,likes,comments",
+            filters={"collaboration_id": collab_ids},
+        )

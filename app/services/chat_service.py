@@ -1,31 +1,9 @@
-"""
-Chat service — conversations and messaging.
-"""
-
 from fastapi import HTTPException, status
 
-from app.core.supabase import get_supabase_admin_client
-
-
-def _ensure_conversation_exists(admin_client, conversation_id: str) -> dict:
-    """Fetch a conversation and verify it exists. Returns the row."""
-    result = (
-        admin_client.table("conversations")
-        .select("*")
-        .eq("id", conversation_id)
-        .maybe_single()
-        .execute()
-    )
-    if not result.data:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found",
-        )
-    return result.data
+from app.repositories.chat_repo import ChatRepository
 
 
 def _row_to_conversation_response(row: dict) -> dict:
-    """Convert a Supabase conversations row to a ConversationResponse dict."""
     return {
         "id": row["id"],
         "participant_ids": row.get("participant_ids", []),
@@ -39,28 +17,20 @@ def _row_to_conversation_response(row: dict) -> dict:
 
 
 async def list_conversations(profile_id: str) -> list[dict]:
-    """List all chat conversations for the current user."""
-    admin_client = get_supabase_admin_client()
-
-    result = (
-        admin_client.table("conversations")
-        .select("*")
-        .contains("participant_ids", [profile_id])
-        .order("last_message_at", desc=True)
-        .execute()
-    )
-
-    items = []
-    for row in result.data or []:
-        items.append(_row_to_conversation_response(row))
-
-    return items
+    repo = ChatRepository()
+    rows = await repo.list_conversations(profile_id)
+    return [_row_to_conversation_response(row) for row in rows]
 
 
 async def get_conversation(conversation_id: str, profile_id: str) -> dict:
-    """Get messages in a conversation."""
-    admin_client = get_supabase_admin_client()
-    row = _ensure_conversation_exists(admin_client, conversation_id)
+    repo = ChatRepository()
+    row = await repo.get_conversation(conversation_id)
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
 
     if profile_id not in row.get("participant_ids", []):
         raise HTTPException(
@@ -68,29 +38,19 @@ async def get_conversation(conversation_id: str, profile_id: str) -> dict:
             detail="You are not a participant in this conversation",
         )
 
-    msgs_result = (
-        admin_client.table("messages")
-        .select("*")
-        .eq("conversation_id", conversation_id)
-        .order("created_at", desc=False)
-        .execute()
-    )
-
-    messages = []
-    for msg in msgs_result.data or []:
-        messages.append({
+    messages_raw = await repo.list_messages(conversation_id)
+    messages = [
+        {
             "id": msg["id"],
             "conversation_id": msg["conversation_id"],
             "sender_id": msg["sender_id"],
             "content": msg["content"],
             "created_at": msg["created_at"],
-        })
+        }
+        for msg in messages_raw
+    ]
 
-    admin_client.table("conversation_reads").upsert({
-        "conversation_id": conversation_id,
-        "profile_id": profile_id,
-        "last_read_at": "now()",
-    }).execute()
+    await repo.upsert_read(conversation_id, profile_id)
 
     resp = _row_to_conversation_response(row)
     resp["messages"] = messages
@@ -98,15 +58,6 @@ async def get_conversation(conversation_id: str, profile_id: str) -> dict:
 
 
 async def get_unread_count(profile_id: str) -> dict:
-    """Get total unread count across all conversations for the current user."""
-    admin_client = get_supabase_admin_client()
-
-    result = (
-        admin_client.table("conversations")
-        .select("unread_count")
-        .contains("participant_ids", [profile_id])
-        .execute()
-    )
-
-    total_unread = sum(row.get("unread_count", 0) for row in result.data or [])
-    return {"unread_count": total_unread}
+    repo = ChatRepository()
+    total = await repo.get_total_unread(profile_id)
+    return {"unread_count": total}

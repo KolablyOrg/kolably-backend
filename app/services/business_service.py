@@ -1,10 +1,6 @@
-"""
-Business service — profile CRUD, discovery.
-"""
-
 from fastapi import HTTPException, status
 
-from app.core.supabase import get_supabase_admin_client
+from app.repositories.business_repo import BusinessRepository
 from app.schemas.business import BusinessResponse
 
 
@@ -15,23 +11,15 @@ async def list_businesses(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    """List and filter businesses with pagination."""
-    admin_client = get_supabase_admin_client()
+    repo = BusinessRepository()
+    rows, total = await repo.list_filtered(
+        search=search,
+        category=category,
+        city=city,
+        page=page,
+        page_size=page_size,
+    )
 
-    query = admin_client.table("businesses").select("*", count="exact")
-
-    if search:
-        query = query.ilike("business_name", f"%{search}%")
-    if category:
-        query = query.eq("category", category)
-    if city:
-        query = query.ilike("city", f"%{city}%")
-
-    start = (page - 1) * page_size
-    end = start + page_size - 1
-    result = query.range(start, end).execute()
-
-    rows = result.data or []
     items = []
     for row in rows:
         items.append({
@@ -52,28 +40,19 @@ async def list_businesses(
 
     return {
         "items": items,
-        "total": result.count or 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
     }
 
 
 async def get_business_by_id(business_id: str) -> BusinessResponse | None:
-    """Get a business by ID with profile info."""
-    supabase = get_supabase_admin_client()
+    repo = BusinessRepository()
+    data = await repo.get_by_id(business_id)
 
-    result = (
-        supabase.table("businesses")
-        .select("*, profiles!businesses_profile_id_fkey(email, role)")
-        .eq("id", business_id)
-        .maybe_single()
-        .execute()
-    )
-
-    if not result.data:
+    if not data:
         return None
 
-    data = result.data
     profile = data.pop("profiles", {})
 
     return BusinessResponse(
@@ -99,23 +78,14 @@ async def list_business_campaigns(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
-    """List campaigns for a specific business."""
-    admin_client = get_supabase_admin_client()
-
-    query = (
-        admin_client.table("campaigns")
-        .select("*", count="exact")
-        .eq("business_id", business_id)
+    repo = BusinessRepository()
+    rows, total = await repo.list_campaigns(
+        business_id=business_id,
+        status=status,
+        page=page,
+        page_size=page_size,
     )
 
-    if status:
-        query = query.eq("status", status)
-
-    start = (page - 1) * page_size
-    end = start + page_size - 1
-    result = query.range(start, end).execute()
-
-    rows = result.data or []
     items = []
     for row in rows:
         items.append({
@@ -136,57 +106,30 @@ async def list_business_campaigns(
 
     return {
         "items": items,
-        "total": result.count or 0,
+        "total": total,
         "page": page,
         "page_size": page_size,
     }
 
 
 async def get_business_stats(profile_id: str) -> dict:
-    """Get stats for a business: total_reach, avg_engagement_rate."""
-    admin_client = get_supabase_admin_client()
+    repo = BusinessRepository()
+    business_id = await repo.get_id_by_profile_id(profile_id)
 
-    result = (
-        admin_client.table("businesses")
-        .select("id")
-        .eq("profile_id", profile_id)
-        .maybe_single()
-        .execute()
-    )
-    if not result.data:
+    if not business_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Business profile not found",
         )
 
-    business_id = result.data["id"]
-
-    campaigns_result = (
-        admin_client.table("campaigns")
-        .select("id")
-        .eq("business_id", business_id)
-        .execute()
-    )
-    campaign_ids = [c["id"] for c in campaigns_result.data or []]
+    campaign_ids = await repo.get_campaign_ids(business_id)
 
     total_reach = 0
     if campaign_ids:
-        collabs_result = (
-            admin_client.table("collaborations")
-            .select("id")
-            .in_("campaign_id", campaign_ids)
-            .execute()
-        )
-        collab_ids = [c["id"] for c in collabs_result.data or []]
-
+        collab_ids = await repo.get_collab_ids_for_campaigns(campaign_ids)
         if collab_ids:
-            subs_result = (
-                admin_client.table("content_submissions")
-                .select("views,likes,comments")
-                .in_("collaboration_id", collab_ids)
-                .execute()
-            )
-            for sub in subs_result.data or []:
+            subs = await repo.get_submissions_for_collabs(collab_ids)
+            for sub in subs:
                 total_reach += sub.get("views", 0) or 0
 
     return {
