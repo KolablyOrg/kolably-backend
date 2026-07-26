@@ -5,7 +5,7 @@ class BusinessRepository(BaseRepository):
     async def get_by_id(self, business_id: str) -> dict | None:
         return await self.select_one(
             "businesses",
-            columns="*, profiles!businesses_profile_id_fkey(email, role)",
+            columns="*",
             filters={"id": business_id},
         )
 
@@ -32,7 +32,7 @@ class BusinessRepository(BaseRepository):
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
-        query = self._table("businesses").select("*", count="exact")
+        query = (await self._table("businesses")).select("*", count="exact")
 
         if search:
             query = query.ilike("business_name", f"%{search}%")
@@ -43,7 +43,7 @@ class BusinessRepository(BaseRepository):
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0
 
@@ -63,7 +63,7 @@ class BusinessRepository(BaseRepository):
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         query = (
-            self._table("campaigns")
+            (await self._table("campaigns"))
             .select("*", count="exact")
             .eq("business_id", business_id)
         )
@@ -73,7 +73,7 @@ class BusinessRepository(BaseRepository):
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0
 

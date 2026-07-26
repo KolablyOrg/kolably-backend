@@ -5,8 +5,10 @@ async def list_notifications(
     profile_id: str,
     page: int = 1,
     page_size: int = 20,
+    *,
+    repo: NotificationRepository | None = None,
 ) -> dict:
-    repo = NotificationRepository()
+    repo = repo or NotificationRepository()
     rows, total = await repo.list_by_profile(
         profile_id=profile_id,
         page=page,
@@ -35,7 +37,11 @@ async def list_notifications(
     }
 
 
-async def get_unread_count(profile_id: str) -> dict:
-    repo = NotificationRepository()
+async def get_unread_count(
+    profile_id: str,
+    *,
+    repo: NotificationRepository | None = None,
+) -> dict:
+    repo = repo or NotificationRepository()
     count = await repo.count_unread(profile_id)
     return {"unread_count": count}

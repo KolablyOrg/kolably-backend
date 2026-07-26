@@ -10,8 +10,12 @@ from app.schemas.campaign import CampaignSummary
 from app.schemas.creator import CreatorSummary
 
 
-async def _get_creator_id_for_user(profile_id: str) -> str:
-    repo = CreatorRepository()
+async def _get_creator_id_for_user(
+    profile_id: str,
+    *,
+    repo: CreatorRepository | None = None,
+) -> str:
+    repo = repo or CreatorRepository()
     creator_id = await repo.get_id_by_profile_id(profile_id)
     if not creator_id:
         raise HTTPException(
@@ -21,8 +25,12 @@ async def _get_creator_id_for_user(profile_id: str) -> str:
     return creator_id
 
 
-async def _get_business_id_for_user(profile_id: str) -> str:
-    repo = BusinessRepository()
+async def _get_business_id_for_user(
+    profile_id: str,
+    *,
+    repo: BusinessRepository | None = None,
+) -> str:
+    repo = repo or BusinessRepository()
     business_id = await repo.get_id_by_profile_id(profile_id)
     if not business_id:
         raise HTTPException(
@@ -47,8 +55,12 @@ def _row_to_application_response(row: dict) -> dict:
     }
 
 
-async def get_application(application_id: str) -> dict:
-    repo = ApplicationRepository()
+async def get_application(
+    application_id: str,
+    *,
+    repo: ApplicationRepository | None = None,
+) -> dict:
+    repo = repo or ApplicationRepository()
     row = await repo.get_by_id(application_id)
     if not row:
         raise HTTPException(
@@ -62,10 +74,13 @@ async def list_my_applications(
     profile_id: str,
     page: int = 1,
     page_size: int = 20,
+    *,
+    creator_repo: CreatorRepository | None = None,
+    app_repo: ApplicationRepository | None = None,
 ) -> dict:
-    creator_id = await _get_creator_id_for_user(profile_id)
+    creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
 
-    app_repo = ApplicationRepository()
+    app_repo = app_repo or ApplicationRepository()
     rows, total = await app_repo.list_by_creator(
         creator_id=creator_id,
         page=page,
@@ -129,10 +144,13 @@ async def list_business_applications(
     status: str | None = None,
     page: int = 1,
     page_size: int = 20,
+    *,
+    business_repo: BusinessRepository | None = None,
+    app_repo: ApplicationRepository | None = None,
 ) -> dict:
-    business_id = await _get_business_id_for_user(profile_id)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
 
-    app_repo = ApplicationRepository()
+    app_repo = app_repo or ApplicationRepository()
     rows, total = await app_repo.list_by_business(
         business_id=business_id,
         status=status,

@@ -49,14 +49,8 @@ async def list_my_campaigns(
     user: UserInToken = Depends(get_current_user),
 ):
     """List campaigns for the current business."""
-    from app.core.supabase import get_supabase_admin_client
-    from app.services.business_service import _get_business_id_for_user
-
-    admin_client = get_supabase_admin_client()
-    business_id = _get_business_id_for_user(admin_client, user.id)
-
-    return await business_service.list_business_campaigns(
-        business_id=business_id,
+    return await business_service.list_my_campaigns(
+        profile_id=user.id,
         status=status,
         page=page,
         page_size=page_size,

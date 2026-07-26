@@ -23,7 +23,7 @@ class ApplicationRepository(BaseRepository):
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         query = (
-            self._table("campaign_applications")
+            (await self._table("campaign_applications"))
             .select(
                 "*,",
                 "campaigns!campaign_applications_campaign_id_fkey(*),",
@@ -35,7 +35,7 @@ class ApplicationRepository(BaseRepository):
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0
 
@@ -47,7 +47,7 @@ class ApplicationRepository(BaseRepository):
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         query = (
-            self._table("campaign_applications")
+            (await self._table("campaign_applications"))
             .select(
                 "*,",
                 "campaigns!campaign_applications_campaign_id_fkey(*, business_id),",
@@ -62,18 +62,18 @@ class ApplicationRepository(BaseRepository):
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0
 
     async def list_by_campaign(self, campaign_id: str) -> list[dict]:
         query = (
-            self._table("campaign_applications")
+            (await self._table("campaign_applications"))
             .select("*, creators(id,name,profile_photo_url,follower_count,niche)")
             .eq("campaign_id", campaign_id)
         )
 
-        result = query.execute()
+        result = await self._execute(query)
         return result.data or []
 
     async def insert_application(self, data: dict) -> dict | None:

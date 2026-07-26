@@ -5,8 +5,12 @@ from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
 
 
-async def _get_creator_id_for_user(profile_id: str) -> str:
-    repo = CreatorRepository()
+async def _get_creator_id_for_user(
+    profile_id: str,
+    *,
+    repo: CreatorRepository | None = None,
+) -> str:
+    repo = repo or CreatorRepository()
     creator_id = await repo.get_id_by_profile_id(profile_id)
     if not creator_id:
         raise HTTPException(
@@ -16,8 +20,12 @@ async def _get_creator_id_for_user(profile_id: str) -> str:
     return creator_id
 
 
-async def _get_business_id_for_user(profile_id: str) -> str:
-    repo = BusinessRepository()
+async def _get_business_id_for_user(
+    profile_id: str,
+    *,
+    repo: BusinessRepository | None = None,
+) -> str:
+    repo = repo or BusinessRepository()
     business_id = await repo.get_id_by_profile_id(profile_id)
     if not business_id:
         raise HTTPException(
@@ -46,18 +54,22 @@ async def list_collaborations(
     role: str,
     page: int = 1,
     page_size: int = 20,
+    *,
+    repo: CollaborationRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+    business_repo: BusinessRepository | None = None,
 ) -> dict:
-    repo = CollaborationRepository()
+    repo = repo or CollaborationRepository()
 
     if role == "creator":
-        creator_id = await _get_creator_id_for_user(profile_id)
+        creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
         rows, total = await repo.list_by_creator(
             creator_id=creator_id,
             page=page,
             page_size=page_size,
         )
     elif role == "business":
-        business_id = await _get_business_id_for_user(profile_id)
+        business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
         rows, total = await repo.list_by_business(
             business_id=business_id,
             page=page,
@@ -76,8 +88,12 @@ async def list_collaborations(
     }
 
 
-async def get_collaboration(collaboration_id: str) -> dict:
-    repo = CollaborationRepository()
+async def get_collaboration(
+    collaboration_id: str,
+    *,
+    repo: CollaborationRepository | None = None,
+) -> dict:
+    repo = repo or CollaborationRepository()
     row = await repo.get_by_id(collaboration_id)
 
     if not row:

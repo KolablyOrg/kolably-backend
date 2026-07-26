@@ -17,7 +17,7 @@ class CampaignRepository(BaseRepository):
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         query = (
-            self._table("campaigns")
+            (await self._table("campaigns"))
             .select("*", count="exact")
             .eq("status", "active")
         )
@@ -29,7 +29,7 @@ class CampaignRepository(BaseRepository):
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0
 

@@ -41,9 +41,10 @@ app/
     exceptions.py         # shared HTTPException subclasses (NotFoundError, ForbiddenError, ...)
     security.py           # JWT decode/verify (HS256 + JWKS-based ES256/RS256)
     dependencies.py       # get_current_user, require_role(*roles)
-    supabase.py            # get_supabase_client() (anon) + get_supabase_admin_client() (service-role)
+    supabase.py            # get_supabase_client() (anon) + get_supabase_admin_client() (service-role) — both async
   schemas/                 # one file per domain: campaign.py, creator.py, ...
   services/                 # one file per domain: campaign_service.py, ...
+  repositories/             # one file per domain (creator_repo.py, ...) over base.py's BaseRepository
   docs/                    # auth_implementation.md, db_schema.md — regenerate from schema.sql, see §11
 docs/                      # PROJECT_STATUS.md, API_REQUIREMENTS.md, DEPLOYMENT.md, DB_DESIGN.md, schema.sql
 migrations/                 # timestamped Supabase-CLI-style SQL migrations — see §11
@@ -57,12 +58,24 @@ Don't scatter logic across files or put service logic in the route file.
 
 ---
 
-## 3. Layering — routes are thin, services do the work
+## 3. Layering — routes are thin, services do the work, repositories do the DB
 
 Routes: parse/validate input (Pydantic + path/query params), call the auth
 dependency, call **one** service function, return its result. No Supabase
 calls, no business rules, no manual status-code branching beyond what the
 service tells you to raise.
+
+Services: own all business rules and `HTTPException` raises. Repositories:
+own all Supabase access. Every domain repo extends `BaseRepository`
+(`app/repositories/base.py`), which provides generic CRUD (`select`,
+`select_one`, `insert`, `update`, `delete`, `count`, `upsert`) and a single
+`_execute()` funnel that awaits the async client and translates postgrest
+`APIError` into `DatabaseError` (HTTP 500). Complex queries (joins, `ilike`,
+`gte`/`lte`, `.range()` pagination) are built directly in the repo method via
+`await self._table(...)` and always executed through `self._execute(...)` —
+never call `.execute()` yourself. Service functions take their repos as
+keyword-only optional params (`repo: CreatorRepository | None = None`) so
+tests can inject fakes without monkeypatching.
 
 ```python
 # app/api/routes/campaigns.py
@@ -82,23 +95,23 @@ async def invite_creator(
     )
 ```
 
-Services: own all Supabase reads/writes, all business rules, all
-`HTTPException` raises. A service function's job is to return a
-schema-shaped dict/object or raise — never a bare `pass`.
+Services: own all business rules and `HTTPException` raises; all Supabase
+access goes through the domain repository. A service function's job is to
+return a schema-shaped dict/object or raise — never a bare `pass`.
 
 ```python
 # app/services/campaign_service.py
 async def invite_creator(campaign_id: str, profile_id: str, creator_id: str,
-                          message: str | None) -> dict:
-    business_id = _get_business_id_for_user(admin_client, profile_id)
-    _ensure_campaign_owner(admin_client, campaign_id, business_id)
-    existing = _get_application(campaign_id, creator_id)
+                          message: str | None, *,
+                          campaign_repo: CampaignRepository | None = None,
+                          app_repo: ApplicationRepository | None = None) -> dict:
+    campaign_repo = campaign_repo or CampaignRepository()
+    business_id = await _get_business_id_for_user(profile_id)
+    await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    existing = await app_repo.get_existing(campaign_id, creator_id)
     if existing:
         raise HTTPException(status_code=409, detail="Creator already invited/applied")
-    return _insert_application(
-        campaign_id=campaign_id, creator_id=creator_id, message=message,
-        direction=ApplicationDirection.BUSINESS_INVITED,
-    )
+    return await app_repo.insert_application({...})  # direction=BUSINESS_INVITED
 ```
 
 Note `UserInToken` (`app/schemas/user.py`) is the shape returned by
@@ -140,15 +153,22 @@ services both import the same source of truth.
 
 ---
 
-## 5. Supabase clients — anon vs. service-role
+## 5. Supabase clients — anon vs. service-role (both async)
+
+Both getters are `async` and return `supabase.AsyncClient`
+(`create_async_client`) — every `.execute()` and `supabase.auth.*` call must
+be `await`ed so the event loop is never blocked. Clients are created fresh
+per call, never cached as module singletons (httpx clients bind to the event
+loop that created them, which breaks under pytest/TestClient).
 
 - **Anon client** (`app/core/supabase.py: get_supabase_client()`) — auth
   operations only (signup, login, password reset). Respects RLS.
 - **Service-role admin client** (`get_supabase_admin_client()`) — all other DB
-  reads/writes. Bypasses RLS, so **every ownership/role check happens in
-  Python**, not in the database. This is why `_ensure_campaign_owner`-style
+  reads/writes, used as the default in `BaseRepository`. Bypasses RLS, so
+  **every ownership/role check happens in Python**, not in the database —
+  there is no DB-level backstop. This is why `_ensure_campaign_owner`-style
   helpers exist — do not skip them because "the DB would reject it anyway."
-  It won't.
+  It won't. Never let a path/body ID reach a query unverified.
 
 Every new service function that touches another user's row (an
 application, a collaboration, a conversation) must include an explicit

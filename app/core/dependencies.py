@@ -41,8 +41,8 @@ async def get_current_user(
             detail="Invalid token: missing subject",
         )
 
-    supabase = get_supabase_admin_client()
-    result = (
+    supabase = await get_supabase_admin_client()
+    result = await (
         supabase.table("profiles")
         .select("*")
         .eq("auth_id", auth_id)

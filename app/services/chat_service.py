@@ -16,14 +16,23 @@ def _row_to_conversation_response(row: dict) -> dict:
     }
 
 
-async def list_conversations(profile_id: str) -> list[dict]:
-    repo = ChatRepository()
+async def list_conversations(
+    profile_id: str,
+    *,
+    repo: ChatRepository | None = None,
+) -> list[dict]:
+    repo = repo or ChatRepository()
     rows = await repo.list_conversations(profile_id)
     return [_row_to_conversation_response(row) for row in rows]
 
 
-async def get_conversation(conversation_id: str, profile_id: str) -> dict:
-    repo = ChatRepository()
+async def get_conversation(
+    conversation_id: str,
+    profile_id: str,
+    *,
+    repo: ChatRepository | None = None,
+) -> dict:
+    repo = repo or ChatRepository()
     row = await repo.get_conversation(conversation_id)
 
     if not row:
@@ -57,7 +66,11 @@ async def get_conversation(conversation_id: str, profile_id: str) -> dict:
     return resp
 
 
-async def get_unread_count(profile_id: str) -> dict:
-    repo = ChatRepository()
+async def get_unread_count(
+    profile_id: str,
+    *,
+    repo: ChatRepository | None = None,
+) -> dict:
+    repo = repo or ChatRepository()
     total = await repo.get_total_unread(profile_id)
     return {"unread_count": total}

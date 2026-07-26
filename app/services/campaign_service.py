@@ -79,8 +79,12 @@ def _row_to_campaign_summary(row: dict, counts: dict | None = None) -> dict:
     return response
 
 
-async def _get_business_id_for_user(profile_id: str) -> str:
-    repo = BusinessRepository()
+async def _get_business_id_for_user(
+    profile_id: str,
+    *,
+    repo: BusinessRepository | None = None,
+) -> str:
+    repo = repo or BusinessRepository()
     business_id = await repo.get_id_by_profile_id(profile_id)
     if not business_id:
         raise HTTPException(
@@ -105,9 +109,15 @@ async def _ensure_campaign_owner(campaign_repo: CampaignRepository, campaign_id:
     return row
 
 
-async def create_campaign_step1(profile_id: str, data: CampaignCreateRequest) -> dict:
-    business_id = await _get_business_id_for_user(profile_id)
-    campaign_repo = CampaignRepository()
+async def create_campaign_step1(
+    profile_id: str,
+    data: CampaignCreateRequest,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> dict:
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
 
     insert_data = {
         "business_id": business_id,
@@ -135,9 +145,12 @@ async def update_campaign_deliverables(
     campaign_id: str,
     profile_id: str,
     data: CampaignDeliverablesRequest,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
 ) -> dict:
-    business_id = await _get_business_id_for_user(profile_id)
-    campaign_repo = CampaignRepository()
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     update_data: dict[str, Any] = {
@@ -160,9 +173,12 @@ async def update_campaign_targeting(
     campaign_id: str,
     profile_id: str,
     data: CampaignTargetingRequest,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
 ) -> dict:
-    business_id = await _get_business_id_for_user(profile_id)
-    campaign_repo = CampaignRepository()
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     update_data: dict[str, Any] = data.model_dump(exclude_none=True)
@@ -181,9 +197,12 @@ async def update_campaign_general(
     campaign_id: str,
     profile_id: str,
     data: CampaignUpdateRequest,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
 ) -> dict:
-    business_id = await _get_business_id_for_user(profile_id)
-    campaign_repo = CampaignRepository()
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
     row = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     update_data: dict[str, Any] = data.model_dump(exclude_none=True)
@@ -207,9 +226,15 @@ async def update_campaign_general(
     return _row_to_campaign_response(updated)
 
 
-async def publish_campaign(campaign_id: str, profile_id: str) -> dict:
-    business_id = await _get_business_id_for_user(profile_id)
-    campaign_repo = CampaignRepository()
+async def publish_campaign(
+    campaign_id: str,
+    profile_id: str,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> dict:
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
     row = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     deliverables = row.get("deliverables") or []
@@ -253,11 +278,14 @@ async def list_campaigns(
     page: int,
     page_size: int,
     user: UserInToken | None = None,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
 ) -> dict:
-    campaign_repo = CampaignRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
 
     if recommended and user and user.role.value == "creator":
-        creator_repo = CreatorRepository()
+        creator_repo = creator_repo or CreatorRepository()
         niche = await creator_repo.get_niche_by_profile_id(user.id)
         if niche:
             category = niche
@@ -280,8 +308,12 @@ async def list_campaigns(
     }
 
 
-async def get_campaign(campaign_id: str) -> dict:
-    campaign_repo = CampaignRepository()
+async def get_campaign(
+    campaign_id: str,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+) -> dict:
+    campaign_repo = campaign_repo or CampaignRepository()
     row = await campaign_repo.get_by_id(campaign_id)
 
     if not row:
@@ -294,9 +326,15 @@ async def get_campaign(campaign_id: str) -> dict:
     return _row_to_campaign_response(row, counts.get(campaign_id))
 
 
-async def delete_campaign(campaign_id: str, profile_id: str) -> dict:
-    business_id = await _get_business_id_for_user(profile_id)
-    campaign_repo = CampaignRepository()
+async def delete_campaign(
+    campaign_id: str,
+    profile_id: str,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> dict:
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     await campaign_repo.delete_campaign(campaign_id)
@@ -323,12 +361,19 @@ async def get_campaign_categories() -> list[CampaignCategoryResponse]:
     return CAMPAIGN_CATEGORIES
 
 
-async def list_campaign_applications(campaign_id: str, profile_id: str) -> list[dict]:
-    business_id = await _get_business_id_for_user(profile_id)
-    campaign_repo = CampaignRepository()
+async def list_campaign_applications(
+    campaign_id: str,
+    profile_id: str,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+    app_repo: ApplicationRepository | None = None,
+) -> list[dict]:
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
-    app_repo = ApplicationRepository()
+    app_repo = app_repo or ApplicationRepository()
     rows = await app_repo.list_by_campaign(campaign_id)
 
     items: list[dict] = []
@@ -364,12 +409,17 @@ async def invite_creator(
     profile_id: str,
     creator_id: str,
     message: str | None,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+    app_repo: ApplicationRepository | None = None,
 ) -> dict:
-    business_id = await _get_business_id_for_user(profile_id)
-    campaign_repo = CampaignRepository()
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
-    creator_repo = CreatorRepository()
+    creator_repo = creator_repo or CreatorRepository()
     creator = await creator_repo.get_by_id(creator_id)
     if not creator:
         raise HTTPException(
@@ -377,7 +427,7 @@ async def invite_creator(
             detail="Creator not found",
         )
 
-    app_repo = ApplicationRepository()
+    app_repo = app_repo or ApplicationRepository()
     existing = await app_repo.get_existing(campaign_id, creator_id)
     if existing:
         raise HTTPException(

@@ -23,3 +23,10 @@ class BadRequestError(HTTPException):
 class UnauthorizedError(HTTPException):
     def __init__(self, detail: str = "Not authenticated"):
         super().__init__(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
+
+
+class DatabaseError(HTTPException):
+    """Raised when a DB query fails — raw postgrest errors never reach the client."""
+
+    def __init__(self, detail: str = "Database operation failed"):
+        super().__init__(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)

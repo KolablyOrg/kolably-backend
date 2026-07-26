@@ -16,14 +16,14 @@ class CollaborationRepository(BaseRepository):
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         query = (
-            self._table("collaborations")
+            (await self._table("collaborations"))
             .select("*", count="exact")
             .eq("creator_id", creator_id)
         )
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0
 
@@ -34,14 +34,14 @@ class CollaborationRepository(BaseRepository):
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         query = (
-            self._table("collaborations")
+            (await self._table("collaborations"))
             .select("*", count="exact")
             .eq("business_id", business_id)
         )
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0
 

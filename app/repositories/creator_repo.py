@@ -5,7 +5,7 @@ class CreatorRepository(BaseRepository):
     async def get_by_id(self, creator_id: str) -> dict | None:
         return await self.select_one(
             "creators",
-            columns="*, profiles!creators_profile_id_fkey(email)",
+            columns="*",
             filters={"id": creator_id},
         )
 
@@ -34,7 +34,7 @@ class CreatorRepository(BaseRepository):
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
-        query = self._table("creators").select("*", count="exact")
+        query = (await self._table("creators")).select("*", count="exact")
 
         if search:
             query = query.ilike("name", f"%{search}%")
@@ -49,7 +49,7 @@ class CreatorRepository(BaseRepository):
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0
 
@@ -77,7 +77,7 @@ class CreatorRepository(BaseRepository):
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         query = (
-            self._table("portfolio_items")
+            (await self._table("portfolio_items"))
             .select("*", count="exact")
             .eq("creator_id", creator_id)
         )
@@ -87,7 +87,7 @@ class CreatorRepository(BaseRepository):
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0
 
@@ -104,13 +104,13 @@ class CreatorRepository(BaseRepository):
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         query = (
-            self._table("saved_campaigns")
+            (await self._table("saved_campaigns"))
             .select("*, campaigns!saved_campaigns_campaign_id_fkey(*)", count="exact")
             .eq("creator_id", creator_id)
         )
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = query.range(start, end).execute()
+        result = await self._execute(query.range(start, end))
 
         return result.data or [], result.count or 0

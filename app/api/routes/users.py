@@ -2,7 +2,7 @@
 User routes — shared operations for both account types.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter()
 
@@ -10,19 +10,25 @@ router = APIRouter()
 @router.get("/me")
 async def get_current_user():
     """Get the currently authenticated user's profile."""
-    # TODO: Implement
-    pass
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Not implemented",
+    )
 
 
 @router.patch("/me")
 async def update_current_user():
     """Update the currently authenticated user's base profile."""
-    # TODO: Implement
-    pass
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Not implemented",
+    )
 
 
 @router.delete("/me")
 async def delete_current_user():
     """Deactivate / delete the current user's account."""
-    # TODO: Implement
-    pass
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Not implemented",
+    )
