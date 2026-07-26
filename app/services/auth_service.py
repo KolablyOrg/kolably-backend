@@ -8,9 +8,14 @@ from app.repositories.profile_repo import ProfileRepository
 from app.schemas.auth import (
     BusinessSignupRequest,
     CreatorSignupRequest,
+    GoogleAuthRequest,
     LoginRequest,
     UpdateProfileRequest,
 )
+
+# GoTrue sets last_sign_in_at == created_at (to the second) only on the very
+# first sign-in for an auth.users row; a small tolerance absorbs clock/DB skew.
+_NEW_USER_SIGN_IN_TOLERANCE_SECONDS = 5
 
 
 async def signup_creator(
@@ -219,6 +224,107 @@ async def login(
             "role": profile["role"],
             "is_active": profile["is_active"],
         },
+    }
+
+
+async def google_auth(
+    data: GoogleAuthRequest,
+    *,
+    profile_repo: ProfileRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> dict:
+    """Sign in (or sign up) with a Google ID token obtained by the frontend.
+
+    Supabase verifies the token against Google and creates/reuses the
+    auth.users row; our DB trigger auto-creates a matching `profiles` row
+    (always with role='creator' — the trigger has no way to know the
+    frontend's intended role). For a brand-new sign-in we correct the role
+    from `data.role` and create a minimal creator/business row from whatever
+    Google gives us (name, avatar) — the frontend is expected to route the
+    user to complete their profile afterward via `PATCH /me`.
+    """
+    supabase = await get_supabase_client()
+
+    try:
+        auth_response = await supabase.auth.sign_in_with_id_token(
+            {"provider": "google", "token": data.id_token}
+        )
+    except AuthApiError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
+
+    if not auth_response.user or not auth_response.session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google sign-in failed",
+        )
+
+    auth_user = auth_response.user
+    auth_id = str(auth_user.id)
+    is_new_user = auth_user.last_sign_in_at is not None and (
+        abs((auth_user.last_sign_in_at - auth_user.created_at).total_seconds())
+        < _NEW_USER_SIGN_IN_TOLERANCE_SECONDS
+    )
+
+    profile_repo = profile_repo or ProfileRepository()
+    profile = await profile_repo.get_by_auth_id(auth_id)
+
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Profile creation trigger failed",
+        )
+
+    if not profile.get("is_active", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
+
+    if is_new_user:
+        if data.role is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="role ('creator' or 'business') is required for first-time Google sign-in",
+            )
+
+        metadata = auth_user.user_metadata or {}
+        display_name = metadata.get("full_name") or metadata.get("name") or profile["email"].split("@")[0]
+        avatar_url = metadata.get("avatar_url") or metadata.get("picture")
+
+        if profile["role"] != data.role:
+            profile = await profile_repo.update_role(profile["id"], data.role) or profile
+
+        if data.role == "creator":
+            creator_repo = creator_repo or CreatorRepository()
+            await creator_repo.insert_creator({
+                "profile_id": profile["id"],
+                "name": display_name,
+                "profile_photo_url": avatar_url,
+            })
+        else:
+            business_repo = business_repo or BusinessRepository()
+            await business_repo.insert_business({
+                "profile_id": profile["id"],
+                "business_name": display_name,
+                "logo_url": avatar_url,
+            })
+
+    session = auth_response.session
+    return {
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "id": profile["id"],
+            "email": profile["email"],
+            "role": profile["role"],
+            "is_active": profile["is_active"],
+        },
+        "is_new_user": is_new_user,
     }
 
 

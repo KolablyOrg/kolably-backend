@@ -2,6 +2,8 @@
 Auth-related Pydantic schemas — request/response models for all auth endpoints.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -35,6 +37,19 @@ class LoginRequest(BaseModel):
     password: str
 
 
+# ── Google Sign-In ────────────────────────────────────
+class GoogleAuthRequest(BaseModel):
+    """Google Identity Services / native Google Sign-In ID token exchange.
+
+    `role` is only required the first time a given Google account signs in
+    (it decides whether a creator or business profile gets created) — it is
+    ignored for returning users.
+    """
+
+    id_token: str = Field(..., min_length=1)
+    role: Literal["creator", "business"] | None = None
+
+
 # ── Token Refresh ────────────────────────────────────
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
@@ -58,6 +73,12 @@ class AuthTokenResponse(BaseModel):
     refresh_token: str | None = None
     token_type: str = "bearer"
     user: dict | None = None  # profile + role info
+
+
+class GoogleAuthResponse(AuthTokenResponse):
+    """Returned by POST /auth/google — adds whether this was a first-time sign-up."""
+
+    is_new_user: bool = False
 
 
 class MessageResponse(BaseModel):

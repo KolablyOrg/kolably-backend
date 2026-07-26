@@ -15,3 +15,7 @@ class ProfileRepository(BaseRepository):
             columns="*",
             filters={"id": profile_id},
         )
+
+    async def update_role(self, profile_id: str, role: str) -> dict | None:
+        rows = await self.update("profiles", {"role": role}, {"id": profile_id})
+        return rows[0] if rows else None

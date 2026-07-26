@@ -13,6 +13,8 @@ from app.schemas.auth import (
     BusinessSignupRequest,
     CreatorSignupRequest,
     ForgotPasswordRequest,
+    GoogleAuthRequest,
+    GoogleAuthResponse,
     LoginRequest,
     MessageResponse,
     RefreshTokenRequest,
@@ -46,6 +48,16 @@ async def signup_business(data: BusinessSignupRequest):
 async def login(data: LoginRequest):
     """Authenticate user and return tokens + profile."""
     return await auth_service.login(data)
+
+
+@router.post("/google", response_model=GoogleAuthResponse)
+async def google_auth(data: GoogleAuthRequest):
+    """Sign in or sign up with a Google ID token.
+
+    `role` is required on first sign-in; the frontend should route
+    `is_new_user` responses to a profile-completion step (`PATCH /me`).
+    """
+    return await auth_service.google_auth(data)
 
 
 @router.post("/logout", response_model=MessageResponse)
