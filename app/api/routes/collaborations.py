@@ -2,41 +2,36 @@
 Collaboration routes — managing active collaborations, content submission, completion.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Query
+
+from app.core.dependencies import get_current_user
+from app.schemas.collaboration import CollaborationResponse
+from app.schemas.common import PaginatedResponse
+from app.schemas.user import UserInToken
+from app.services import collaboration_service
 
 router = APIRouter()
 
 
-@router.get("/")
-async def list_collaborations():
+@router.get("/", response_model=PaginatedResponse[CollaborationResponse])
+async def list_collaborations(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    user: UserInToken = Depends(get_current_user),
+):
     """List collaborations for the current user (filtered by role)."""
-    # TODO: Implement
-    pass
+    return await collaboration_service.list_collaborations(
+        profile_id=user.id,
+        role=user.role.value,
+        page=page,
+        page_size=page_size,
+    )
 
 
-@router.get("/{collaboration_id}")
-async def get_collaboration(collaboration_id: str):
+@router.get("/{collaboration_id}", response_model=CollaborationResponse)
+async def get_collaboration(
+    collaboration_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
     """Get collaboration details."""
-    # TODO: Implement
-    pass
-
-
-@router.post("/{collaboration_id}/submit")
-async def submit_content(collaboration_id: str):
-    """Creator submits content / post link for the collaboration."""
-    # TODO: Implement
-    pass
-
-
-@router.patch("/{collaboration_id}/complete")
-async def mark_complete(collaboration_id: str):
-    """Business marks the collaboration as completed."""
-    # TODO: Implement
-    pass
-
-
-@router.patch("/{collaboration_id}/cancel")
-async def cancel_collaboration(collaboration_id: str):
-    """Cancel an active collaboration."""
-    # TODO: Implement
-    pass
+    return await collaboration_service.get_collaboration(collaboration_id)

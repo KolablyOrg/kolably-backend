@@ -126,13 +126,14 @@ No changes. Already fully implemented.
 
 | Status | Method | Path |
 |---|---|---|
-| 🔧 | GET | `/creators` |
-| 🔧 | GET | `/creators/{creator_id}` |
+| ✅ | GET | `/creators` |
+| ✅ | GET | `/creators/{creator_id}` |
 | ✅ | PATCH | `/creators/{creator_id}` |
-| 🔧 | GET | `/creators/{creator_id}/portfolio` |
+| ✅ | GET | `/creators/{creator_id}/portfolio` |
 | ✅ | POST / DELETE | `/creators/{creator_id}/portfolio(/{item_id})` |
-| 🆕 | GET | `/creators/me/stats` |
-| 🆕 | GET / POST / DELETE | `/creators/me/saved-campaigns(/{campaign_id})` |
+| ✅ | GET | `/creators/me/stats` |
+| ✅ | GET | `/creators/me/saved-campaigns` |
+| 🔧 | POST / DELETE | `/creators/me/saved-campaigns(/{campaign_id})` |
 | 🆕 | GET | `/creators/me/instagram/auth-url` |
 | 🆕 | POST | `/creators/me/instagram/connect` |
 | 🆕 | POST | `/creators/me/instagram/sync` |
@@ -222,12 +223,12 @@ CREATE TABLE saved_campaigns (
 | Status | Method | Path |
 |---|---|---|
 | ✅ | GET | `/businesses` |
-| 🔧 | GET | `/businesses/{business_id}` |
+| ✅ | GET | `/businesses/{business_id}` |
 | ✅ | PATCH | `/businesses/{business_id}` |
-| 🔧 | GET | `/businesses/{business_id}/campaigns` |
-| 🆕 | GET | `/businesses/me/stats` |
-| 🆕 | GET | `/businesses/me/campaigns?status=active&page_size=N` |
-| 🆕 | GET | `/businesses/me/applications?status=pending&page_size=N&sort=recent` |
+| ✅ | GET | `/businesses/{business_id}/campaigns` |
+| ✅ | GET | `/businesses/me/stats` |
+| ✅ | GET | `/businesses/me/campaigns` |
+| ✅ | GET | `/businesses/me/applications` |
 
 `BusinessResponse` gains `is_verified: bool = False` — manual flag, set by
 superadmin via the existing `PATCH /businesses/{id}` path.
@@ -260,12 +261,12 @@ all-zero response, not an error.
 | 🧩 | PATCH | `/campaigns/{id}/deliverables` |
 | 🧩 | PATCH | `/campaigns/{id}/targeting` |
 | 🧩 | POST | `/campaigns/{id}/publish` |
-| 🔧 | GET | `/campaigns` |
-| 🔧 | GET | `/campaigns/{campaign_id}` |
+| ✅ | GET | `/campaigns` |
+| ✅ | GET | `/campaigns/{campaign_id}` |
 | ✅ | PATCH / DELETE | `/campaigns/{campaign_id}` |
-| 🔧 | GET | `/campaigns/{campaign_id}/applications` |
-| 🆕 | GET | `/campaigns/categories` |
-| 🆕 | POST | `/campaigns/{campaign_id}/invite` |
+| ✅ | GET | `/campaigns/{campaign_id}/applications` |
+| ✅ | GET | `/campaigns/categories` |
+| 🔧 | POST | `/campaigns/{campaign_id}/invite` |
 
 ### Create flow — 4 steps, draft on step 1, publish at the end
 
@@ -362,7 +363,7 @@ Uses the `campaign_applications` table (§5), not a separate table.
 | 🔧 | PATCH | `/applications/{application_id}/reject` |
 | 🧩 | PATCH | `/applications/{application_id}/request-revision` |
 | 🧩 | PATCH | `/applications/{application_id}` (resubmit) |
-| 🔧 | GET | `/applications/me/sent` |
+| ✅ | GET | `/applications/me/sent` |
 
 ```python
 class ApplicationResponse(BaseModel):
@@ -479,7 +480,7 @@ then calls `complete` or `cancel` — no per-submission approval step.
 | ✅ | GET | `/chat/conversations/{conversation_id}` |
 | ✅ | POST | `/chat/conversations/{conversation_id}/messages` |
 | 🧩 | POST | `/chat/conversations` |
-| 🧩 | GET | `/chat/unread-count` |
+| ✅ | GET | `/chat/unread-count` |
 
 ```
 POST /chat/conversations
@@ -520,8 +521,8 @@ no separate mark-read endpoint.
 
 | Status | Method | Path |
 |---|---|---|
-| 🆕 | GET | `/notifications` |
-| 🆕 | GET | `/notifications/unread-count` |
+| ✅ | GET | `/notifications` |
+| ✅ | GET | `/notifications/unread-count` |
 | 🆕 | PATCH | `/notifications/{notification_id}/read` |
 | 🆕 | PATCH | `/notifications/read-all` |
 

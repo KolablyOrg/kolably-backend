@@ -23,6 +23,7 @@ class BusinessResponse(BusinessBase):
     user_id: str
     owner_name: str
     created_at: datetime
+    is_verified: bool = False
 
 
 class BusinessUpdateRequest(BaseModel):
@@ -34,3 +35,16 @@ class BusinessUpdateRequest(BaseModel):
     logo_url: str | None = None
     instagram_page: str | None = None
     website: str | None = None
+
+
+class BusinessSummary(BaseModel):
+    id: str
+    business_name: str
+    logo_url: str | None = None
+
+
+class BusinessStatsResponse(BaseModel):
+    total_reach: int
+    reach_change_pct: float
+    avg_engagement_rate: float
+    engagement_series: list[float]

@@ -5,21 +5,21 @@ Frontend calls these endpoints only. Supabase is a hidden implementation detail.
 """
 
 from fastapi import APIRouter, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.core.dependencies import get_current_user
 from app.schemas.auth import (
-    CreatorSignupRequest,
+    AuthTokenResponse,
     BusinessSignupRequest,
-    LoginRequest,
-    RefreshTokenRequest,
+    CreatorSignupRequest,
     ForgotPasswordRequest,
+    LoginRequest,
+    MessageResponse,
+    RefreshTokenRequest,
     ResetPasswordRequest,
     UpdateProfileRequest,
-    AuthTokenResponse,
-    MessageResponse,
 )
 from app.schemas.user import UserInToken
-from app.core.dependencies import get_current_user
 from app.services import auth_service
 
 router = APIRouter()

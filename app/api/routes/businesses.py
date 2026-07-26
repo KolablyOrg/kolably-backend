@@ -1,35 +1,103 @@
 """
-Business routes — profile, discovery.
+Business routes — profile, discovery, dashboard.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Query
+
+from app.core.dependencies import get_current_user
+from app.schemas.application import ApplicationWithCreator
+from app.schemas.business import BusinessResponse, BusinessStatsResponse
+from app.schemas.campaign import CampaignSummary
+from app.schemas.common import PaginatedResponse
+from app.schemas.user import UserInToken
+from app.services import application_service, business_service
 
 router = APIRouter()
 
 
-@router.get("/")
-async def list_businesses():
-    """List / search businesses."""
-    # TODO: Implement
-    pass
+@router.get("/", response_model=PaginatedResponse[BusinessResponse])
+async def list_businesses(
+    search: str | None = Query(None),
+    category: str | None = Query(None),
+    city: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """List and filter businesses."""
+    return await business_service.list_businesses(
+        search=search,
+        category=category,
+        city=city,
+        page=page,
+        page_size=page_size,
+    )
 
 
-@router.get("/{business_id}")
-async def get_business(business_id: str):
+@router.get("/me/stats", response_model=BusinessStatsResponse)
+async def get_business_stats(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Get stats for the current business."""
+    return await business_service.get_business_stats(profile_id=user.id)
+
+
+@router.get("/me/campaigns", response_model=PaginatedResponse[CampaignSummary])
+async def list_my_campaigns(
+    status: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    user: UserInToken = Depends(get_current_user),
+):
+    """List campaigns for the current business."""
+    from app.core.supabase import get_supabase_admin_client
+    from app.services.business_service import _get_business_id_for_user
+
+    admin_client = get_supabase_admin_client()
+    business_id = _get_business_id_for_user(admin_client, user.id)
+
+    return await business_service.list_business_campaigns(
+        business_id=business_id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/me/applications", response_model=PaginatedResponse[ApplicationWithCreator])
+async def list_my_applications(
+    status: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    user: UserInToken = Depends(get_current_user),
+):
+    """List applications for the current business."""
+    return await application_service.list_business_applications(
+        profile_id=user.id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/{business_id}", response_model=BusinessResponse)
+async def get_business(business_id: str) -> BusinessResponse:
     """Get a specific business's public profile."""
-    # TODO: Implement
-    pass
+    business = await business_service.get_business_by_id(business_id)
+    if not business:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
+    return business
 
 
-@router.patch("/{business_id}")
-async def update_business_profile(business_id: str):
-    """Update business profile (own profile only)."""
-    # TODO: Implement
-    pass
-
-
-@router.get("/{business_id}/campaigns")
-async def get_business_campaigns(business_id: str):
-    """List all campaigns for a business."""
-    # TODO: Implement
-    pass
+@router.get("/{business_id}/campaigns", response_model=PaginatedResponse[CampaignSummary])
+async def list_business_campaigns(
+    business_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    """List public campaigns for a business."""
+    return await business_service.list_business_campaigns(
+        business_id=business_id,
+        page=page,
+        page_size=page_size,
+    )

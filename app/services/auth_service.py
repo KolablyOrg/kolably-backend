@@ -8,14 +8,13 @@ auth provider, only this file changes — routes and frontend stay untouched.
 from fastapi import HTTPException, status
 from supabase_auth.errors import AuthApiError
 
-from app.core.supabase import get_supabase_client, get_supabase_admin_client
+from app.core.supabase import get_supabase_admin_client, get_supabase_client
 from app.schemas.auth import (
-    CreatorSignupRequest,
     BusinessSignupRequest,
+    CreatorSignupRequest,
     LoginRequest,
     UpdateProfileRequest,
 )
-
 
 # ─── Signup ───────────────────────────────────────────
 

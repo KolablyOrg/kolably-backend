@@ -5,14 +5,15 @@ Aggregate API router — collects all domain routers under /api/v1.
 from fastapi import APIRouter
 
 from app.api.routes import (
+    applications,
     auth,
-    users,
-    creators,
     businesses,
     campaigns,
-    applications,
-    collaborations,
     chat,
+    collaborations,
+    creators,
+    notifications,
+    users,
 )
 
 api_router = APIRouter()
@@ -25,3 +26,4 @@ api_router.include_router(campaigns.router, prefix="/campaigns", tags=["campaign
 api_router.include_router(applications.router, prefix="/applications", tags=["applications"])
 api_router.include_router(collaborations.router, prefix="/collaborations", tags=["collaborations"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

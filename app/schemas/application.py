@@ -7,6 +7,8 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.core.enums import ApplicationDirection, ApplicationStatus
+from app.schemas.business import BusinessSummary
+from app.schemas.campaign import CampaignSummary
 from app.schemas.creator import CreatorSummary
 
 
@@ -30,6 +32,24 @@ class ApplicationResponse(BaseModel):
     created_at: datetime
 
 
+class ApplicationWithCampaign(ApplicationResponse):
+    """GET /applications/me/sent"""
+    campaign: CampaignSummary
+    business: BusinessSummary
+
+
 class ApplicationWithCreator(ApplicationResponse):
-    """Application nested with creator summary (for business views)."""
+    """GET /campaigns/{id}/applications, GET /businesses/me/applications"""
     creator: CreatorSummary
+
+
+class ApplicationUpdateRequest(BaseModel):
+    """Creator resubmits after revision request."""
+    message: str | None = None
+    instagram_handle: str | None = None
+    example_content_url: str | None = None
+
+
+class ApplicationRevisionRequest(BaseModel):
+    """Business requests revision."""
+    reason: str

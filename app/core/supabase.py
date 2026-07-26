@@ -6,7 +6,7 @@ Two clients:
 - `supabase_admin` (service role key) — for DB operations bypassing RLS
 """
 
-from supabase import create_client, Client
+from supabase import Client, create_client
 
 from app.core.config import settings
 
