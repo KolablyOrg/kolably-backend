@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     INSTAGRAM_APP_ID: str = ""
     INSTAGRAM_APP_SECRET: str = ""
 
+    # ── Meta parent app (Facebook Login for Business product — unused for
+    # OAuth, but the Data Deletion Callback is a whole-app setting that may
+    # be signed with this secret rather than INSTAGRAM_APP_SECRET) ────────
+    APP_SECRET: str = ""
+
     # ── Token encryption ──────────────────────────────
     TOKEN_ENCRYPTION_KEY: str = ""  # Fernet key — encrypts instagram_access_token at rest
 

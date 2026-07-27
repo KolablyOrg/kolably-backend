@@ -12,6 +12,7 @@ from app.api.routes import (
     chat,
     collaborations,
     creators,
+    meta,
     notifications,
     users,
 )
@@ -27,3 +28,4 @@ api_router.include_router(applications.router, prefix="/applications", tags=["ap
 api_router.include_router(collaborations.router, prefix="/collaborations", tags=["collaborations"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(meta.router, prefix="/meta", tags=["meta"])

@@ -69,6 +69,30 @@ class CreatorRepository(BaseRepository):
             return []
         return await self.insert("portfolio_items", items)
 
+    async def anonymize(self, creator_id: str, data: dict) -> dict | None:
+        """Scrub PII from a creator row in place — used for Meta's Data
+        Deletion Callback. Rows are kept (not hard-deleted) so FK references
+        from collaborations/applications/messages don't break; see
+        Kolably_Legal_Documentation_Kit.docx's Account Deletion policy."""
+        rows = await self.update("creators", data, {"id": creator_id})
+        return rows[0] if rows else None
+
+    async def delete_portfolio_by_creator_id(self, creator_id: str) -> list[dict]:
+        return await self.delete("portfolio_items", {"creator_id": creator_id})
+
+    async def clear_instagram_connection(self, creator_id: str) -> dict | None:
+        """Clear a stale Instagram connection — used by Meta's Deauthorize
+        Callback, when a user revokes access without a full data-deletion
+        request. Lighter-touch than `anonymize`: only the connection fields
+        are cleared, name/bio/photo/portfolio stay untouched."""
+        rows = await self.update("creators", {
+            "instagram_user_id": None,
+            "instagram_access_token": None,
+            "instagram_token_expires_at": None,
+            "instagram_synced_at": None,
+        }, {"id": creator_id})
+        return rows[0] if rows else None
+
     async def update_by_profile_id(self, profile_id: str, data: dict) -> dict | None:
         rows = await self.update("creators", data, {"profile_id": profile_id})
         return rows[0] if rows else None
