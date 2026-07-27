@@ -2,11 +2,17 @@
 Creator routes — profile, discovery, Instagram integration, dashboard.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 
 from app.core.dependencies import get_current_user
 from app.schemas.common import PaginatedResponse
-from app.schemas.creator import CreatorResponse, CreatorStatsResponse, PortfolioItemResponse
+from app.schemas.creator import (
+    CreatorResponse,
+    CreatorStatsResponse,
+    InstagramAuthUrlResponse,
+    InstagramConnectRequest,
+    PortfolioItemResponse,
+)
 from app.schemas.user import UserInToken
 from app.services import creator_service
 
@@ -33,6 +39,57 @@ async def list_saved_campaigns(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/me/instagram/auth-url", response_model=InstagramAuthUrlResponse)
+async def get_instagram_auth_url(
+    redirect_uri: str = Query(..., description="Where Instagram should redirect back to after consent"),
+    user: UserInToken = Depends(get_current_user),
+):
+    """Get the Instagram OAuth authorization URL to redirect the client to."""
+    return await creator_service.get_instagram_auth_url(redirect_uri)
+
+
+@router.post("/me/instagram/connect", response_model=CreatorResponse)
+async def connect_instagram(
+    data: InstagramConnectRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Connect Instagram to the current (already signed-up) creator account.
+
+    One-time full profile pre-fill from Instagram — for creators who signed
+    up via Google/email and are completing the mandatory onboarding step
+    (see `require_instagram_connected` in app/core/dependencies.py).
+    """
+    return await creator_service.connect_instagram(
+        profile_id=user.id,
+        code=data.code,
+        redirect_uri=data.redirect_uri,
+    )
+
+
+@router.post("/me/instagram/sync", response_model=CreatorResponse)
+async def sync_instagram(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Re-fetch follower/following count, photo, and engagement rate from Instagram."""
+    return await creator_service.sync_instagram(profile_id=user.id)
+
+
+@router.delete("/me/instagram/disconnect", status_code=status.HTTP_204_NO_CONTENT)
+async def disconnect_instagram(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Disconnect Instagram — clears the stored token locally."""
+    await creator_service.disconnect_instagram(profile_id=user.id)
+
+
+@router.post("/me/instagram/import-portfolio", response_model=list[PortfolioItemResponse])
+async def import_instagram_portfolio(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Import recent Instagram media into the creator's portfolio."""
+    return await creator_service.import_instagram_portfolio(profile_id=user.id)
 
 
 @router.get("/", response_model=PaginatedResponse[CreatorResponse])

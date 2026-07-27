@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
 
+    # ── Instagram (Instagram API with Instagram Login) ─
+    INSTAGRAM_APP_ID: str = ""
+    INSTAGRAM_APP_SECRET: str = ""
+
+    # ── Token encryption ──────────────────────────────
+    TOKEN_ENCRYPTION_KEY: str = ""  # Fernet key — encrypts instagram_access_token at rest
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

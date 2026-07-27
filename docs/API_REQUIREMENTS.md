@@ -118,7 +118,49 @@ class NotificationType(str, Enum):
 
 ## 1. Auth (`/api/v1/auth`)
 
-No changes. Already fully implemented.
+Everything below `/auth/google` is unchanged. New:
+
+```
+POST /auth/instagram   { code: str, redirect_uri: str, role?: "creator" }
+→ InstagramAuthResponse (access_token, refresh_token, user, is_new_user)
+```
+
+Third signup/login method, creator-only, mirrors `/auth/google`'s
+new-vs-returning shape. Uses the Instagram service/token-exchange flow from
+§2 directly — not Supabase's native ID-token verification, since Instagram
+isn't a Supabase-recognized OAuth provider and returns no email address.
+Implementation: `auth_service.instagram_auth()` (see `app/services/auth_service.py`).
+
+- **First-time sign-in** (`role="creator"` required, 400 otherwise): full
+  one-tap pre-fill — `name`/`bio`/`website`/`profile_photo_url`/
+  `follower_count`/`following_count`/`engagement_rate` all populated from
+  Instagram immediately, plus a portfolio import from recent media. No
+  separate "connect Instagram" onboarding step needed — unlike Google/email
+  signups (see the mandatory gate below).
+- **Returning sign-in**: only the stats subset refreshes (matches `sync`'s
+  scope in §2) — `name`/`bio`/`website` aren't touched, same reasoning as
+  the connect-once/sync-stats-only split there.
+- No email address is ever returned by Instagram, but `profiles.email` is
+  `NOT NULL UNIQUE` — a placeholder (`ig_{instagram_user_id}@users.kolably.instagram`)
+  is used at signup; nothing currently prompts the creator for a real one
+  (a good candidate for a later settings-page nudge, not implemented here).
+- Session minting has no natural fit in Supabase's normal
+  `sign_up`/`sign_in_with_id_token` calls (no password, not a recognized ID
+  token) — bridged via `admin.generate_link` + `verify_otp`, entirely
+  server-side, nothing emailed anywhere.
+
+**Mandatory onboarding gate:** creators who sign up via Google/email have no
+Instagram data yet, so `app/core/dependencies.py` exposes
+`require_instagram_connected` — 403 (`instagram_not_connected`) for any
+creator without a stored `instagram_access_token`. Superadmins bypass. Add
+it alongside `require_role(UserRole.CREATOR)` on creator-action routes as
+they get built (`POST /applications`, `POST /collaborations/{id}/submit`,
+`POST /chat/conversations`, campaign save/apply) — not on `/auth/me`,
+`PATCH /me`, or the `/creators/me/instagram/*` connect endpoints themselves,
+since a gated creator still needs to reach those. `GET /campaigns` stays
+public/ungated; routing a freshly-Google-signed-up creator straight to the
+connect screen before they see the rest of the app is a frontend concern,
+not a backend one.
 
 ---
 
@@ -151,20 +193,39 @@ class CreatorResponse(CreatorBase):
     tiktok_handle: str | None = None
     instagram_connected: bool = False       # NEW
     instagram_synced_at: datetime | None = None   # NEW
+    website: str | None = None              # NEW — from Instagram profile
+    following_count: int | None = None      # NEW — from Instagram profile
 ```
+`name` and `bio` already exist on `CreatorBase` (self-reported at signup) —
+Instagram connect/sync overwrites them in place, see below, rather than
+adding separate `instagram_name`/`instagram_bio` fields.
 
 `PortfolioItemResponse` gains `media_type: Literal["photo","video"] = "photo"`,
 `like_count: int | None = None`, `comment_count: int | None = None`
 (`GET /creators/{id}/portfolio?media_type=video`).
 
-### Instagram connection (Meta Graph API)
+### Instagram connection (Instagram API with Instagram Login)
 
-Prerequisite: Meta Developer account + app, Business Verification, App
-Review approval for `instagram_business_basic` +
-`instagram_business_manage_insights` scopes (real calendar time — start this
-before/alongside engineering, not after). Only works for Instagram
-Business/Creator accounts linked to a Facebook Page — the connect flow needs
-to tell a personal-account creator to convert first.
+Uses **Instagram API with Instagram Login** (`graph.instagram.com` /
+`instagram.com/oauth/authorize`), not the classic Facebook Login for
+Business flow — confirmed by live testing (2026-07-27) against a Business
+account added as an Instagram Tester. This flow does **not** require the
+creator's Instagram to be linked to a Facebook Page, so the personal-account
+conversion prompt only needs to say "convert to Business/Creator," not
+"...and link a Facebook Page."
+
+Prerequisite: Meta Developer account + app with the **Instagram API** product
+added, Business Verification (✅ done). App Review approval for
+`instagram_business_basic` + `instagram_business_manage_insights` is still
+required before real (non-Tester) creators can connect — that part remains
+real calendar time, start alongside engineering. Until then, engineering/QA
+can build and test end-to-end using accounts added as Instagram Testers
+(App dashboard → Instagram API → Roles), which get full scope access
+immediately without waiting on App Review.
+
+Config: `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` (not the generic
+`APP_ID`/`APP_SECRET`, which belong to a separate, unused Facebook Login
+product on the same Meta app).
 
 ```
 GET    /creators/me/instagram/auth-url        → { "url": str }
@@ -174,22 +235,35 @@ DELETE /creators/me/instagram/disconnect      → 204
 POST   /creators/me/instagram/import-portfolio → list[PortfolioItemResponse]
 ```
 
-- `auth-url` returns the Meta OAuth authorization URL for the client to
-  redirect to.
-- `connect` exchanges the returned `code` for a long-lived access token
-  (~60-day expiry), fetches the linked Instagram Business Account, and
-  stores it. Immediately calls the Graph API for `followers_count`,
-  `profile_picture_url`, and recent media insights to populate
-  `follower_count`/`profile_photo_url`/`engagement_rate`, replacing whatever
-  was self-reported/uploaded at signup.
-- `sync` also re-fetches `profile_picture_url` in addition to
-  `follower_count`/`engagement_rate`.
-- `sync` re-fetches `follower_count`/`engagement_rate` on demand (call on
-  profile view if `instagram_synced_at` is stale, e.g. >24h).
+- `auth-url` returns the `instagram.com/oauth/authorize` URL (client_id=
+  `INSTAGRAM_APP_ID`, scope=`instagram_business_basic,instagram_business_manage_insights`)
+  for the client to redirect to.
+- `connect` exchanges the returned `code` for a short-lived token, then
+  exchanges that for a long-lived token via `GET
+  graph.instagram.com/access_token?grant_type=ig_exchange_token` (~60-day
+  expiry, confirmed by testing: `expires_in=5183854`s). Immediately calls
+  `graph.instagram.com/me?fields=followers_count,follows_count,profile_picture_url,name,biography,website`
+  plus media insights for `engagement_rate`, and does a **one-time full
+  pre-fill**: `follower_count`/`following_count`/`profile_photo_url`/
+  `engagement_rate`/`name`/`bio`/`website`, replacing whatever was
+  self-reported/uploaded at signup.
+- `sync` only re-fetches the pure-stats subset —
+  `follower_count`/`following_count`/`profile_photo_url`/`engagement_rate` —
+  on demand (call on profile view if `instagram_synced_at` is stale, e.g.
+  >24h). It deliberately does **not** re-fetch `name`/`bio`/`website` on
+  every sync: those are one-time pre-fill only, so a creator who
+  customizes their Kolably bio/name after connecting (e.g. adds a
+  Kolably-specific pitch) doesn't get silently overwritten by their
+  Instagram bio on the next sync. Should also proactively refresh the
+  long-lived token via `grant_type=ig_refresh_token` well before its 60-day
+  expiry (e.g. whenever <10 days remain).
 - `import-portfolio` pulls the creator's recent IG media
   (`/{ig-user-id}/media`) into `portfolio_items` — `media_url`, `post_link`
   (permalink), `media_type`, `like_count`, `comment_count` all come from the
-  Graph API response.
+  Graph API response. The response's `media_product_type` field
+  (`FEED`/`REELS`/`STORY`) reliably distinguishes Reels from regular
+  feed posts/carousels if finer-grained typing than `photo`/`video` is
+  ever wanted.
 - Token fields (`instagram_access_token`, `instagram_user_id`) are never
   serialized in `CreatorResponse` — internal only.
 
@@ -569,6 +643,8 @@ ALTER TABLE creators ADD COLUMN instagram_user_id TEXT;
 ALTER TABLE creators ADD COLUMN instagram_access_token TEXT;   -- encrypted at rest
 ALTER TABLE creators ADD COLUMN instagram_token_expires_at TIMESTAMPTZ;
 ALTER TABLE creators ADD COLUMN instagram_synced_at TIMESTAMPTZ;
+ALTER TABLE creators ADD COLUMN website TEXT;
+ALTER TABLE creators ADD COLUMN following_count INT;
 
 -- portfolio_items
 ALTER TABLE portfolio_items ADD COLUMN media_type TEXT DEFAULT 'photo';
@@ -610,14 +686,17 @@ CREATE TABLE notifications ( ... );          -- see §8
 
 ## Build order
 
-0. **Start the Meta App Review process immediately** (Business Verification +
-   `instagram_business_basic`/`instagram_business_manage_insights` scopes) —
-   this is calendar time (1–4+ weeks), not engineering time, and gates the
-   Instagram connection feature regardless of when the code is ready.
+0. **Business Verification done ✅. Submit App Review immediately** for
+   `instagram_business_basic`/`instagram_business_manage_insights` on the
+   Instagram API product — this is calendar time (1–4+ weeks), not
+   engineering time. It gates real (non-Tester) creators connecting, but not
+   engineering — see §2 for the confirmed-working Instagram Tester testing
+   path in the meantime.
 1. Creators + Businesses read paths (`GET /creators`, `GET /creators/{id}`, `GET /businesses/{id}`)
-2. Instagram connection flow (`/creators/me/instagram/*`) — build against
-   Meta test users while App Review is pending; can't go live for real
-   creators until it's approved
+2. Instagram connection flow (`/creators/me/instagram/*`) — build and test
+   end-to-end now against accounts added as Instagram Testers (confirmed
+   working: profile stats, media list, insights all return correctly); can't
+   go live for real creators until App Review is approved
 3. Campaigns — full 4-step create/publish flow
 4. Applications — including `direction` and revision workflow
 5. Collaborations — multi-submission content tracking

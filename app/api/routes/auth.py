@@ -15,6 +15,8 @@ from app.schemas.auth import (
     ForgotPasswordRequest,
     GoogleAuthRequest,
     GoogleAuthResponse,
+    InstagramAuthRequest,
+    InstagramAuthResponse,
     LoginRequest,
     MessageResponse,
     RefreshTokenRequest,
@@ -58,6 +60,17 @@ async def google_auth(data: GoogleAuthRequest):
     `is_new_user` responses to a profile-completion step (`PATCH /me`).
     """
     return await auth_service.google_auth(data)
+
+
+@router.post("/instagram", response_model=InstagramAuthResponse)
+async def instagram_auth(data: InstagramAuthRequest):
+    """Sign in or sign up via Instagram API with Instagram Login (creators only).
+
+    `role` ("creator") is required on first sign-in. A first-time sign-in
+    pre-fills the full profile + portfolio from Instagram — no separate
+    "connect Instagram" onboarding step needed, unlike Google/email signups.
+    """
+    return await auth_service.instagram_auth(data)
 
 
 @router.post("/logout", response_model=MessageResponse)

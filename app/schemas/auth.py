@@ -50,6 +50,20 @@ class GoogleAuthRequest(BaseModel):
     role: Literal["creator", "business"] | None = None
 
 
+# ── Instagram Sign-In ─────────────────────────────────
+class InstagramAuthRequest(BaseModel):
+    """Instagram API with Instagram Login — authorization code exchange.
+
+    Creator-only. `role` is only required on first-time sign-up (mirrors
+    `GoogleAuthRequest`) — always "creator" since businesses never connect
+    Instagram in this product.
+    """
+
+    code: str = Field(..., min_length=1)
+    redirect_uri: str = Field(..., min_length=1)
+    role: Literal["creator"] | None = None
+
+
 # ── Token Refresh ────────────────────────────────────
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
@@ -77,6 +91,12 @@ class AuthTokenResponse(BaseModel):
 
 class GoogleAuthResponse(AuthTokenResponse):
     """Returned by POST /auth/google — adds whether this was a first-time sign-up."""
+
+    is_new_user: bool = False
+
+
+class InstagramAuthResponse(AuthTokenResponse):
+    """Returned by POST /auth/instagram — adds whether this was a first-time sign-up."""
 
     is_new_user: bool = False
 

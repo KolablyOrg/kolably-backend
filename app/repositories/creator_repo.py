@@ -16,6 +16,13 @@ class CreatorRepository(BaseRepository):
             filters={"profile_id": profile_id},
         )
 
+    async def get_by_instagram_user_id(self, instagram_user_id: str) -> dict | None:
+        return await self.select_one(
+            "creators",
+            columns="*",
+            filters={"instagram_user_id": instagram_user_id},
+        )
+
     async def get_id_by_profile_id(self, profile_id: str) -> str | None:
         row = await self.select_one(
             "creators",
@@ -56,6 +63,11 @@ class CreatorRepository(BaseRepository):
     async def insert_creator(self, data: dict) -> dict | None:
         rows = await self.insert("creators", data)
         return rows[0] if rows else None
+
+    async def insert_portfolio_items(self, items: list[dict]) -> list[dict]:
+        if not items:
+            return []
+        return await self.insert("portfolio_items", items)
 
     async def update_by_profile_id(self, profile_id: str, data: dict) -> dict | None:
         rows = await self.update("creators", data, {"profile_id": profile_id})

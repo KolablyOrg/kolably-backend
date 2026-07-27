@@ -8,6 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.core.enums import UserRole
 from app.core.security import verify_supabase_token
 from app.core.supabase import get_supabase_admin_client
+from app.repositories.creator_repo import CreatorRepository
 from app.schemas.user import UserInToken
 
 security = HTTPBearer()
@@ -95,3 +96,25 @@ def require_role(*allowed_roles: UserRole):
         return user
 
     return _check_role
+
+
+async def require_instagram_connected(
+    user: UserInToken = Depends(get_current_user),
+) -> UserInToken:
+    """
+    Mandatory onboarding gate: a creator must have Instagram connected before
+    using creator-facing actions (applying, submitting content, messaging).
+
+    Only enforced for role=creator — Google/email signups have no Instagram
+    data yet and must connect during onboarding; Instagram signups already
+    arrive connected (see `auth_service.instagram_auth`). Superadmins bypass
+    entirely (they may not even have a `creators` row).
+    """
+    if user.role == UserRole.CREATOR:
+        creator = await CreatorRepository().get_by_profile_id(user.id)
+        if not creator or not creator.get("instagram_access_token"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="instagram_not_connected",
+            )
+    return user

@@ -5,7 +5,7 @@ Creator-related Pydantic schemas.
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CreatorBase(BaseModel):
@@ -27,6 +27,8 @@ class CreatorResponse(CreatorBase):
     tiktok_handle: str | None = None
     instagram_connected: bool = False
     instagram_synced_at: datetime | None = None
+    website: str | None = None
+    following_count: int | None = None
 
 
 class CreatorUpdateRequest(BaseModel):
@@ -63,3 +65,13 @@ class PortfolioItemResponse(BaseModel):
 class CreatorStatsResponse(BaseModel):
     active_collaborations_count: int
     engagement_growth_pct: float | None = None
+
+
+# ── Instagram connection ──────────────────────────────
+class InstagramAuthUrlResponse(BaseModel):
+    url: str
+
+
+class InstagramConnectRequest(BaseModel):
+    code: str = Field(..., min_length=1)
+    redirect_uri: str = Field(..., min_length=1)

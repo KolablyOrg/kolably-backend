@@ -1,7 +1,10 @@
+from datetime import UTC, datetime, timedelta
+
 from fastapi import HTTPException, status
 from supabase_auth.errors import AuthApiError
 
-from app.core.supabase import get_supabase_client
+from app.core.crypto import encrypt_token
+from app.core.supabase import get_supabase_admin_client, get_supabase_client
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.profile_repo import ProfileRepository
@@ -9,9 +12,11 @@ from app.schemas.auth import (
     BusinessSignupRequest,
     CreatorSignupRequest,
     GoogleAuthRequest,
+    InstagramAuthRequest,
     LoginRequest,
     UpdateProfileRequest,
 )
+from app.services import instagram_service
 
 # GoTrue sets last_sign_in_at == created_at (to the second) only on the very
 # first sign-in for an auth.users row; a small tolerance absorbs clock/DB skew.
@@ -325,6 +330,155 @@ async def google_auth(
             "is_active": profile["is_active"],
         },
         "is_new_user": is_new_user,
+    }
+
+
+async def _mint_session_for_email(email: str):
+    """Mint a real Supabase session for `email` with nothing sent anywhere.
+
+    Instagram gives us no password and isn't a Supabase-recognized ID-token
+    provider (unlike Google), so there's no `sign_up`/`sign_in_with_id_token`
+    call that fits. Instead: generate a magic-link token server-side via the
+    admin API, then immediately verify it server-side — the "link" is never
+    emailed, it's just used as a one-time bridge to a real session.
+    """
+    supabase_admin = await get_supabase_admin_client()
+    link = await supabase_admin.auth.admin.generate_link({"type": "magiclink", "email": email})
+
+    supabase_anon = await get_supabase_client()
+    auth_response = await supabase_anon.auth.verify_otp({
+        "token_hash": link.properties.hashed_token,
+        "type": "magiclink",
+    })
+    return auth_response.session
+
+
+async def instagram_auth(
+    data: InstagramAuthRequest,
+    *,
+    profile_repo: ProfileRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+) -> dict:
+    """Sign in (or sign up) via Instagram API with Instagram Login.
+
+    Creator-only. A brand-new sign-in gets a full one-tap profile pre-fill
+    (name/bio/website/photo/follower stats/engagement rate) plus a portfolio
+    import — no separate onboarding step needed, unlike Google/email signups
+    which still have to connect Instagram afterward. A returning sign-in only
+    refreshes the stats subset, matching the connect-once/sync-stats-only
+    split already documented for `/creators/me/instagram/sync` in
+    `API_REQUIREMENTS.md` §2.
+    """
+    short_lived = await instagram_service.exchange_code_for_token(data.code, data.redirect_uri)
+    long_lived = await instagram_service.exchange_for_long_lived_token(short_lived["access_token"])
+    access_token = long_lived["access_token"]
+
+    ig_profile = await instagram_service.fetch_profile(access_token)
+    instagram_user_id = str(ig_profile["user_id"])
+
+    creator_repo = creator_repo or CreatorRepository()
+    profile_repo = profile_repo or ProfileRepository()
+
+    expires_at = datetime.now(UTC) + timedelta(seconds=long_lived.get("expires_in", 5_184_000))
+    encrypted_token = encrypt_token(access_token)
+    now = datetime.now(UTC).isoformat()
+
+    existing_creator = await creator_repo.get_by_instagram_user_id(instagram_user_id)
+
+    if existing_creator:
+        profile = await profile_repo.get_by_id(existing_creator["profile_id"])
+        if not profile:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Profile not found for existing creator",
+            )
+        if not profile.get("is_active", False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is deactivated",
+            )
+
+        await creator_repo.update_by_profile_id(existing_creator["profile_id"], {
+            "follower_count": ig_profile.get("followers_count"),
+            "following_count": ig_profile.get("follows_count"),
+            "profile_photo_url": ig_profile.get("profile_picture_url"),
+            "instagram_access_token": encrypted_token,
+            "instagram_token_expires_at": expires_at.isoformat(),
+            "instagram_synced_at": now,
+        })
+
+        session = await _mint_session_for_email(profile["email"])
+        return {
+            "access_token": session.access_token,
+            "refresh_token": session.refresh_token,
+            "token_type": "bearer",
+            "user": {
+                "id": profile["id"],
+                "email": profile["email"],
+                "role": profile["role"],
+                "is_active": profile["is_active"],
+            },
+            "is_new_user": False,
+        }
+
+    # First-time Instagram sign-in — always a new creator account.
+    if data.role != "creator":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="role ('creator') is required for first-time Instagram sign-in",
+        )
+
+    placeholder_email = f"ig_{instagram_user_id}@users.kolably.instagram"
+
+    supabase_admin = await get_supabase_admin_client()
+    try:
+        user_response = await supabase_admin.auth.admin.create_user({
+            "email": placeholder_email,
+            "email_confirm": True,
+            "user_metadata": {"role": "creator"},
+        })
+    except AuthApiError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    auth_id = str(user_response.user.id)
+    profile = await profile_repo.get_by_auth_id(auth_id)
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Profile creation trigger failed",
+        )
+
+    media = await instagram_service.fetch_media(access_token)
+    engagement_rate = await instagram_service.calculate_engagement_rate(access_token, media)
+
+    new_creator = await creator_repo.insert_creator({
+        "profile_id": profile["id"],
+        "username": ig_profile["username"],
+        "instagram_handle": ig_profile["username"],
+        "instagram_user_id": instagram_user_id,
+        "instagram_access_token": encrypted_token,
+        "instagram_token_expires_at": expires_at.isoformat(),
+        "instagram_synced_at": now,
+        **instagram_service.build_profile_prefill(ig_profile, engagement_rate),
+    })
+
+    if media and new_creator:
+        await creator_repo.insert_portfolio_items(
+            instagram_service.build_portfolio_items(new_creator["id"], media)
+        )
+
+    session = await _mint_session_for_email(placeholder_email)
+    return {
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+        "token_type": "bearer",
+        "user": {
+            "id": profile["id"],
+            "email": profile["email"],
+            "role": profile["role"],
+            "is_active": profile["is_active"],
+        },
+        "is_new_user": True,
     }
 
 
