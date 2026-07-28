@@ -46,8 +46,10 @@ class FakeGoTrue:
     def __init__(self, response=None, error=None):
         self._response = response
         self._error = error
+        self.last_credentials = None
 
     async def sign_in_with_id_token(self, credentials):
+        self.last_credentials = credentials
         if self._error:
             raise self._error
         return self._response
@@ -218,3 +220,40 @@ async def test_google_auth_invalid_token_raises_401(monkeypatch):
         await auth_service.google_auth(GoogleAuthRequest(id_token="bad-tok"))
 
     assert exc_info.value.status_code == 401
+
+
+async def test_google_auth_forwards_nonce_when_provided(monkeypatch):
+    """Regression: the frontend hashes a nonce into the GIS config, so the
+    same raw nonce must reach Supabase or it rejects the token with
+    'Passed nonce and nonce in id_token should either both exist or not.'"""
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    gotrue = FakeGoTrue(response=FakeAuthResponse(user, FakeSession()))
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.google_auth(
+        GoogleAuthRequest(id_token="tok", nonce="raw-nonce-value"),
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert gotrue.last_credentials == {
+        "provider": "google",
+        "token": "tok",
+        "nonce": "raw-nonce-value",
+    }
+
+
+async def test_google_auth_omits_nonce_when_not_provided(monkeypatch):
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    gotrue = FakeGoTrue(response=FakeAuthResponse(user, FakeSession()))
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.google_auth(
+        GoogleAuthRequest(id_token="tok"),
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert "nonce" not in gotrue.last_credentials

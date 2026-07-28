@@ -251,10 +251,12 @@ async def google_auth(
     """
     supabase = await get_supabase_client()
 
+    credentials = {"provider": "google", "token": data.id_token}
+    if data.nonce:
+        credentials["nonce"] = data.nonce
+
     try:
-        auth_response = await supabase.auth.sign_in_with_id_token(
-            {"provider": "google", "token": data.id_token}
-        )
+        auth_response = await supabase.auth.sign_in_with_id_token(credentials)
     except AuthApiError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

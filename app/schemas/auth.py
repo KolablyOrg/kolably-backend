@@ -48,6 +48,12 @@ class GoogleAuthRequest(BaseModel):
 
     id_token: str = Field(..., min_length=1)
     role: Literal["creator", "business"] | None = None
+    nonce: str | None = None
+    """Raw (unhashed) nonce — required only if the frontend's Google
+    Identity Services config included a hashed nonce when requesting the
+    credential. Must be present/absent on both sides together, or Supabase
+    rejects the token with 'Passed nonce and nonce in id_token should
+    either both exist or not.'"""
 
 
 # ── Instagram Sign-In ─────────────────────────────────
