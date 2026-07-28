@@ -97,6 +97,10 @@ class CreatorRepository(BaseRepository):
         rows = await self.update("creators", data, {"profile_id": profile_id})
         return rows[0] if rows else None
 
+    async def update_creator(self, creator_id: str, data: dict) -> dict | None:
+        rows = await self.update("creators", data, {"id": creator_id})
+        return rows[0] if rows else None
+
     async def get_niche_by_profile_id(self, profile_id: str) -> str | None:
         row = await self.select_one(
             "creators",
@@ -104,6 +108,20 @@ class CreatorRepository(BaseRepository):
             filters={"profile_id": profile_id},
         )
         return row.get("niche") if row else None
+
+    async def get_portfolio_item(self, item_id: str) -> dict | None:
+        return await self.select_one(
+            "portfolio_items",
+            columns="*",
+            filters={"id": item_id},
+        )
+
+    async def insert_portfolio_item(self, data: dict) -> dict | None:
+        rows = await self.insert("portfolio_items", data)
+        return rows[0] if rows else None
+
+    async def delete_portfolio_item(self, item_id: str, creator_id: str) -> list[dict]:
+        return await self.delete("portfolio_items", {"id": item_id, "creator_id": creator_id})
 
     async def list_portfolio(
         self,
@@ -131,6 +149,19 @@ class CreatorRepository(BaseRepository):
         return await self.count(
             "collaborations",
             filters={"creator_id": creator_id, "status": "active"},
+        )
+
+    async def save_campaign(self, creator_id: str, campaign_id: str) -> None:
+        """Idempotent — re-saving an already-saved campaign is a no-op."""
+        await self.upsert(
+            "saved_campaigns",
+            {"creator_id": creator_id, "campaign_id": campaign_id},
+        )
+
+    async def unsave_campaign(self, creator_id: str, campaign_id: str) -> None:
+        await self.delete(
+            "saved_campaigns",
+            {"creator_id": creator_id, "campaign_id": campaign_id},
         )
 
     async def list_saved_campaigns(

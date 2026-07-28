@@ -4,8 +4,14 @@ Unit tests for creator_service — repositories injected as fakes, no Supabase.
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
-from app.schemas.creator import CreatorResponse
+from app.core.enums import UserRole
+from app.schemas.creator import (
+    CreatorResponse,
+    CreatorUpdateRequest,
+    PortfolioItemCreateRequest,
+)
 from app.services import creator_service
 
 CREATOR_ROW = {
@@ -19,6 +25,7 @@ CREATOR_ROW = {
     "follower_count": 1000,
     "engagement_rate": 3.5,
     "bio": "hello",
+    "instagram_handle": "@alice",
     "created_at": "2024-01-01T00:00:00+00:00",
     "tiktok_handle": None,
     "instagram_user_id": "ig-user",
@@ -26,16 +33,72 @@ CREATOR_ROW = {
     "instagram_synced_at": None,
 }
 
+CAMPAIGN_ROW = {
+    "id": "camp1",
+    "business_id": "b1",
+    "title": "Summer Campaign",
+    "objective": "brand_awareness",
+    "description": "Promote the summer menu",
+    "cover_image_url": None,
+    "deliverables": [
+        {"platform": "instagram", "content_type": "post", "quantity": 1, "description": None, "required": True}
+    ],
+    "compensation_type": "cash",
+    "cash_amount_min": 100.0,
+    "cash_amount_max": 200.0,
+    "free_product_description": None,
+    "creator_category": "food",
+    "follower_range_min": None,
+    "follower_range_max": None,
+    "min_engagement_rate": None,
+    "location": "Springfield",
+    "max_creators": 5,
+    "additional_requirements": None,
+    "deadline": None,
+    "status": "active",
+    "created_at": "2024-01-01T00:00:00+00:00",
+}
+
+PORTFOLIO_ITEM_ROW = {
+    "id": "pi1",
+    "creator_id": "c1",
+    "title": "Spring shoot",
+    "media_url": "https://storage.example.com/portfolio/1.jpg",
+    "post_link": None,
+    "media_type": "photo",
+    "like_count": None,
+    "comment_count": None,
+    "created_at": "2024-01-01T00:00:00+00:00",
+}
+
 
 class FakeCreatorRepo:
     """Duck-typed stand-in for CreatorRepository."""
 
-    def __init__(self, row=None, rows=(), total=0, creator_id="c1", active_count=0):
+    def __init__(
+        self,
+        row=None,
+        rows=(),
+        total=0,
+        creator_id="c1",
+        active_count=0,
+        portfolio_item=None,
+        saved_rows=(),
+        saved_total=0,
+    ):
         self._row = row
         self._rows = list(rows)
         self._total = total
         self._creator_id = creator_id
         self._active_count = active_count
+        self._portfolio_item = portfolio_item
+        self._saved_rows = list(saved_rows)
+        self._saved_total = saved_total
+        self.updated_with = None
+        self.inserted_item = None
+        self.deleted = None
+        self.saved = None
+        self.unsaved = None
 
     async def get_by_id(self, creator_id: str):
         return self._row
@@ -48,6 +111,38 @@ class FakeCreatorRepo:
 
     async def count_active_collaborations(self, creator_id: str):
         return self._active_count
+
+    async def update_creator(self, creator_id: str, data: dict):
+        self.updated_with = data
+        return {**self._row, **data} if self._row else None
+
+    async def get_portfolio_item(self, item_id: str):
+        return self._portfolio_item
+
+    async def insert_portfolio_item(self, data: dict):
+        self.inserted_item = data
+        return {**data, "id": "pi1", "created_at": "2024-01-01T00:00:00+00:00"}
+
+    async def delete_portfolio_item(self, item_id: str, creator_id: str):
+        self.deleted = (item_id, creator_id)
+        return []
+
+    async def save_campaign(self, creator_id: str, campaign_id: str):
+        self.saved = (creator_id, campaign_id)
+
+    async def unsave_campaign(self, creator_id: str, campaign_id: str):
+        self.unsaved = (creator_id, campaign_id)
+
+    async def list_saved_campaigns(self, creator_id: str, page: int = 1, page_size: int = 20):
+        return self._saved_rows, self._saved_total
+
+
+class FakeCampaignRepo:
+    def __init__(self, row=None):
+        self._row = row
+
+    async def get_by_id(self, campaign_id: str):
+        return self._row
 
 
 async def test_get_creator_by_id_returns_none_when_missing():
@@ -106,3 +201,261 @@ async def test_get_creator_stats_counts_active_collaborations():
     stats = await creator_service.get_creator_stats(profile_id="p1", repo=repo)
 
     assert stats["active_collaborations_count"] == 3
+
+
+# ── Serialization ─────────────────────────────────────
+
+
+async def test_row_to_creator_response_includes_instagram_handle():
+    """Regression: instagram_handle is a public CreatorBase field and must be
+    mapped through (it was silently dropped, always serializing as None)."""
+    creator = creator_service._row_to_creator_response(dict(CREATOR_ROW))
+
+    assert creator.instagram_handle == "@alice"
+
+
+# ── update_creator ────────────────────────────────────
+
+
+async def test_update_creator_applies_only_provided_fields():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
+
+    result = await creator_service.update_creator(
+        creator_id="c1",
+        profile_id="p1",
+        role=UserRole.CREATOR,
+        data=CreatorUpdateRequest(name="Alice Cooper", tiktok_handle="@alicecooper"),
+        repo=repo,
+    )
+
+    assert repo.updated_with == {"name": "Alice Cooper", "tiktok_handle": "@alicecooper"}
+    assert result.name == "Alice Cooper"
+    assert result.city == "Springfield"  # untouched
+
+
+async def test_update_creator_404_when_creator_missing():
+    repo = FakeCreatorRepo(row=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.update_creator(
+            creator_id="missing",
+            profile_id="p1",
+            role=UserRole.CREATOR,
+            data=CreatorUpdateRequest(name="X"),
+            repo=repo,
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_update_creator_403_for_non_owner():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))  # owned by profile p1
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.update_creator(
+            creator_id="c1",
+            profile_id="someone-else",
+            role=UserRole.CREATOR,
+            data=CreatorUpdateRequest(name="X"),
+            repo=repo,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert repo.updated_with is None
+
+
+async def test_update_creator_allowed_for_superadmin():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
+
+    result = await creator_service.update_creator(
+        creator_id="c1",
+        profile_id="admin-profile",
+        role=UserRole.SUPERADMIN,
+        data=CreatorUpdateRequest(bio="edited by admin"),
+        repo=repo,
+    )
+
+    assert result.bio == "edited by admin"
+
+
+async def test_update_creator_empty_payload_returns_current_without_write():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
+
+    result = await creator_service.update_creator(
+        creator_id="c1",
+        profile_id="p1",
+        role=UserRole.CREATOR,
+        data=CreatorUpdateRequest(),
+        repo=repo,
+    )
+
+    assert repo.updated_with is None  # no DB write happened
+    assert result.name == "Alice"
+
+
+# ── Portfolio add/delete ──────────────────────────────
+
+
+async def test_add_portfolio_item_happy_path():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
+
+    item = await creator_service.add_portfolio_item(
+        creator_id="c1",
+        profile_id="p1",
+        role=UserRole.CREATOR,
+        data=PortfolioItemCreateRequest(
+            title="Spring shoot",
+            media_url="https://storage.example.com/portfolio/1.jpg",
+        ),
+        repo=repo,
+    )
+
+    assert repo.inserted_item["creator_id"] == "c1"
+    assert repo.inserted_item["media_type"] == "photo"  # default
+    assert item["id"] == "pi1"
+    assert item["title"] == "Spring shoot"
+
+
+async def test_add_portfolio_item_403_for_non_owner():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.add_portfolio_item(
+            creator_id="c1",
+            profile_id="someone-else",
+            role=UserRole.CREATOR,
+            data=PortfolioItemCreateRequest(media_url="https://x.com/1.jpg"),
+            repo=repo,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert repo.inserted_item is None
+
+
+async def test_portfolio_item_create_requires_media_url():
+    with pytest.raises(ValidationError):
+        PortfolioItemCreateRequest(title="no url")
+
+
+async def test_delete_portfolio_item_happy_path():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW), portfolio_item=dict(PORTFOLIO_ITEM_ROW))
+
+    await creator_service.delete_portfolio_item(
+        creator_id="c1",
+        item_id="pi1",
+        profile_id="p1",
+        role=UserRole.CREATOR,
+        repo=repo,
+    )
+
+    assert repo.deleted == ("pi1", "c1")
+
+
+async def test_delete_portfolio_item_404_when_missing():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW), portfolio_item=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.delete_portfolio_item(
+            creator_id="c1",
+            item_id="missing",
+            profile_id="p1",
+            role=UserRole.CREATOR,
+            repo=repo,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert repo.deleted is None
+
+
+async def test_delete_portfolio_item_404_when_belongs_to_other_creator():
+    """An item_id that exists but under a different creator must 404, not
+    delete — otherwise a creator could delete anyone's items by guessing IDs."""
+    repo = FakeCreatorRepo(
+        row=dict(CREATOR_ROW),
+        portfolio_item={**PORTFOLIO_ITEM_ROW, "creator_id": "someone-else"},
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.delete_portfolio_item(
+            creator_id="c1",
+            item_id="pi1",
+            profile_id="p1",
+            role=UserRole.CREATOR,
+            repo=repo,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert repo.deleted is None
+
+
+# ── Saved campaigns ───────────────────────────────────
+
+
+async def test_save_campaign_upserts_bookmark():
+    repo = FakeCreatorRepo(creator_id="c1")
+    campaign_repo = FakeCampaignRepo(row=dict(CAMPAIGN_ROW))
+
+    await creator_service.save_campaign(
+        profile_id="p1",
+        campaign_id="camp1",
+        repo=repo,
+        campaign_repo=campaign_repo,
+    )
+
+    assert repo.saved == ("c1", "camp1")
+
+
+async def test_save_campaign_404_for_unknown_campaign():
+    repo = FakeCreatorRepo(creator_id="c1")
+    campaign_repo = FakeCampaignRepo(row=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.save_campaign(
+            profile_id="p1",
+            campaign_id="missing",
+            repo=repo,
+            campaign_repo=campaign_repo,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert repo.saved is None
+
+
+async def test_save_campaign_404_without_creator_profile():
+    repo = FakeCreatorRepo(creator_id=None)
+    campaign_repo = FakeCampaignRepo(row=dict(CAMPAIGN_ROW))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.save_campaign(
+            profile_id="p-missing",
+            campaign_id="camp1",
+            repo=repo,
+            campaign_repo=campaign_repo,
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_unsave_campaign_deletes_bookmark():
+    repo = FakeCreatorRepo(creator_id="c1")
+
+    await creator_service.unsave_campaign(profile_id="p1", campaign_id="camp1", repo=repo)
+
+    assert repo.unsaved == ("c1", "camp1")
+
+
+async def test_list_saved_campaigns_returns_full_campaign_objects():
+    """Contract is PaginatedResponse[CampaignResponse] — items must carry the
+    full campaign shape (deliverables, description, max_creators, ...), not a
+    hand-picked subset that would fail response validation."""
+    saved_row = {"creator_id": "c1", "campaign_id": "camp1", "campaigns": dict(CAMPAIGN_ROW)}
+    repo = FakeCreatorRepo(creator_id="c1", saved_rows=[saved_row], saved_total=1)
+
+    result = await creator_service.list_saved_campaigns(profile_id="p1", repo=repo)
+
+    assert result["total"] == 1
+    item = result["items"][0]
+    assert item["id"] == "camp1"
+    assert item["description"] == "Promote the summer menu"
+    assert item["deliverables"][0]["platform"] == "instagram"
+    assert item["max_creators"] == 5

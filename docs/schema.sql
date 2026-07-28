@@ -115,6 +115,7 @@ create trigger trg_creators_updated_at
 create table if not exists portfolio_items (
   id              uuid primary key default gen_random_uuid(),
   creator_id      uuid not null references creators(id) on delete cascade,
+  title           text,                              -- optional label for manual additions
   media_url       text not null,                    -- Storage `portfolio`, or IG media URL
   post_link       text,                              -- IG permalink, if imported
   media_type      text not null default 'photo' check (media_type in ('photo', 'video')),

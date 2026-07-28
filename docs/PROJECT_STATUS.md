@@ -3,9 +3,10 @@
 A honest snapshot of what works vs. what's scaffolding, based on reading the
 code. Auth is current as of 2026-07-21; the Campaigns section was refreshed on
 2026-07-25 after reviewing [`app/services/campaign_service.py`](../app/services/campaign_service.py)
-and [`app/api/routes/campaigns.py`](../app/api/routes/campaigns.py). All routes
-below live under the `/api/v1` prefix and are wired up in
-[`app/api/router.py`](../app/api/router.py).
+and [`app/api/routes/campaigns.py`](../app/api/routes/campaigns.py); the
+Creators section was added on 2026-07-28 after completing the module
+end-to-end. All routes below live under the `/api/v1` prefix and are wired up
+in [`app/api/router.py`](../app/api/router.py).
 
 ## Summary
 
@@ -13,19 +14,20 @@ below live under the `/api/v1` prefix and are wired up in
 |---|---|
 | Auth (signup, login, sessions, profile) | ✅ Fully implemented |
 | Users | ⚠️ Stub only (dead code — superseded by `/auth/me`) |
-| Creators | ❌ Not implemented (routes exist, return nothing) |
+| Creators | ✅ Fully implemented (end-to-end, persisted) |
 | Businesses | ❌ Not implemented |
 | Campaigns | ✅ Fully implemented (end-to-end, persisted) |
 | Applications | ❌ Not implemented |
 | Collaborations | ❌ Not implemented |
 | Chat | ❌ Not implemented |
 
-Auth and Campaigns are real end-to-end. The other domains still only define
-route signatures and Pydantic schemas — handler bodies are `# TODO: Implement`
-/ `pass` and the corresponding `*_service.py` files contain nothing but TODO
-comments. Calling any of those returns `null` with a `200 OK` (FastAPI's
-default for a bare `pass`), not an error — worth knowing so it isn't mistaken
-for "working but empty."
+Auth, Creators, and Campaigns are real end-to-end. The remaining domains
+(Businesses, Applications, Collaborations, Chat) still only define route signatures and
+Pydantic schemas — handler bodies are `# TODO: Implement` / `pass` and the
+corresponding `*_service.py` files contain nothing but TODO comments. Calling
+any of those returns `null` with a `200 OK` (FastAPI's default for a bare
+`pass`), not an error — worth knowing so it isn't mistaken for "working but
+empty."
 
 ## ✅ Implemented: Auth (`/api/v1/auth`)
 
@@ -97,6 +99,51 @@ if not owner).
 - **`recommended` mode** only narrows by exact `creator_category == niche` for callers with role `creator`; it does not rank and silently returns the unfiltered feed for other roles.
 - **Business-owned listing stub.** `GET /businesses/{business_id}/campaigns` (in `businesses.py`) is still a `# TODO: Implement` stub — a business cannot list its own `draft`/`closed` campaigns through `/businesses`; only `active` ones surface via the feed.
 
+## ✅ Implemented: Creators (`/api/v1/creators`)
+
+Backed by [`app/services/creator_service.py`](../app/services/creator_service.py),
+[`app/repositories/creator_repo.py`](../app/repositories/creator_repo.py),
+[`app/api/routes/creators.py`](../app/api/routes/creators.py), and
+[`app/schemas/creator.py`](../app/schemas/creator.py). All write paths are
+ownership-checked in the service layer (`_ensure_creator_access` — 404 if the
+creator doesn't exist, 403 if it belongs to someone else; superadmin bypass).
+Covers the full `docs/API_REQUIREMENTS.md §2` contract, including the
+Instagram connection flow (Instagram API with Instagram Login, confirmed
+working against tester accounts).
+
+### Endpoints
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/creators/` | public | Paginated discovery list; filters: `search`, `niche`, `city`, `follower_min`, `follower_max` |
+| GET | `/creators/{id}` | public | Public creator profile |
+| PATCH | `/creators/{id}` | CREATOR (owner) / SUPERADMIN | Update profile fields (name, username, city, niche, bio, handles, photo, follower_count) |
+| GET | `/creators/{id}/portfolio` | public | Paginated portfolio; `media_type` filter |
+| POST | `/creators/{id}/portfolio` | CREATOR (owner) / SUPERADMIN | Manual portfolio add (`media_url` from client-side Storage upload) |
+| DELETE | `/creators/{id}/portfolio/{item_id}` | CREATOR (owner) / SUPERADMIN | Delete a portfolio item (404s if the item belongs to another creator) |
+| GET | `/creators/me/stats` | authenticated | `active_collaborations_count` + `engagement_growth_pct` (always null — no data source) |
+| GET | `/creators/me/saved-campaigns` | authenticated | Paginated saved campaigns, full `CampaignResponse` items |
+| POST | `/creators/me/saved-campaigns/{campaign_id}` | CREATOR + Instagram-connected | Save a campaign (idempotent upsert; 404 on unknown campaign) |
+| DELETE | `/creators/me/saved-campaigns/{campaign_id}` | CREATOR | Unsave a campaign (idempotent) |
+| GET | `/creators/me/instagram/auth-url` | authenticated | Build the `instagram.com/oauth/authorize` URL |
+| POST | `/creators/me/instagram/connect` | authenticated | Exchange code → long-lived token (Fernet-encrypted at rest) → one-time full profile pre-fill; 422 for personal accounts, 409 if the IG account is connected elsewhere |
+| POST | `/creators/me/instagram/sync` | authenticated | Stats-only re-fetch (followers/following/photo/engagement); proactively refreshes the long-lived token when <10 days remain |
+| DELETE | `/creators/me/instagram/disconnect` | authenticated | Clear the stored connection locally |
+| POST | `/creators/me/instagram/import-portfolio` | authenticated | Pull recent IG media into `portfolio_items` |
+
+### Notes
+- Token fields (`instagram_access_token`, `instagram_user_id`) are never
+  serialized — `CreatorResponse` doesn't include them, and there's a
+  regression test for it.
+- `portfolio_items.title` (migration `019`) backs optional labels on manual
+  additions; Instagram imports leave it NULL.
+- `POST /creators/me/saved-campaigns/{id}` is gated by
+  `require_instagram_connected` per `API_REQUIREMENTS.md §1` ("campaign
+  save/apply"); unsave is deliberately not gated so a disconnected creator can
+  still clean up.
+- Unit-tested via `tests/test_creator_service.py` (repo fakes, no Supabase)
+  and `tests/test_instagram_connect.py` (Graph API faked).
+
 ## ⚠️ Dead stub: Users (`/api/v1/users`)
 
 `GET/PATCH/DELETE /users/me` are empty placeholders. They appear to
@@ -110,12 +157,6 @@ the next feature.
 For each of these, the endpoint signatures and Pydantic request/response
 schemas already exist (see `app/schemas/`), so the API *contract* is designed —
 only the handler + service logic is missing.
-
-**Creators** (`/api/v1/creators`, schema: [`app/schemas/creator.py`](../app/schemas/creator.py))
-- `GET /` — list/search creators (filters: location, niche, follower range)
-- `GET /{creator_id}` — public profile
-- `PATCH /{creator_id}` — update own profile
-- `GET /{creator_id}/portfolio`, `POST /{creator_id}/portfolio`, `DELETE /{creator_id}/portfolio/{item_id}` — portfolio CRUD
 
 **Businesses** (`/api/v1/businesses`, schema: [`app/schemas/business.py`](../app/schemas/business.py))
 - `GET /` — list/search
@@ -143,11 +184,15 @@ only the handler + service logic is missing.
 
 ## Testing
 
-- `tests/test_health.py` — the only real automated test (smoke test on `/health`)
-- `test_login.py` / `test_signup.py` at the repo root are **manual debug
-  scripts**, not part of the `tests/` suite and not run in CI — they call
-  Supabase directly and print the result. No automated coverage exists for
-  auth or anything else yet.
+- `tests/` is a real pytest suite with repo-faked unit tests (no Supabase
+  calls): creator service (`test_creator_service.py`), Instagram connect/sync
+  flow (`test_instagram_connect.py`), Instagram auth (`test_instagram_auth.py`),
+  business service, auth service, repositories, dependencies, Meta webhook +
+  signed-request parsing, and a `/health` smoke test. `tests/conftest.py`
+  generates a throwaway `TOKEN_ENCRYPTION_KEY` per run so the suite doesn't
+  depend on local `.env` contents.
+- Standalone smoke scripts (`scripts/test_campaign_flow.py`) require a live
+  server and are **not** part of the `tests/` suite.
 
 > ⚠️ **Security issue found while writing this doc:** `test_login.py` (repo
 > root) hardcoded a real email + password and this repo is **public** on
@@ -162,7 +207,7 @@ Given the dependency chain (a campaign needs a business; an application needs
 a campaign + creator; a collaboration needs an accepted application; chat
 needs a collaboration/application context):
 
-1. Creators + Businesses (read-only profile/discovery first — unblocks everything else and is the simplest slice). Campaigns already leans on these via `businesses.id` resolution and creator-niche matching, so making them real will tighten the campaigns flow too.
+1. ~~Creators~~ — **done.** Businesses (read-only profile/discovery first — unblocks everything else and is the simplest slice). Campaigns already leans on these via `businesses.id` resolution, so making them real will tighten the campaigns flow too.
 2. ~~Campaigns (CRUD + feed)~~ — **done.**
 3. Applications (apply/accept/reject) — campaigns already exposes `GET /campaigns/{id}/applications` and `POST /campaigns/{id}/invite`, so the creator-side application endpoints are the natural next step.
 4. Collaborations (submission/completion lifecycle)

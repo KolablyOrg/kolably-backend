@@ -88,6 +88,9 @@ When making schema changes:
 | 014 | Create notifications table |
 | 015 | Auth user trigger for auto profile creation |
 | 016 | Enable RLS on new tables and revoke public EXECUTE on functions |
+| 017 | Alter creators: add website + following_count (Instagram pre-fill fields) |
+| 018 | Create data_deletion_requests table (Meta Data Deletion Callback log) |
+| 019 | Alter portfolio_items: add title column |
 
 ## Notes
 

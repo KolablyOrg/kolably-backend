@@ -1,4 +1,4 @@
--- Migration: 017 - Create Data Deletion Requests
+-- Migration: 018 - Create Data Deletion Requests
 -- Description: Log table for Meta's Data Deletion Request Callback
 --              (docs/API_REQUIREMENTS.md / Kolably_Legal_Documentation_Kit.docx
 --              Account Deletion & Data Retention Policy §3)

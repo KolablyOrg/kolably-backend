@@ -3,9 +3,16 @@ from datetime import UTC, datetime, timedelta
 from fastapi import HTTPException, status
 
 from app.core.crypto import decrypt_token, encrypt_token
+from app.core.enums import UserRole
+from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.creator_repo import CreatorRepository
-from app.schemas.creator import CreatorResponse
+from app.schemas.creator import (
+    CreatorResponse,
+    CreatorUpdateRequest,
+    PortfolioItemCreateRequest,
+)
 from app.services import instagram_service
+from app.services.campaign_service import _row_to_campaign_response
 
 _TOKEN_REFRESH_THRESHOLD = timedelta(days=10)
 _DEFAULT_TOKEN_LIFETIME_SECONDS = 5_184_000  # ~60 days
@@ -27,6 +34,7 @@ def _row_to_creator_response(row: dict) -> CreatorResponse:
         follower_count=row.get("follower_count"),
         engagement_rate=row.get("engagement_rate"),
         bio=row.get("bio"),
+        instagram_handle=row.get("instagram_handle"),
         created_at=row["created_at"],
         tiktok_handle=row.get("tiktok_handle"),
         instagram_connected=bool(row.get("instagram_user_id") and row.get("instagram_access_token")),
@@ -84,14 +92,151 @@ def _row_to_portfolio_item(row: dict) -> dict:
     return {
         "id": row["id"],
         "creator_id": row["creator_id"],
+        "title": row.get("title"),
         "media_url": row["media_url"],
         "post_link": row.get("post_link"),
-        "caption": row.get("caption"),
         "media_type": row.get("media_type", "photo"),
         "like_count": row.get("like_count"),
         "comment_count": row.get("comment_count"),
         "created_at": row["created_at"],
     }
+
+
+def _ensure_creator_access(creator: dict | None, profile_id: str, role: UserRole) -> dict:
+    """Ownership gate for write paths — the service-role client bypasses RLS,
+    so this check is the only backstop. 404 if the creator doesn't exist
+    (don't leak existence), 403 if it exists but belongs to someone else.
+    Superadmins can act on any creator profile.
+    """
+    if not creator:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator not found",
+        )
+    if role != UserRole.SUPERADMIN and creator["profile_id"] != profile_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not own this creator profile",
+        )
+    return creator
+
+
+async def update_creator(
+    creator_id: str,
+    profile_id: str,
+    role: UserRole,
+    data: CreatorUpdateRequest,
+    *,
+    repo: CreatorRepository | None = None,
+) -> CreatorResponse:
+    """Update a creator's profile (owner or superadmin). Only provided
+    (non-None) fields are written; Instagram-owned fields (website,
+    following_count, engagement stats) are not updatable here — they come
+    from connect/sync."""
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_id(creator_id)
+    _ensure_creator_access(creator, profile_id, role)
+
+    update_data = data.model_dump(exclude_none=True)
+    if not update_data:
+        return _row_to_creator_response(creator)
+
+    updated = await repo.update_creator(creator_id, update_data)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator not found",
+        )
+    return _row_to_creator_response(updated)
+
+
+async def add_portfolio_item(
+    creator_id: str,
+    profile_id: str,
+    role: UserRole,
+    data: PortfolioItemCreateRequest,
+    *,
+    repo: CreatorRepository | None = None,
+) -> dict:
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_id(creator_id)
+    _ensure_creator_access(creator, profile_id, role)
+
+    row = await repo.insert_portfolio_item({
+        "creator_id": creator_id,
+        **data.model_dump(),
+    })
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to add portfolio item",
+        )
+    return _row_to_portfolio_item(row)
+
+
+async def delete_portfolio_item(
+    creator_id: str,
+    item_id: str,
+    profile_id: str,
+    role: UserRole,
+    *,
+    repo: CreatorRepository | None = None,
+) -> None:
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_id(creator_id)
+    _ensure_creator_access(creator, profile_id, role)
+
+    item = await repo.get_portfolio_item(item_id)
+    if not item or item["creator_id"] != creator_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Portfolio item not found",
+        )
+    await repo.delete_portfolio_item(item_id, creator_id)
+
+
+async def save_campaign(
+    profile_id: str,
+    campaign_id: str,
+    *,
+    repo: CreatorRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
+) -> None:
+    """Bookmark a campaign for the current creator. Idempotent — saving an
+    already-saved campaign is a no-op (the PK is (creator_id, campaign_id))."""
+    repo = repo or CreatorRepository()
+    creator_id = await repo.get_id_by_profile_id(profile_id)
+    if not creator_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator profile not found",
+        )
+
+    campaign_repo = campaign_repo or CampaignRepository()
+    if not await campaign_repo.get_by_id(campaign_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found",
+        )
+
+    await repo.save_campaign(creator_id, campaign_id)
+
+
+async def unsave_campaign(
+    profile_id: str,
+    campaign_id: str,
+    *,
+    repo: CreatorRepository | None = None,
+) -> None:
+    """Remove a bookmark. Idempotent — unsaving something not saved is a no-op."""
+    repo = repo or CreatorRepository()
+    creator_id = await repo.get_id_by_profile_id(profile_id)
+    if not creator_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator profile not found",
+        )
+    await repo.unsave_campaign(creator_id, campaign_id)
 
 
 async def get_creator_portfolio(
@@ -164,23 +309,9 @@ async def list_saved_campaigns(
 
     items = []
     for row in rows:
-        campaign = row.get("campaigns", {})
+        campaign = row.get("campaigns")
         if campaign:
-            items.append({
-                "id": campaign.get("id"),
-                "business_id": campaign.get("business_id"),
-                "title": campaign.get("title"),
-                "cover_image_url": campaign.get("cover_image_url"),
-                "objective": campaign.get("objective"),
-                "compensation_type": campaign.get("compensation_type"),
-                "cash_amount_min": campaign.get("cash_amount_min"),
-                "cash_amount_max": campaign.get("cash_amount_max"),
-                "creator_category": campaign.get("creator_category"),
-                "location": campaign.get("location"),
-                "deadline": campaign.get("deadline"),
-                "status": campaign.get("status"),
-                "created_at": campaign.get("created_at"),
-            })
+            items.append(_row_to_campaign_response(campaign))
 
     return {
         "items": items,

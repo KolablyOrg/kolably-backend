@@ -11,9 +11,11 @@ from pydantic import BaseModel, Field
 class CreatorBase(BaseModel):
     name: str
     username: str | None = None
-    city: str
-    niche: str
-    follower_count: int
+    # city/niche/follower_count are nullable in Postgres — Instagram-signup
+    # creators exist before they complete onboarding.
+    city: str | None = None
+    niche: str | None = None
+    follower_count: int | None = None
     bio: str | None = None
     instagram_handle: str | None = None
     engagement_rate: float | None = None
@@ -33,11 +35,14 @@ class CreatorResponse(CreatorBase):
 
 class CreatorUpdateRequest(BaseModel):
     name: str | None = None
+    username: str | None = None
     city: str | None = None
     niche: str | None = None
     follower_count: int | None = None
     bio: str | None = None
     instagram_handle: str | None = None
+    tiktok_handle: str | None = None
+    youtube_handle: str | None = None
     profile_photo_url: str | None = None
 
 
@@ -48,6 +53,17 @@ class CreatorSummary(BaseModel):
     profile_photo_url: str | None = None
     follower_count: int | None = None
     niche: str | None = None
+
+
+class PortfolioItemCreateRequest(BaseModel):
+    """Manual portfolio addition — `media_url` comes from the client uploading
+    directly to Supabase Storage (`portfolio` bucket); the backend only stores
+    the URL string. `like_count`/`comment_count` are Instagram-import-only and
+    are not accepted here."""
+    title: str | None = None
+    media_url: str = Field(..., min_length=1)
+    post_link: str | None = None
+    media_type: Literal["photo", "video"] = "photo"
 
 
 class PortfolioItemResponse(BaseModel):

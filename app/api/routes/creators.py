@@ -2,15 +2,23 @@
 Creator routes — profile, discovery, Instagram integration, dashboard.
 """
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import (
+    get_current_user,
+    require_instagram_connected,
+    require_role,
+)
+from app.core.enums import UserRole
+from app.schemas.campaign import CampaignResponse
 from app.schemas.common import PaginatedResponse
 from app.schemas.creator import (
     CreatorResponse,
     CreatorStatsResponse,
+    CreatorUpdateRequest,
     InstagramAuthUrlResponse,
     InstagramConnectRequest,
+    PortfolioItemCreateRequest,
     PortfolioItemResponse,
 )
 from app.schemas.user import UserInToken
@@ -27,7 +35,7 @@ async def get_creator_stats(
     return await creator_service.get_creator_stats(profile_id=user.id)
 
 
-@router.get("/me/saved-campaigns", response_model=PaginatedResponse)
+@router.get("/me/saved-campaigns", response_model=PaginatedResponse[CampaignResponse])
 async def list_saved_campaigns(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -39,6 +47,35 @@ async def list_saved_campaigns(
         page=page,
         page_size=page_size,
     )
+
+
+@router.post(
+    "/me/saved-campaigns/{campaign_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[
+        Depends(require_role(UserRole.CREATOR)),
+        Depends(require_instagram_connected),
+    ],
+)
+async def save_campaign(
+    campaign_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Save (bookmark) a campaign for the current creator. Idempotent."""
+    await creator_service.save_campaign(profile_id=user.id, campaign_id=campaign_id)
+
+
+@router.delete(
+    "/me/saved-campaigns/{campaign_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
+async def unsave_campaign(
+    campaign_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Remove a saved campaign for the current creator. Idempotent."""
+    await creator_service.unsave_campaign(profile_id=user.id, campaign_id=campaign_id)
 
 
 @router.get("/me/instagram/auth-url", response_model=InstagramAuthUrlResponse)
@@ -119,9 +156,27 @@ async def get_creator(creator_id: str):
     """Get a specific creator's public profile."""
     creator = await creator_service.get_creator_by_id(creator_id)
     if not creator:
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Creator not found")
     return creator
+
+
+@router.patch(
+    "/{creator_id}",
+    response_model=CreatorResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR, UserRole.SUPERADMIN))],
+)
+async def update_creator(
+    creator_id: str,
+    data: CreatorUpdateRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Update a creator's profile (owner or superadmin only)."""
+    return await creator_service.update_creator(
+        creator_id=creator_id,
+        profile_id=user.id,
+        role=user.role,
+        data=data,
+    )
 
 
 @router.get("/{creator_id}/portfolio", response_model=PaginatedResponse[PortfolioItemResponse])
@@ -137,4 +192,44 @@ async def get_creator_portfolio(
         media_type=media_type,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.post(
+    "/{creator_id}/portfolio",
+    response_model=PortfolioItemResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role(UserRole.CREATOR, UserRole.SUPERADMIN))],
+)
+async def add_portfolio_item(
+    creator_id: str,
+    data: PortfolioItemCreateRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Add a portfolio item (owner or superadmin only). `media_url` is the
+    Supabase Storage URL the client uploaded to directly."""
+    return await creator_service.add_portfolio_item(
+        creator_id=creator_id,
+        profile_id=user.id,
+        role=user.role,
+        data=data,
+    )
+
+
+@router.delete(
+    "/{creator_id}/portfolio/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_role(UserRole.CREATOR, UserRole.SUPERADMIN))],
+)
+async def delete_portfolio_item(
+    creator_id: str,
+    item_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Delete a portfolio item (owner or superadmin only)."""
+    await creator_service.delete_portfolio_item(
+        creator_id=creator_id,
+        item_id=item_id,
+        profile_id=user.id,
+        role=user.role,
     )
