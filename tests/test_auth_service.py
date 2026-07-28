@@ -244,6 +244,54 @@ async def test_google_auth_forwards_nonce_when_provided(monkeypatch):
     }
 
 
+class FakeAdminAuthForLogout:
+    def __init__(self, error=None):
+        self._error = error
+        self.sign_out_calls = []
+
+    async def sign_out(self, jwt, scope):
+        self.sign_out_calls.append((jwt, scope))
+        if self._error:
+            raise self._error
+
+
+def _patch_admin_supabase_for_logout(monkeypatch, admin_auth):
+    class FakeAdminGoTrue:
+        def __init__(self, admin):
+            self.admin = admin
+
+    class FakeAdminSupabaseClient:
+        def __init__(self, admin):
+            self.auth = FakeAdminGoTrue(admin)
+
+    async def fake_get_supabase_admin_client():
+        return FakeAdminSupabaseClient(admin_auth)
+
+    monkeypatch.setattr(auth_service, "get_supabase_admin_client", fake_get_supabase_admin_client)
+
+
+async def test_logout_revokes_token_via_admin_sign_out(monkeypatch):
+    """Regression: auth.sign_out() takes no token arg and only signs out the
+    client's own (always empty) session — admin.sign_out(jwt, scope) is the
+    one that actually revokes an arbitrary token."""
+    admin_auth = FakeAdminAuthForLogout()
+    _patch_admin_supabase_for_logout(monkeypatch, admin_auth)
+
+    result = await auth_service.logout("some-access-token")
+
+    assert result == {"message": "Logged out successfully"}
+    assert admin_auth.sign_out_calls == [("some-access-token", "global")]
+
+
+async def test_logout_swallows_auth_api_error(monkeypatch):
+    admin_auth = FakeAdminAuthForLogout(error=AuthApiError("invalid token", 401, None))
+    _patch_admin_supabase_for_logout(monkeypatch, admin_auth)
+
+    result = await auth_service.logout("already-expired-token")
+
+    assert result == {"message": "Logged out successfully"}
+
+
 async def test_google_auth_omits_nonce_when_not_provided(monkeypatch):
     user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
     gotrue = FakeGoTrue(response=FakeAuthResponse(user, FakeSession()))

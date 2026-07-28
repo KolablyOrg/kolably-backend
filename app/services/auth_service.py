@@ -510,10 +510,18 @@ async def refresh_session(refresh_token: str) -> dict:
 
 
 async def logout(access_token: str) -> dict:
-    supabase = await get_supabase_client()
+    """Revoke the given access token.
+
+    `supabase.auth.sign_out()` only signs out the *client instance's own*
+    loaded session — it takes no token argument, and `get_supabase_client()`
+    always returns a fresh, session-less client, so it can never revoke the
+    caller's token. `admin.sign_out(jwt, ...)` is the one that actually
+    revokes an arbitrary token passed in directly.
+    """
+    supabase = await get_supabase_admin_client()
 
     try:
-        await supabase.auth.sign_out(access_token)
+        await supabase.auth.admin.sign_out(access_token, "global")
     except AuthApiError:
         pass
 
