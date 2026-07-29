@@ -278,6 +278,40 @@ async def test_update_creator_allowed_for_superadmin():
     assert result.bio == "edited by admin"
 
 
+async def test_update_creator_rejects_follower_count_when_instagram_connected():
+    """Regression: CREATOR_ROW has instagram_access_token set (connected) —
+    follower_count is Instagram-verified once connected, so self-editing it
+    must be rejected rather than silently overwriting the verified stat."""
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.update_creator(
+            creator_id="c1",
+            profile_id="p1",
+            role=UserRole.CREATOR,
+            data=CreatorUpdateRequest(follower_count=999999),
+            repo=repo,
+        )
+
+    assert exc_info.value.status_code == 422
+    assert repo.updated_with is None
+
+
+async def test_update_creator_allows_follower_count_when_not_connected():
+    repo = FakeCreatorRepo(row={**CREATOR_ROW, "instagram_access_token": None})
+
+    result = await creator_service.update_creator(
+        creator_id="c1",
+        profile_id="p1",
+        role=UserRole.CREATOR,
+        data=CreatorUpdateRequest(follower_count=1500),
+        repo=repo,
+    )
+
+    assert result.follower_count == 1500
+    assert repo.updated_with == {"follower_count": 1500}
+
+
 async def test_update_creator_empty_payload_returns_current_without_write():
     repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
 
