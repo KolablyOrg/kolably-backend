@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     # ── App ───────────────────────────────────────────
     APP_ENV: str = "development"
     DEBUG: bool = True
+    # This backend's own public HTTPS origin — Instagram's OAuth product
+    # rejects any redirect_uri that isn't https://, so mobile clients can't
+    # register their own exp://.../mobile://... scheme with Meta directly.
+    # Instead every Instagram OAuth flow redirects here, and this backend
+    # relays the result on to whatever URI the client actually wants
+    # (see app/api/routes/auth.py:instagram_oauth_callback).
+    PUBLIC_API_BASE_URL: str = "https://api.kolably.com"
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",

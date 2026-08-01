@@ -14,8 +14,10 @@ connect flow.
 from urllib.parse import urlencode
 
 import httpx
+from cryptography.fernet import InvalidToken
 
 from app.core.config import settings
+from app.core.crypto import decrypt_token, encrypt_token
 from app.core.exceptions import ExternalServiceError
 
 _AUTHORIZE_URL = "https://www.instagram.com/oauth/authorize"
@@ -34,7 +36,7 @@ _MEDIA_FIELDS = (
 _INSIGHT_METRICS = ["reach", "likes", "comments", "shares", "saved", "total_interactions"]
 
 
-def build_authorize_url(redirect_uri: str) -> str:
+def build_authorize_url(redirect_uri: str, state: str | None = None) -> str:
     """The `instagram.com/oauth/authorize` URL for the client to redirect to."""
     params = {
         "client_id": settings.INSTAGRAM_APP_ID,
@@ -42,7 +44,38 @@ def build_authorize_url(redirect_uri: str) -> str:
         "scope": _SCOPES,
         "response_type": "code",
     }
+    if state:
+        params["state"] = state
     return f"{_AUTHORIZE_URL}?{urlencode(params)}"
+
+
+def relay_redirect_uri() -> str:
+    """The single, fixed HTTPS redirect_uri every Instagram OAuth flow uses —
+    Instagram rejects anything else, so a mobile app's own exp://.../mobile://
+    scheme can never be registered with Meta directly. This backend relays
+    the result on to the caller's real destination (see `encode_app_redirect`
+    / the `/auth/instagram/callback` route)."""
+    return f"{settings.PUBLIC_API_BASE_URL}/api/v1/auth/instagram/callback"
+
+
+def encode_app_redirect(app_redirect_uri: str) -> str:
+    """Pack the caller's real (non-https) redirect target into an encrypted
+    `state` value — only this backend can produce or read it, so it can't be
+    abused as an open redirect by a crafted `state` param."""
+    return encrypt_token(app_redirect_uri)
+
+
+def decode_app_redirect(state: str) -> str | None:
+    try:
+        return decrypt_token(state)
+    except InvalidToken:
+        return None
+
+
+def build_authorize_url_with_relay(app_redirect_uri: str) -> str:
+    """Authorize URL using the fixed relay redirect_uri, with the caller's
+    real destination packed into `state`."""
+    return build_authorize_url(relay_redirect_uri(), state=encode_app_redirect(app_redirect_uri))
 
 
 def build_profile_prefill(ig_profile: dict, engagement_rate: float | None) -> dict:

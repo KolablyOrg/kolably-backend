@@ -388,8 +388,14 @@ async def instagram_auth(
     refreshes the stats subset, matching the connect-once/sync-stats-only
     split already documented for `/creators/me/instagram/sync` in
     `API_REQUIREMENTS.md` §2.
+
+    `data.redirect_uri` is accepted for API compatibility but unused — see
+    `creator_service.connect_instagram` for why the token exchange always
+    uses the fixed relay URL instead.
     """
-    short_lived = await instagram_service.exchange_code_for_token(data.code, data.redirect_uri)
+    short_lived = await instagram_service.exchange_code_for_token(
+        data.code, instagram_service.relay_redirect_uri()
+    )
     long_lived = await instagram_service.exchange_for_long_lived_token(short_lived["access_token"])
     access_token = long_lived["access_token"]
 

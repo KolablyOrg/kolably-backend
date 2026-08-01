@@ -12,7 +12,7 @@ from fastapi import HTTPException
 
 from app.core.crypto import decrypt_token, encrypt_token
 from app.models.creator import Creator, PortfolioItem
-from app.services import creator_service
+from app.services import creator_service, instagram_service
 
 NOW = datetime(2026, 7, 27, 12, 0, 0, tzinfo=UTC)
 
@@ -153,6 +153,28 @@ async def test_get_instagram_auth_url_includes_redirect_and_scope():
     assert "instagram.com/oauth/authorize" in result["url"]
     assert "redirect_uri=" in result["url"]
     assert "instagram_business_manage_insights" in result["url"]
+
+
+async def test_get_instagram_auth_url_uses_fixed_relay_not_client_uri():
+    """Regression: Instagram rejects any redirect_uri that isn't https —
+    a client's own exp://.../mobile://... scheme can never be registered
+    with Meta, so the authorize URL must always point at this backend's
+    fixed relay endpoint instead, with the client's real destination
+    packed into `state`."""
+    from urllib.parse import parse_qs, urlparse
+
+    app_redirect = "exp://192.168.1.8:3000/--/auth/instagram/callback"
+    result = await creator_service.get_instagram_auth_url(app_redirect)
+
+    query = parse_qs(urlparse(result["url"]).query)
+    assert query["redirect_uri"][0] == instagram_service.relay_redirect_uri()
+    assert app_redirect not in result["url"]
+    assert instagram_service.decode_app_redirect(query["state"][0]) == app_redirect
+
+
+def test_decode_app_redirect_rejects_tampered_state():
+    real_state = instagram_service.encode_app_redirect("mobile://auth/instagram/callback")
+    assert instagram_service.decode_app_redirect(real_state[:-1] + "x") is None
 
 
 async def test_connect_instagram_prefills_profile(monkeypatch):

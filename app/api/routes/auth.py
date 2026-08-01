@@ -4,7 +4,8 @@ Authentication routes — backend facade over Supabase Auth.
 Frontend calls these endpoints only. Supabase is a hidden implementation detail.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.dependencies import get_current_user
@@ -24,7 +25,7 @@ from app.schemas.auth import (
     UpdateProfileRequest,
 )
 from app.schemas.user import UserInToken
-from app.services import auth_service
+from app.services import auth_service, instagram_service
 
 router = APIRouter()
 security = HTTPBearer()
@@ -71,6 +72,37 @@ async def instagram_auth(data: InstagramAuthRequest):
     "connect Instagram" onboarding step needed, unlike Google/email signups.
     """
     return await auth_service.instagram_auth(data)
+
+
+@router.get("/instagram/login-url")
+async def get_instagram_login_url(
+    redirect_uri: str = Query(..., description="Where the client wants the flow to end up (its own app-scheme URI)"),
+):
+    """Public — no session exists yet. Instagram only accepts a fixed HTTPS
+    redirect_uri (see `instagram_service.relay_redirect_uri`), so this
+    returns an authorize URL that relays back to the client's real
+    `redirect_uri` via `/auth/instagram/callback`."""
+    return {"url": instagram_service.build_authorize_url_with_relay(redirect_uri)}
+
+
+@router.get("/instagram/callback")
+async def instagram_oauth_callback(
+    code: str | None = Query(None),
+    state: str | None = Query(None),
+    error: str | None = Query(None),
+):
+    """The single fixed HTTPS redirect_uri every Instagram OAuth flow (both
+    login/signup and the creator-connect flow) actually gives to Instagram.
+    Instagram redirects here; this relays the result on to whatever URI the
+    client packed into `state` when it started the flow."""
+    app_redirect_uri = instagram_service.decode_app_redirect(state) if state else None
+    if not app_redirect_uri:
+        return {"detail": "Invalid or expired Instagram authentication request."}
+
+    separator = "&" if "?" in app_redirect_uri else "?"
+    if code:
+        return RedirectResponse(url=f"{app_redirect_uri}{separator}code={code}")
+    return RedirectResponse(url=f"{app_redirect_uri}{separator}error={error or 'access_denied'}")
 
 
 @router.post("/logout", response_model=MessageResponse)

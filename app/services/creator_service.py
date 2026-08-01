@@ -346,7 +346,10 @@ def _not_connected() -> HTTPException:
 
 
 async def get_instagram_auth_url(redirect_uri: str) -> dict:
-    return {"url": instagram_service.build_authorize_url(redirect_uri)}
+    """`redirect_uri` here is where the *client* wants the flow to end up
+    (its own exp://.../mobile://... scheme) — Instagram itself only ever
+    sees this backend's fixed HTTPS relay URL (see `build_authorize_url_with_relay`)."""
+    return {"url": instagram_service.build_authorize_url_with_relay(redirect_uri)}
 
 
 async def connect_instagram(
@@ -359,13 +362,19 @@ async def connect_instagram(
     """Exchange the OAuth `code`, pre-fill the profile from Instagram, and store
     the token. One-time full pre-fill — same fields `/auth/instagram` signup
     populates for a brand-new creator (see `instagram_service.build_profile_prefill`).
+
+    `redirect_uri` is accepted for API compatibility but unused: Instagram's
+    token endpoint requires the exact redirect_uri used at the authorize
+    step, which was always the fixed relay URL, never the client's own.
     """
     repo = repo or CreatorRepository()
     creator = await repo.get_by_profile_id(profile_id)
     if not creator:
         raise _no_creator_profile()
 
-    short_lived = await instagram_service.exchange_code_for_token(code, redirect_uri)
+    short_lived = await instagram_service.exchange_code_for_token(
+        code, instagram_service.relay_redirect_uri()
+    )
     long_lived = await instagram_service.exchange_for_long_lived_token(short_lived["access_token"])
     access_token = long_lived["access_token"]
 
