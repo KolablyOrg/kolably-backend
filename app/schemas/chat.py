@@ -4,7 +4,7 @@ Chat / messaging Pydantic schemas.
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ParticipantSummary(BaseModel):
@@ -14,7 +14,14 @@ class ParticipantSummary(BaseModel):
 
 
 class MessageCreateRequest(BaseModel):
-    content: str
+    content: str = Field(..., min_length=1)
+
+
+class ConversationCreateRequest(BaseModel):
+    """Get-or-create: returns the existing conversation between the two
+    participants for `collaboration_id` if one exists, else creates one."""
+    participant_id: str
+    collaboration_id: str | None = None
 
 
 class MessageResponse(BaseModel):

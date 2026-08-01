@@ -55,3 +55,13 @@ class CollaborationRepository(BaseRepository):
             columns="*",
             filters={"collaboration_id": collaboration_id},
         )
+
+    async def insert_collaboration(self, data: dict) -> Collaboration | None:
+        rows = await self.insert("collaborations", data)
+        return Collaboration.from_row(rows[0]) if rows else None
+
+    async def update_status(
+        self, collaboration_id: str, data: dict
+    ) -> Collaboration | None:
+        rows = await self.update("collaborations", data, {"id": collaboration_id})
+        return Collaboration.from_row(rows[0]) if rows else None

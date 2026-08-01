@@ -6,6 +6,7 @@ from app.core.enums import (
     ApplicationDirection,
     ApplicationStatus,
     CampaignStatus,
+    NotificationType,
 )
 from app.models.campaign import Campaign
 from app.repositories.application_repo import ApplicationRepository
@@ -24,6 +25,7 @@ from app.schemas.campaign import (
 )
 from app.schemas.creator import CreatorSummary
 from app.schemas.user import UserInToken
+from app.services import notification_service
 
 
 def _campaign_to_response(campaign: Campaign) -> CampaignResponse:
@@ -426,7 +428,7 @@ async def invite_creator(
 ) -> ApplicationResponse:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     creator_repo = creator_repo or CreatorRepository()
     creator = await creator_repo.get_by_id(creator_id)
@@ -458,6 +460,14 @@ async def invite_creator(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create invite",
         )
+
+    await notification_service.create_notification(
+        profile_id=creator.profile_id,
+        type=NotificationType.CAMPAIGN_INVITE_RECEIVED,
+        title="You've been invited!",
+        body=f'A business invited you to apply for "{campaign.title}".',
+        related_id=application.id,
+    )
 
     return ApplicationResponse(
         id=application.id,

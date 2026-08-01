@@ -13,40 +13,35 @@ from app.core.enums import NotificationType
 class Notification:
     """Notification domain model — internal representation."""
     id: str
-    user_id: str  # profiles.id
+    profile_id: str  # profiles.id
     type: NotificationType
     title: str
     body: str
-    data: dict[str, Any] = field(default_factory=dict)
-    read_at: datetime | None = None
+    related_id: str | None = None
+    is_read: bool = False
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Notification":
-        import json
-        data = row.get("data") or {}
-        if isinstance(data, str):
-            data = json.loads(data) if data else {}
-
         return cls(
             id=row["id"],
-            user_id=row["user_id"],
+            profile_id=row["profile_id"],
             type=NotificationType(row["type"]),
             title=row["title"],
             body=row["body"],
-            data=data,
-            read_at=row.get("read_at"),
+            related_id=row.get("related_id"),
+            is_read=row.get("is_read", False),
             created_at=row["created_at"],
         )
 
     def to_row(self) -> dict[str, Any]:
         return {
             "id": self.id,
-            "user_id": self.user_id,
+            "profile_id": self.profile_id,
             "type": self.type.value,
             "title": self.title,
             "body": self.body,
-            "data": self.data,
-            "read_at": self.read_at,
+            "related_id": self.related_id,
+            "is_read": self.is_read,
             "created_at": self.created_at,
         }

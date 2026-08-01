@@ -9,11 +9,16 @@ from typing import Any
 
 @dataclass
 class Conversation:
-    """Conversation domain model — internal representation."""
+    """Conversation domain model — internal representation.
+
+    `conversations` itself only has `id`/`collaboration_id`/`created_at` —
+    participants, last message, and unread count live in separate tables
+    (`conversation_participants`, `messages`, `conversation_reads`) and are
+    filled in by the service layer after construction, not read from a row.
+    """
     id: str
     collaboration_id: str | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
-    # Joined fields — populated when the query selects them
     participant_ids: list[str] = field(default_factory=list)
     last_message: str | None = None
     last_message_at: datetime | None = None
@@ -25,10 +30,6 @@ class Conversation:
             id=row["id"],
             collaboration_id=row.get("collaboration_id"),
             created_at=row["created_at"],
-            participant_ids=row.get("participant_ids", []),
-            last_message=row.get("last_message"),
-            last_message_at=row.get("last_message_at"),
-            unread_count=row.get("unread_count", 0),
         )
 
     def to_row(self) -> dict[str, Any]:

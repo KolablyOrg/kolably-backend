@@ -31,3 +31,22 @@ class NotificationRepository(BaseRepository):
         )
         result = await self._execute(query)
         return result.count or 0
+
+    async def insert_notification(self, data: dict) -> Notification | None:
+        rows = await self.insert("notifications", data)
+        return Notification.from_row(rows[0]) if rows else None
+
+    async def mark_read(self, notification_id: str, profile_id: str) -> Notification | None:
+        rows = await self.update(
+            "notifications",
+            {"is_read": True},
+            {"id": notification_id, "profile_id": profile_id},
+        )
+        return Notification.from_row(rows[0]) if rows else None
+
+    async def mark_all_read(self, profile_id: str) -> None:
+        await self.update(
+            "notifications",
+            {"is_read": True},
+            {"profile_id": profile_id, "is_read": False},
+        )

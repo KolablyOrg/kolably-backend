@@ -1,0 +1,284 @@
+"""
+Unit tests for chat_service — repositories injected as fakes, no Supabase.
+
+Chat spans four tables (conversations, conversation_participants, messages,
+conversation_reads) with no denormalized columns on `conversations` itself,
+so these tests exercise the service's in-memory joining of that data.
+"""
+
+import pytest
+from fastapi import HTTPException
+
+from app.models.business import Business
+from app.models.chat import Conversation, Message
+from app.models.creator import Creator
+from app.models.user import UserProfile
+from app.services import chat_service
+
+CREATOR_PROFILE_ROW = {
+    "id": "p-creator",
+    "auth_id": "auth-creator",
+    "email": "creator@example.com",
+    "role": "creator",
+    "created_at": "2024-01-01T00:00:00+00:00",
+}
+
+BUSINESS_PROFILE_ROW = {
+    "id": "p-business",
+    "auth_id": "auth-business",
+    "email": "business@example.com",
+    "role": "business",
+    "created_at": "2024-01-01T00:00:00+00:00",
+}
+
+CREATOR_ROW = {
+    "id": "c1",
+    "profile_id": "p-creator",
+    "name": "Alice",
+    "profile_photo_url": "https://example.com/alice.jpg",
+    "created_at": "2024-01-01T00:00:00+00:00",
+}
+
+BUSINESS_ROW = {
+    "id": "b1",
+    "profile_id": "p-business",
+    "business_name": "Acme Co",
+    "logo_url": "https://example.com/acme.png",
+    "city": "Springfield",
+    "category": "food",
+    "created_at": "2024-01-01T00:00:00+00:00",
+}
+
+
+class FakeProfileRepo:
+    def __init__(self, rows=None):
+        self._by_id = {r["id"]: r for r in (rows or [CREATOR_PROFILE_ROW, BUSINESS_PROFILE_ROW])}
+
+    async def get_by_id(self, profile_id: str):
+        row = self._by_id.get(profile_id)
+        return UserProfile.from_row(row) if row else None
+
+
+class FakeCreatorRepo:
+    async def get_by_profile_id(self, profile_id: str):
+        if profile_id == "p-creator":
+            return Creator.from_row(CREATOR_ROW)
+        return None
+
+
+class FakeBusinessRepo:
+    async def get_by_profile_id(self, profile_id: str):
+        if profile_id == "p-business":
+            return Business.from_row(BUSINESS_ROW)
+        return None
+
+
+class FakeChatRepo:
+    def __init__(
+        self,
+        conversation_id="conv1",
+        participants=("p-creator", "p-business"),
+        messages=(),
+        collaboration_id=None,
+    ):
+        self.conversations = {
+            conversation_id: Conversation.from_row({
+                "id": conversation_id,
+                "collaboration_id": collaboration_id,
+                "created_at": "2024-01-01T00:00:00+00:00",
+            })
+        }
+        self.participants = {conversation_id: list(participants)}
+        self.messages = {conversation_id: list(messages)}
+        self.reads: dict[tuple[str, str], str] = {}
+        self.added_participants = []
+        self.inserted_messages = []
+        self.inserted_conversations = []
+
+    async def list_conversation_ids_for_profile(self, profile_id: str):
+        return [cid for cid, members in self.participants.items() if profile_id in members]
+
+    async def get_conversations_by_ids(self, ids):
+        return [self.conversations[i] for i in ids if i in self.conversations]
+
+    async def get_conversation(self, conversation_id: str):
+        return self.conversations.get(conversation_id)
+
+    async def get_participant_ids(self, conversation_id: str):
+        return list(self.participants.get(conversation_id, []))
+
+    async def add_participants(self, conversation_id: str, profile_ids):
+        existing = set(self.participants.setdefault(conversation_id, []))
+        for pid in profile_ids:
+            if pid not in existing:
+                self.participants[conversation_id].append(pid)
+                existing.add(pid)
+        self.added_participants.append((conversation_id, list(profile_ids)))
+
+    async def find_conversation_by_collaboration(self, collaboration_id: str):
+        for conv in self.conversations.values():
+            if conv.collaboration_id == collaboration_id:
+                return conv
+        return None
+
+    async def find_shared_conversation_without_collaboration(self, profile_id, other_profile_id):
+        for cid, members in self.participants.items():
+            conv = self.conversations[cid]
+            if conv.collaboration_id is None and profile_id in members and other_profile_id in members:
+                return conv
+        return None
+
+    async def insert_conversation(self, collaboration_id):
+        new_id = f"conv-new-{len(self.conversations) + 1}"
+        conv = Conversation.from_row({
+            "id": new_id,
+            "collaboration_id": collaboration_id,
+            "created_at": "2024-01-01T00:00:00+00:00",
+        })
+        self.conversations[new_id] = conv
+        self.participants[new_id] = []
+        self.inserted_conversations.append(new_id)
+        return conv
+
+    async def list_messages(self, conversation_id: str):
+        return list(self.messages.get(conversation_id, []))
+
+    async def get_last_message(self, conversation_id: str):
+        msgs = self.messages.get(conversation_id, [])
+        return msgs[-1] if msgs else None
+
+    async def insert_message(self, data: dict):
+        msg = Message.from_row({
+            **data,
+            "id": f"msg{len(self.inserted_messages) + 1}",
+            "created_at": "2024-01-02T00:00:00+00:00",
+        })
+        self.messages.setdefault(data["conversation_id"], []).append(msg)
+        self.inserted_messages.append(msg)
+        return msg
+
+    async def upsert_read(self, conversation_id: str, profile_id: str):
+        self.reads[(conversation_id, profile_id)] = "2024-01-02T00:00:00+00:00"
+
+    async def get_last_read_at(self, conversation_id: str, profile_id: str):
+        return self.reads.get((conversation_id, profile_id))
+
+    async def count_unread(self, conversation_id: str, profile_id: str):
+        last_read = self.reads.get((conversation_id, profile_id))
+        count = 0
+        for msg in self.messages.get(conversation_id, []):
+            if msg.sender_id == profile_id:
+                continue
+            if last_read is None or msg.created_at > last_read:
+                count += 1
+        return count
+
+
+def _repos():
+    return dict(profile_repo=FakeProfileRepo(), creator_repo=FakeCreatorRepo(), business_repo=FakeBusinessRepo())
+
+
+async def test_list_conversations_resolves_other_participant_and_last_message():
+    repo = FakeChatRepo(messages=[Message.from_row({
+        "id": "m1", "conversation_id": "conv1", "sender_id": "p-business",
+        "content": "Hi there!", "created_at": "2024-01-01T12:00:00+00:00",
+    })])
+
+    result = await chat_service.list_conversations("p-creator", repo=repo, **_repos())
+
+    assert len(result) == 1
+    conv = result[0]
+    assert conv["other_participant"]["name"] == "Acme Co"
+    assert conv["other_participant"]["avatar_url"] == "https://example.com/acme.png"
+    assert conv["last_message"] == "Hi there!"
+    assert conv["unread_count"] == 1  # from business, never read by creator
+
+
+async def test_get_conversation_marks_read_and_returns_messages():
+    repo = FakeChatRepo(messages=[Message.from_row({
+        "id": "m1", "conversation_id": "conv1", "sender_id": "p-business",
+        "content": "Hello", "created_at": "2024-01-01T12:00:00+00:00",
+    })])
+
+    result = await chat_service.get_conversation("conv1", "p-creator", repo=repo, **_repos())
+
+    assert len(result["messages"]) == 1
+    assert ("conv1", "p-creator") in repo.reads
+
+
+async def test_get_conversation_rejects_non_participant():
+    repo = FakeChatRepo()
+    with pytest.raises(HTTPException) as exc:
+        await chat_service.get_conversation("conv1", "p-stranger", repo=repo, **_repos())
+    assert exc.value.status_code == 403
+
+
+async def test_get_conversation_404_when_missing():
+    repo = FakeChatRepo()
+    with pytest.raises(HTTPException) as exc:
+        await chat_service.get_conversation("missing", "p-creator", repo=repo, **_repos())
+    assert exc.value.status_code == 404
+
+
+async def test_send_message_inserts_and_marks_sender_read(monkeypatch):
+    notified = []
+
+    async def _fake_create_notification(profile_id, type, title, body, related_id=None, **kwargs):
+        notified.append(profile_id)
+
+    monkeypatch.setattr(chat_service.notification_service, "create_notification", _fake_create_notification)
+
+    repo = FakeChatRepo()
+    result = await chat_service.send_message("conv1", "p-creator", "Hey!", repo=repo)
+
+    assert result["content"] == "Hey!"
+    assert result["sender_id"] == "p-creator"
+    assert ("conv1", "p-creator") in repo.reads
+    assert notified == ["p-business"]
+
+
+async def test_send_message_rejects_non_participant():
+    repo = FakeChatRepo()
+    with pytest.raises(HTTPException) as exc:
+        await chat_service.send_message("conv1", "p-stranger", "Hey!", repo=repo)
+    assert exc.value.status_code == 403
+
+
+async def test_get_or_create_conversation_finds_existing_by_collaboration():
+    repo = FakeChatRepo(collaboration_id="collab1")
+
+    resp, created = await chat_service.get_or_create_conversation(
+        "p-creator", "p-business", "collab1", repo=repo, **_repos()
+    )
+
+    assert created is False
+    assert resp["id"] == "conv1"
+    assert repo.inserted_conversations == []
+
+
+async def test_get_or_create_conversation_creates_new_when_none_exists():
+    repo = FakeChatRepo(participants=())  # no existing conversation has these participants
+    repo.participants = {}
+    repo.conversations = {}
+
+    resp, created = await chat_service.get_or_create_conversation(
+        "p-creator", "p-business", None, repo=repo, **_repos()
+    )
+
+    assert created is True
+    assert len(repo.inserted_conversations) == 1
+    assert set(repo.participants[resp["id"]]) == {"p-creator", "p-business"}
+
+
+async def test_get_or_create_conversation_rejects_self():
+    repo = FakeChatRepo()
+    with pytest.raises(HTTPException) as exc:
+        await chat_service.get_or_create_conversation("p-creator", "p-creator", None, repo=repo, **_repos())
+    assert exc.value.status_code == 400
+
+
+async def test_get_or_create_conversation_404s_on_unknown_participant():
+    repo = FakeChatRepo()
+    with pytest.raises(HTTPException) as exc:
+        await chat_service.get_or_create_conversation("p-creator", "p-ghost", None, repo=repo, **_repos())
+    assert exc.value.status_code == 404

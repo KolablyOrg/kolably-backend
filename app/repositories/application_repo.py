@@ -85,3 +85,12 @@ class ApplicationRepository(BaseRepository):
     async def insert_application(self, data: dict) -> CampaignApplication | None:
         rows = await self.insert("campaign_applications", data)
         return CampaignApplication.from_row(rows[0]) if rows else None
+
+    async def update_status(self, application_id: str, status: str) -> CampaignApplication | None:
+        rows = await self.update(
+            "campaign_applications", {"status": status}, {"id": application_id}
+        )
+        return CampaignApplication.from_row(rows[0]) if rows else None
+
+    async def delete_application(self, application_id: str) -> None:
+        await self.delete("campaign_applications", {"id": application_id})

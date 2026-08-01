@@ -5,7 +5,7 @@ Notification routes.
 from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user
-from app.schemas.common import PaginatedResponse
+from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.notification import NotificationResponse, UnreadCountResponse
 from app.schemas.user import UserInToken
 from app.services import notification_service
@@ -33,3 +33,23 @@ async def get_unread_count(
 ):
     """Get unread count for notifications."""
     return await notification_service.get_unread_count(profile_id=user.id)
+
+
+@router.patch("/{notification_id}/read", response_model=NotificationResponse)
+async def mark_notification_read(
+    notification_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Mark a single notification as read."""
+    return await notification_service.mark_notification_read(
+        notification_id=notification_id,
+        profile_id=user.id,
+    )
+
+
+@router.patch("/read-all", response_model=MessageResponse)
+async def mark_all_notifications_read(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Mark all of the current user's notifications as read."""
+    return await notification_service.mark_all_notifications_read(profile_id=user.id)
