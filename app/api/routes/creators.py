@@ -18,6 +18,8 @@ from app.schemas.creator import (
     CreatorUpdateRequest,
     InstagramAuthUrlResponse,
     InstagramConnectRequest,
+    InstagramImportRequest,
+    InstagramMediaPreviewItem,
     PortfolioItemCreateRequest,
     PortfolioItemResponse,
 )
@@ -121,12 +123,25 @@ async def disconnect_instagram(
     await creator_service.disconnect_instagram(profile_id=user.id)
 
 
-@router.post("/me/instagram/import-portfolio", response_model=list[PortfolioItemResponse])
-async def import_instagram_portfolio(
+@router.get("/me/instagram/media-preview", response_model=list[InstagramMediaPreviewItem])
+async def preview_instagram_media(
     user: UserInToken = Depends(get_current_user),
 ):
-    """Import recent Instagram media into the creator's portfolio."""
-    return await creator_service.import_instagram_portfolio(profile_id=user.id)
+    """Preview recent Instagram media without importing it, so the creator
+    can choose which posts/reels to add to their portfolio."""
+    return await creator_service.preview_instagram_media(profile_id=user.id)
+
+
+@router.post("/me/instagram/import-portfolio", response_model=list[PortfolioItemResponse])
+async def import_instagram_portfolio(
+    data: InstagramImportRequest = InstagramImportRequest(),
+    user: UserInToken = Depends(get_current_user),
+):
+    """Import Instagram media into the creator's portfolio — specific items
+    if `media_ids` is given, otherwise everything."""
+    return await creator_service.import_instagram_portfolio(
+        profile_id=user.id, media_ids=data.media_ids
+    )
 
 
 @router.get("/", response_model=PaginatedResponse[CreatorResponse])

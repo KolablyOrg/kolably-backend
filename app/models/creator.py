@@ -123,8 +123,14 @@ class Creator:
         }
 
     def to_public_row(self) -> dict[str, Any]:
-        """Convert to dict for public responses (excludes sensitive fields)."""
+        """Convert to dict for public responses (excludes sensitive fields).
+
+        `instagram_handle` is a free-text field self-reported at signup, so
+        its presence alone doesn't mean Instagram is actually connected —
+        callers need the real signal before we strip `instagram_user_id`.
+        """
         row = self.to_row()
+        row["instagram_connected"] = bool(row.get("instagram_user_id"))
         row.pop("instagram_access_token", None)
         row.pop("instagram_token_expires_at", None)
         row.pop("instagram_user_id", None)

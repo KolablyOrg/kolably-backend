@@ -309,6 +309,54 @@ async def test_import_instagram_portfolio_inserts_items(monkeypatch):
     assert repo.portfolio_inserted[0]["creator_id"] == "creator-1"
 
 
+async def test_preview_instagram_media_does_not_insert_anything(monkeypatch):
+    _patch_instagram_service(monkeypatch)
+    connected = {**CREATOR_ROW, "instagram_access_token": encrypt_token("some-tok")}
+    repo = FakeCreatorRepo(creator=connected)
+
+    items = await creator_service.preview_instagram_media(profile_id="profile-1", repo=repo)
+
+    assert len(items) == 1
+    assert items[0]["id"] == IG_MEDIA[0]["id"]
+    assert items[0]["media_url"] == IG_MEDIA[0]["media_url"]
+    assert items[0]["media_type"] == "video"
+    assert repo.portfolio_inserted is None  # preview never writes to the portfolio
+
+
+async def test_preview_instagram_media_not_connected_422():
+    repo = FakeCreatorRepo(creator=dict(CREATOR_ROW))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.preview_instagram_media(profile_id="profile-1", repo=repo)
+    assert exc_info.value.status_code == 422
+
+
+async def test_import_instagram_portfolio_imports_only_selected_media_ids(monkeypatch):
+    _patch_instagram_service(monkeypatch)
+    connected = {**CREATOR_ROW, "instagram_access_token": encrypt_token("some-tok")}
+    repo = FakeCreatorRepo(creator=connected)
+
+    items = await creator_service.import_instagram_portfolio(
+        profile_id="profile-1", media_ids=[IG_MEDIA[0]["id"]], repo=repo
+    )
+
+    assert len(items) == 1
+    assert repo.portfolio_inserted[0]["creator_id"] == "creator-1"
+
+
+async def test_import_instagram_portfolio_filters_out_unselected_media_ids(monkeypatch):
+    _patch_instagram_service(monkeypatch)
+    connected = {**CREATOR_ROW, "instagram_access_token": encrypt_token("some-tok")}
+    repo = FakeCreatorRepo(creator=connected)
+
+    items = await creator_service.import_instagram_portfolio(
+        profile_id="profile-1", media_ids=["some-other-id-not-in-media"], repo=repo
+    )
+
+    assert items == []
+    assert repo.portfolio_inserted is None
+
+
 async def test_import_instagram_portfolio_not_connected_422():
     repo = FakeCreatorRepo(creator=dict(CREATOR_ROW))
 
@@ -316,3 +364,17 @@ async def test_import_instagram_portfolio_not_connected_422():
         await creator_service.import_instagram_portfolio(profile_id="profile-1", repo=repo)
 
     assert exc_info.value.status_code == 422
+
+
+def test_to_public_row_reports_instagram_connected_from_user_id():
+    """Regression: to_public_row previously stripped instagram_user_id (the
+    only real 'is Instagram connected' signal) without replacing it with
+    anything — clients were left with only the self-reported
+    instagram_handle text field, which is set at signup regardless of
+    whether Instagram was ever actually connected."""
+    connected = _make_creator({**CREATOR_ROW, "instagram_user_id": "999"})
+    not_connected = _make_creator(dict(CREATOR_ROW))
+
+    assert connected.to_public_row()["instagram_connected"] is True
+    assert not_connected.to_public_row()["instagram_connected"] is False
+    assert "instagram_user_id" not in connected.to_public_row()

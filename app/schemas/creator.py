@@ -91,3 +91,20 @@ class InstagramAuthUrlResponse(BaseModel):
 class InstagramConnectRequest(BaseModel):
     code: str = Field(..., min_length=1)
     redirect_uri: str = Field(..., min_length=1)
+
+
+class InstagramMediaPreviewItem(BaseModel):
+    """One item from the creator's recent Instagram media, fetched but not
+    yet imported into their portfolio — lets them pick which ones to add."""
+    id: str
+    media_url: str
+    permalink: str | None = None
+    media_type: Literal["photo", "video"] = "photo"
+    like_count: int | None = None
+    comment_count: int | None = None
+
+
+class InstagramImportRequest(BaseModel):
+    """`media_ids` selects specific previewed items to import; omitted/None
+    imports everything (back-compat with the original bulk-import call)."""
+    media_ids: list[str] | None = None

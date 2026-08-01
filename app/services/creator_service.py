@@ -470,8 +470,38 @@ async def disconnect_instagram(
     })
 
 
+async def preview_instagram_media(
+    profile_id: str,
+    *,
+    repo: CreatorRepository | None = None,
+) -> list[dict]:
+    """Fetch recent Instagram media without importing it, so the creator can
+    pick which posts/reels to add to their portfolio."""
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_profile_id(profile_id)
+    if not creator or not creator.instagram_access_token:
+        raise _not_connected()
+
+    access_token = decrypt_token(creator.instagram_access_token)
+    media = await instagram_service.fetch_media(access_token)
+
+    return [
+        {
+            "id": str(item["id"]),
+            "media_url": item.get("media_url"),
+            "permalink": item.get("permalink"),
+            "media_type": "video" if item.get("media_type") == "VIDEO" else "photo",
+            "like_count": item.get("like_count"),
+            "comment_count": item.get("comments_count"),
+        }
+        for item in media
+        if item.get("media_url")
+    ]
+
+
 async def import_instagram_portfolio(
     profile_id: str,
+    media_ids: list[str] | None = None,
     *,
     repo: CreatorRepository | None = None,
 ) -> list[dict]:
@@ -482,6 +512,10 @@ async def import_instagram_portfolio(
 
     access_token = decrypt_token(creator.instagram_access_token)
     media = await instagram_service.fetch_media(access_token)
+
+    if media_ids is not None:
+        wanted = set(media_ids)
+        media = [item for item in media if str(item.get("id")) in wanted]
 
     if not media:
         return []
