@@ -8,7 +8,17 @@ from fastapi import HTTPException
 
 from app.core import dependencies
 from app.core.enums import UserRole
+from app.models.creator import Creator
 from app.schemas.user import UserInToken
+
+
+def _make_creator(data: dict) -> Creator:
+    return Creator(
+        id=data.get("id", "c1"),
+        profile_id=data.get("profile_id", "p1"),
+        name=data.get("name", "Test"),
+        instagram_access_token=data.get("instagram_access_token"),
+    )
 
 
 class FakeCreatorRepo:
@@ -16,7 +26,7 @@ class FakeCreatorRepo:
         self._creator = creator
 
     async def get_by_profile_id(self, profile_id):
-        return self._creator
+        return _make_creator(self._creator) if self._creator else None
 
 
 def _user(role: UserRole) -> UserInToken:

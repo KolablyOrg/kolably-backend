@@ -12,9 +12,18 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.config import settings
+from app.models.creator import Creator
 from app.services import meta_webhook_service
 
 TEST_SECRET = "unit-test-app-secret"
+
+
+def _make_creator(data: dict) -> Creator:
+    return Creator(
+        id=data["id"],
+        profile_id=data["profile_id"],
+        name=data.get("name", ""),
+    )
 
 
 def _b64url(data: bytes) -> str:
@@ -43,12 +52,12 @@ class FakeCreatorRepo:
         self.cleared_connection_for = None
 
     async def get_by_instagram_user_id(self, instagram_user_id):
-        return self._creator
+        return _make_creator(self._creator) if self._creator else None
 
     async def anonymize(self, creator_id, data):
         self.anonymized_id = creator_id
         self.anonymized_data = data
-        return {**data, "id": creator_id}
+        return _make_creator({**data, "id": creator_id, "profile_id": self._creator["profile_id"]})
 
     async def delete_portfolio_by_creator_id(self, creator_id):
         self.portfolio_deleted_for = creator_id
@@ -56,7 +65,7 @@ class FakeCreatorRepo:
 
     async def clear_instagram_connection(self, creator_id):
         self.cleared_connection_for = creator_id
-        return {"id": creator_id, "instagram_user_id": None}
+        return _make_creator({"id": creator_id, "profile_id": self._creator["profile_id"]})
 
 
 class FakeProfileRepo:

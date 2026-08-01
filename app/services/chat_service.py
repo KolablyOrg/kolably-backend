@@ -1,18 +1,31 @@
 from fastapi import HTTPException, status
 
+from app.models.chat import Conversation, Message
 from app.repositories.chat_repo import ChatRepository
 
 
-def _row_to_conversation_response(row: dict) -> dict:
+def _conversation_to_response(conv: Conversation) -> dict:
+    """Convert a Conversation model to a response dict."""
     return {
-        "id": row["id"],
-        "participant_ids": row.get("participant_ids", []),
+        "id": conv.id,
+        "participant_ids": conv.participant_ids,
         "other_participant": {"id": "", "name": "", "avatar_url": None},
-        "collaboration_id": row.get("collaboration_id"),
-        "last_message": row.get("last_message"),
-        "last_message_at": row.get("last_message_at"),
-        "unread_count": row.get("unread_count", 0),
-        "created_at": row["created_at"],
+        "collaboration_id": conv.collaboration_id,
+        "last_message": conv.last_message,
+        "last_message_at": conv.last_message_at,
+        "unread_count": conv.unread_count,
+        "created_at": conv.created_at,
+    }
+
+
+def _message_to_response(msg: Message) -> dict:
+    """Convert a Message model to a response dict."""
+    return {
+        "id": msg.id,
+        "conversation_id": msg.conversation_id,
+        "sender_id": msg.sender_id,
+        "content": msg.content,
+        "created_at": msg.created_at,
     }
 
 
@@ -22,8 +35,8 @@ async def list_conversations(
     repo: ChatRepository | None = None,
 ) -> list[dict]:
     repo = repo or ChatRepository()
-    rows = await repo.list_conversations(profile_id)
-    return [_row_to_conversation_response(row) for row in rows]
+    conversations = await repo.list_conversations(profile_id)
+    return [_conversation_to_response(c) for c in conversations]
 
 
 async def get_conversation(
@@ -33,36 +46,27 @@ async def get_conversation(
     repo: ChatRepository | None = None,
 ) -> dict:
     repo = repo or ChatRepository()
-    row = await repo.get_conversation(conversation_id)
+    conversation = await repo.get_conversation(conversation_id)
 
-    if not row:
+    if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found",
         )
 
-    if profile_id not in row.get("participant_ids", []):
+    # Access check — participant_ids comes from the joined query
+    if profile_id not in conversation.participant_ids:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not a participant in this conversation",
         )
 
-    messages_raw = await repo.list_messages(conversation_id)
-    messages = [
-        {
-            "id": msg["id"],
-            "conversation_id": msg["conversation_id"],
-            "sender_id": msg["sender_id"],
-            "content": msg["content"],
-            "created_at": msg["created_at"],
-        }
-        for msg in messages_raw
-    ]
+    messages = await repo.list_messages(conversation_id)
 
     await repo.upsert_read(conversation_id, profile_id)
 
-    resp = _row_to_conversation_response(row)
-    resp["messages"] = messages
+    resp = _conversation_to_response(conversation)
+    resp["messages"] = [_message_to_response(m) for m in messages]
     return resp
 
 

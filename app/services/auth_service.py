@@ -5,6 +5,7 @@ from supabase_auth.errors import AuthApiError
 
 from app.core.crypto import encrypt_token
 from app.core.supabase import get_supabase_admin_client, get_supabase_client
+from app.models.user import UserProfile
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.profile_repo import ProfileRepository
@@ -21,6 +22,23 @@ from app.services import instagram_service
 # GoTrue sets last_sign_in_at == created_at (to the second) only on the very
 # first sign-in for an auth.users row; a small tolerance absorbs clock/DB skew.
 _NEW_USER_SIGN_IN_TOLERANCE_SECONDS = 5
+
+
+def _profile_to_dict(profile: UserProfile) -> dict:
+    """Convert a UserProfile model to a plain dict for JSON responses."""
+    return {
+        "id": profile.id,
+        "auth_id": profile.auth_id,
+        "email": profile.email,
+        "role": profile.role.value if hasattr(profile.role, "value") else profile.role,
+        "full_name": profile.full_name,
+        "avatar_url": profile.avatar_url,
+        "phone": profile.phone,
+        "is_active": profile.is_active,
+        "email_confirmed_at": profile.email_confirmed_at,
+        "created_at": profile.created_at,
+        "updated_at": profile.updated_at,
+    }
 
 
 async def signup_creator(
@@ -64,7 +82,7 @@ async def signup_creator(
             detail="Profile creation trigger failed",
         )
 
-    profile_id = profile["id"]
+    profile_id = profile.id
 
     creator_repo = creator_repo or CreatorRepository()
     await creator_repo.insert_creator({
@@ -138,7 +156,7 @@ async def signup_business(
             detail="Profile creation trigger failed",
         )
 
-    profile_id = profile["id"]
+    profile_id = profile.id
 
     business_repo = business_repo or BusinessRepository()
     await business_repo.insert_business({
@@ -212,7 +230,7 @@ async def login(
             detail="User profile not found",
         )
 
-    if not profile.get("is_active", False):
+    if not profile.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
@@ -224,10 +242,10 @@ async def login(
         "refresh_token": session.refresh_token,
         "token_type": "bearer",
         "user": {
-            "id": profile["id"],
-            "email": profile["email"],
-            "role": profile["role"],
-            "is_active": profile["is_active"],
+            "id": profile.id,
+            "email": profile.email,
+            "role": profile.role.value if hasattr(profile.role, "value") else profile.role,
+            "is_active": profile.is_active,
         },
     }
 
@@ -285,7 +303,7 @@ async def google_auth(
             detail="Profile creation trigger failed",
         )
 
-    if not profile.get("is_active", False):
+    if not profile.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
@@ -299,23 +317,23 @@ async def google_auth(
             )
 
         metadata = auth_user.user_metadata or {}
-        display_name = metadata.get("full_name") or metadata.get("name") or profile["email"].split("@")[0]
+        display_name = metadata.get("full_name") or metadata.get("name") or profile.email.split("@")[0]
         avatar_url = metadata.get("avatar_url") or metadata.get("picture")
 
-        if profile["role"] != data.role:
-            profile = await profile_repo.update_role(profile["id"], data.role) or profile
+        if profile.role != data.role:
+            profile = await profile_repo.update_role(profile.id, data.role) or profile
 
         if data.role == "creator":
             creator_repo = creator_repo or CreatorRepository()
             await creator_repo.insert_creator({
-                "profile_id": profile["id"],
+                "profile_id": profile.id,
                 "name": display_name,
                 "profile_photo_url": avatar_url,
             })
         else:
             business_repo = business_repo or BusinessRepository()
             await business_repo.insert_business({
-                "profile_id": profile["id"],
+                "profile_id": profile.id,
                 "business_name": display_name,
                 "logo_url": avatar_url,
             })
@@ -326,10 +344,10 @@ async def google_auth(
         "refresh_token": session.refresh_token,
         "token_type": "bearer",
         "user": {
-            "id": profile["id"],
-            "email": profile["email"],
-            "role": profile["role"],
-            "is_active": profile["is_active"],
+            "id": profile.id,
+            "email": profile.email,
+            "role": profile.role.value if hasattr(profile.role, "value") else profile.role,
+            "is_active": profile.is_active,
         },
         "is_new_user": is_new_user,
     }
@@ -388,19 +406,19 @@ async def instagram_auth(
     existing_creator = await creator_repo.get_by_instagram_user_id(instagram_user_id)
 
     if existing_creator:
-        profile = await profile_repo.get_by_id(existing_creator["profile_id"])
+        profile = await profile_repo.get_by_id(existing_creator.profile_id)
         if not profile:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Profile not found for existing creator",
             )
-        if not profile.get("is_active", False):
+        if not profile.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is deactivated",
             )
 
-        await creator_repo.update_by_profile_id(existing_creator["profile_id"], {
+        await creator_repo.update_by_profile_id(existing_creator.profile_id, {
             "follower_count": ig_profile.get("followers_count"),
             "following_count": ig_profile.get("follows_count"),
             "profile_photo_url": ig_profile.get("profile_picture_url"),
@@ -409,16 +427,16 @@ async def instagram_auth(
             "instagram_synced_at": now,
         })
 
-        session = await _mint_session_for_email(profile["email"])
+        session = await _mint_session_for_email(profile.email)
         return {
             "access_token": session.access_token,
             "refresh_token": session.refresh_token,
             "token_type": "bearer",
             "user": {
-                "id": profile["id"],
-                "email": profile["email"],
-                "role": profile["role"],
-                "is_active": profile["is_active"],
+                "id": profile.id,
+                "email": profile.email,
+                "role": profile.role.value if hasattr(profile.role, "value") else profile.role,
+                "is_active": profile.is_active,
             },
             "is_new_user": False,
         }
@@ -454,7 +472,7 @@ async def instagram_auth(
     engagement_rate = await instagram_service.calculate_engagement_rate(access_token, media)
 
     new_creator = await creator_repo.insert_creator({
-        "profile_id": profile["id"],
+        "profile_id": profile.id,
         "username": ig_profile["username"],
         "instagram_handle": ig_profile["username"],
         "instagram_user_id": instagram_user_id,
@@ -466,7 +484,7 @@ async def instagram_auth(
 
     if media and new_creator:
         await creator_repo.insert_portfolio_items(
-            instagram_service.build_portfolio_items(new_creator["id"], media)
+            instagram_service.build_portfolio_items(new_creator.id, media)
         )
 
     session = await _mint_session_for_email(placeholder_email)
@@ -475,10 +493,10 @@ async def instagram_auth(
         "refresh_token": session.refresh_token,
         "token_type": "bearer",
         "user": {
-            "id": profile["id"],
-            "email": profile["email"],
-            "role": profile["role"],
-            "is_active": profile["is_active"],
+            "id": profile.id,
+            "email": profile.email,
+            "role": profile.role.value if hasattr(profile.role, "value") else profile.role,
+            "is_active": profile.is_active,
         },
         "is_new_user": True,
     }
@@ -573,19 +591,19 @@ async def get_user_profile(
             detail="Profile not found",
         )
 
-    response = {**profile}
+    response = _profile_to_dict(profile)
 
-    if profile["role"] in ("creator", "superadmin"):
+    if profile.role.value in ("creator", "superadmin"):
         creator_repo = creator_repo or CreatorRepository()
-        creator = await creator_repo.get_by_profile_id(profile["id"])
+        creator = await creator_repo.get_by_profile_id(profile.id)
         if creator:
-            response["creator"] = creator
+            response["creator"] = creator.to_public_row()
 
-    if profile["role"] in ("business", "superadmin"):
+    if profile.role.value in ("business", "superadmin"):
         business_repo = business_repo or BusinessRepository()
-        business = await business_repo.get_by_profile_id(profile["id"])
+        business = await business_repo.get_by_profile_id(profile.id)
         if business:
-            response["business"] = business
+            response["business"] = business.to_row()
 
     return response
 
@@ -645,10 +663,7 @@ async def update_user_profile(
     if not final_update:
         return await get_user_profile(auth_id)
 
-    if role == "creator":
-        result = await repo.update_by_profile_id(profile_id, final_update)
-    else:
-        result = await repo.update_by_profile_id(profile_id, final_update)
+    result = await repo.update_by_profile_id(profile_id, final_update)
 
     if not result:
         table_name = "creators" if role == "creator" else "businesses"

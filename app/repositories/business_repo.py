@@ -1,20 +1,24 @@
+from app.models.business import Business
+from app.models.campaign import Campaign
 from app.repositories.base import BaseRepository
 
 
 class BusinessRepository(BaseRepository):
-    async def get_by_id(self, business_id: str) -> dict | None:
-        return await self.select_one(
+    async def get_by_id(self, business_id: str) -> Business | None:
+        row = await self.select_one(
             "businesses",
             columns="*",
             filters={"id": business_id},
         )
+        return Business.from_row(row) if row else None
 
-    async def get_by_profile_id(self, profile_id: str) -> dict | None:
-        return await self.select_one(
+    async def get_by_profile_id(self, profile_id: str) -> Business | None:
+        row = await self.select_one(
             "businesses",
             columns="*",
             filters={"profile_id": profile_id},
         )
+        return Business.from_row(row) if row else None
 
     async def get_id_by_profile_id(self, profile_id: str) -> str | None:
         row = await self.select_one(
@@ -31,7 +35,7 @@ class BusinessRepository(BaseRepository):
         city: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[Business], int]:
         query = (await self._table("businesses")).select("*", count="exact")
 
         if search:
@@ -45,15 +49,16 @@ class BusinessRepository(BaseRepository):
         end = start + page_size - 1
         result = await self._execute(query.range(start, end))
 
-        return result.data or [], result.count or 0
+        rows = result.data or []
+        return [Business.from_row(row) for row in rows], result.count or 0
 
-    async def insert_business(self, data: dict) -> dict | None:
+    async def insert_business(self, data: dict) -> Business | None:
         rows = await self.insert("businesses", data)
-        return rows[0] if rows else None
+        return Business.from_row(rows[0]) if rows else None
 
-    async def update_by_profile_id(self, profile_id: str, data: dict) -> dict | None:
+    async def update_by_profile_id(self, profile_id: str, data: dict) -> Business | None:
         rows = await self.update("businesses", data, {"profile_id": profile_id})
-        return rows[0] if rows else None
+        return Business.from_row(rows[0]) if rows else None
 
     async def list_campaigns(
         self,
@@ -61,7 +66,7 @@ class BusinessRepository(BaseRepository):
         status: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[Campaign], int]:
         query = (
             (await self._table("campaigns"))
             .select("*", count="exact")
@@ -75,7 +80,8 @@ class BusinessRepository(BaseRepository):
         end = start + page_size - 1
         result = await self._execute(query.range(start, end))
 
-        return result.data or [], result.count or 0
+        rows = result.data or []
+        return [Campaign.from_row(row) for row in rows], result.count or 0
 
     async def get_campaign_ids(self, business_id: str) -> list[str]:
         rows = await self.select(

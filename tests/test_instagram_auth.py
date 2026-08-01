@@ -3,11 +3,18 @@ Unit tests for auth_service.instagram_auth — Instagram Graph API calls and
 the Supabase admin/anon clients are faked, so no real network/DB calls happen.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi import HTTPException
 
+from app.core.enums import UserRole
+from app.models.creator import Creator
+from app.models.user import UserProfile
 from app.schemas.auth import InstagramAuthRequest
 from app.services import auth_service
+
+NOW = datetime(2026, 7, 26, 12, 0, 0, tzinfo=UTC)
 
 IG_PROFILE = {
     "user_id": 17841441112302348,
@@ -40,6 +47,28 @@ EXISTING_PROFILE = {
     "role": "creator",
     "is_active": True,
 }
+
+
+def _make_profile(data: dict) -> UserProfile:
+    return UserProfile(
+        id=data["id"],
+        auth_id=data["auth_id"],
+        email=data["email"],
+        role=UserRole(data["role"]),
+        is_active=data.get("is_active", True),
+        created_at=data.get("created_at", NOW),
+    )
+
+
+def _make_creator(data: dict) -> Creator:
+    return Creator(
+        id=data.get("id", "creator-ig-1"),
+        profile_id=data["profile_id"],
+        name=data.get("name", ""),
+        instagram_user_id=data.get("instagram_user_id"),
+        instagram_access_token=data.get("instagram_access_token"),
+        created_at=data.get("created_at", NOW),
+    )
 
 
 class FakeAdminAuth:
@@ -112,16 +141,16 @@ class FakeCreatorRepo:
         self.portfolio_inserted = None
 
     async def get_by_instagram_user_id(self, instagram_user_id):
-        return self._existing
+        return _make_creator(self._existing) if self._existing else None
 
     async def update_by_profile_id(self, profile_id, data):
         self.updated_profile_id = profile_id
         self.updated = data
-        return {**data, "profile_id": profile_id}
+        return _make_creator({**data, "profile_id": profile_id})
 
     async def insert_creator(self, data):
         self.inserted = data
-        return {**data, "id": "creator-ig-1"}
+        return _make_creator({**data, "id": "creator-ig-1"})
 
     async def insert_portfolio_items(self, items):
         self.portfolio_inserted = items
@@ -134,10 +163,11 @@ class FakeProfileRepo:
         self._by_auth_id = by_auth_id
 
     async def get_by_id(self, profile_id):
-        return self._by_id.get(profile_id)
+        row = self._by_id.get(profile_id)
+        return _make_profile(row) if row else None
 
     async def get_by_auth_id(self, auth_id):
-        return self._by_auth_id
+        return _make_profile(self._by_auth_id) if self._by_auth_id else None
 
 
 def _patch_instagram_service(monkeypatch, media=IG_MEDIA, profile=IG_PROFILE):

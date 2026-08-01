@@ -112,7 +112,7 @@ async def require_instagram_connected(
     """
     if user.role == UserRole.CREATOR:
         creator = await CreatorRepository().get_by_profile_id(user.id)
-        if not creator or not creator.get("instagram_access_token"):
+        if not creator or not creator.instagram_access_token:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="instagram_not_connected",

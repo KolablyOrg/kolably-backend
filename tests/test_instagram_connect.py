@@ -11,6 +11,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.crypto import decrypt_token, encrypt_token
+from app.models.creator import Creator, PortfolioItem
 from app.services import creator_service
 
 NOW = datetime(2026, 7, 27, 12, 0, 0, tzinfo=UTC)
@@ -59,6 +60,35 @@ IG_MEDIA = [
 ]
 
 
+def _make_creator(data: dict) -> Creator:
+    return Creator(
+        id=data.get("id", "creator-x"),
+        profile_id=data["profile_id"],
+        name=data.get("name", ""),
+        username=data.get("username"),
+        city=data.get("city"),
+        niche=data.get("niche"),
+        follower_count=data.get("follower_count"),
+        bio=data.get("bio"),
+        instagram_handle=data.get("instagram_handle"),
+        engagement_rate=data.get("engagement_rate"),
+        profile_photo_url=data.get("profile_photo_url"),
+        created_at=data.get("created_at", "2024-01-01T00:00:00+00:00"),
+        tiktok_handle=data.get("tiktok_handle"),
+        instagram_user_id=data.get("instagram_user_id"),
+        instagram_access_token=data.get("instagram_access_token"),
+        instagram_token_expires_at=data.get("instagram_token_expires_at"),
+        instagram_synced_at=data.get("instagram_synced_at"),
+        instagram_connected=bool(data.get("instagram_user_id")),
+        website=data.get("website"),
+        following_count=data.get("following_count"),
+    )
+
+
+def _make_portfolio_item(data: dict) -> PortfolioItem:
+    return PortfolioItem.from_row(data)
+
+
 class FakeCreatorRepo:
     def __init__(self, creator=None, other_by_ig_id=None):
         self._creator = creator
@@ -68,19 +98,22 @@ class FakeCreatorRepo:
         self.portfolio_inserted = None
 
     async def get_by_profile_id(self, profile_id):
-        return self._creator
+        return _make_creator(self._creator) if self._creator else None
 
     async def get_by_instagram_user_id(self, instagram_user_id):
-        return self._other_by_ig_id
+        return _make_creator(self._other_by_ig_id) if self._other_by_ig_id else None
 
     async def update_by_profile_id(self, profile_id, data):
         self.updated_profile_id = profile_id
         self.updated = data
-        return {**self._creator, **data}
+        return _make_creator({**self._creator, **data})
 
     async def insert_portfolio_items(self, items):
         self.portfolio_inserted = items
-        return [{**item, "id": f"pi-{i}", "created_at": "2026-01-01T00:00:00+00:00"} for i, item in enumerate(items)]
+        return [
+            _make_portfolio_item({**item, "id": f"pi-{i}", "created_at": "2026-01-01T00:00:00+00:00"})
+            for i, item in enumerate(items)
+        ]
 
 
 def _patch_instagram_service(monkeypatch, refresh_calls=None):

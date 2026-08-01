@@ -1,4 +1,19 @@
+from app.models.notification import Notification
 from app.repositories.notification_repo import NotificationRepository
+
+
+def _notification_to_response(notif: Notification) -> dict:
+    """Convert a Notification model to a response dict."""
+    return {
+        "id": notif.id,
+        "profile_id": notif.user_id,
+        "type": notif.type.value if hasattr(notif.type, "value") else notif.type,
+        "title": notif.title,
+        "body": notif.body,
+        "related_id": notif.data.get("related_id"),
+        "is_read": notif.read_at is not None,
+        "created_at": notif.created_at,
+    }
 
 
 async def list_notifications(
@@ -9,25 +24,13 @@ async def list_notifications(
     repo: NotificationRepository | None = None,
 ) -> dict:
     repo = repo or NotificationRepository()
-    rows, total = await repo.list_by_profile(
+    notifications, total = await repo.list_by_profile(
         profile_id=profile_id,
         page=page,
         page_size=page_size,
     )
 
-    items = [
-        {
-            "id": row["id"],
-            "profile_id": row["profile_id"],
-            "type": row["type"],
-            "title": row["title"],
-            "body": row["body"],
-            "related_id": row.get("related_id"),
-            "is_read": row.get("is_read", False),
-            "created_at": row["created_at"],
-        }
-        for row in rows
-    ]
+    items = [_notification_to_response(n) for n in notifications]
 
     return {
         "items": items,

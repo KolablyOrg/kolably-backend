@@ -68,10 +68,10 @@ async def handle_data_deletion(
     status = "no_matching_account"
 
     if creator:
-        await creator_repo.delete_portfolio_by_creator_id(creator["id"])
-        await creator_repo.anonymize(creator["id"], dict(_ANONYMIZED_CREATOR_FIELDS))
+        await creator_repo.delete_portfolio_by_creator_id(creator.id)
+        await creator_repo.anonymize(creator.id, dict(_ANONYMIZED_CREATOR_FIELDS))
         await profile_repo.anonymize(
-            creator["profile_id"], f"deleted-{creator['profile_id']}@deleted.kolably.com"
+            creator.profile_id, f"deleted-{creator.profile_id}@deleted.kolably.com"
         )
         status = "completed"
 
@@ -80,7 +80,7 @@ async def handle_data_deletion(
     await deletion_repo.insert_request({
         "confirmation_code": confirmation_code,
         "instagram_user_id": instagram_user_id,
-        "profile_id": creator["profile_id"] if creator else None,
+        "profile_id": creator.profile_id if creator else None,
         "status": status,
         "completed_at": now,
     })
@@ -112,6 +112,6 @@ async def handle_deauthorize(
     creator = await creator_repo.get_by_instagram_user_id(instagram_user_id)
 
     if creator:
-        await creator_repo.clear_instagram_connection(creator["id"])
+        await creator_repo.clear_instagram_connection(creator.id)
 
     return {"status": "ok"}

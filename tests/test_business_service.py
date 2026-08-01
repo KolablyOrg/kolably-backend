@@ -2,6 +2,8 @@
 Unit tests for business_service — repositories injected as fakes, no Supabase.
 """
 
+from app.models.business import Business
+from app.models.campaign import Campaign
 from app.schemas.business import BusinessResponse
 from app.services import business_service
 
@@ -26,7 +28,7 @@ CAMPAIGN_ROW = {
     "business_id": "b1",
     "title": "Brunch launch",
     "cover_image_url": None,
-    "objective": "awareness",
+    "objective": "brand_awareness",
     "compensation_type": "cash",
     "cash_amount_min": 100.0,
     "cash_amount_max": 200.0,
@@ -35,7 +37,16 @@ CAMPAIGN_ROW = {
     "deadline": None,
     "status": "active",
     "created_at": "2024-01-01T00:00:00+00:00",
+    "description": "Test campaign",
 }
+
+
+def _make_business(row: dict) -> Business:
+    return Business.from_row(row)
+
+
+def _make_campaign(row: dict) -> Campaign:
+    return Campaign.from_row(row)
 
 
 class FakeBusinessRepo:
@@ -50,17 +61,17 @@ class FakeBusinessRepo:
         self.seen_business_id: str | None = None
 
     async def get_by_id(self, business_id: str):
-        return self._row
+        return _make_business(self._row) if self._row else None
 
     async def list_filtered(self, **kwargs):
-        return self._rows, self._total
+        return [_make_business(r) for r in self._rows], self._total
 
     async def get_id_by_profile_id(self, profile_id: str):
         return self._business_id
 
     async def list_campaigns(self, business_id: str, **kwargs):
         self.seen_business_id = business_id
-        return self._campaigns, len(self._campaigns)
+        return [_make_campaign(c) for c in self._campaigns], len(self._campaigns)
 
 
 async def test_get_business_by_id_maps_user_id_from_profile_id():
@@ -85,7 +96,7 @@ async def test_list_businesses_uses_same_serialization_as_get():
 
     item = result["items"][0]
     assert isinstance(item, BusinessResponse)
-    assert item.model_dump() == business_service._row_to_business_response(dict(BUSINESS_ROW)).model_dump()
+    assert item.model_dump() == business_service._business_to_response(_make_business(dict(BUSINESS_ROW))).model_dump()
 
 
 async def test_list_my_campaigns_resolves_business_id_from_profile():
@@ -97,5 +108,5 @@ async def test_list_my_campaigns_resolves_business_id_from_profile():
 
     assert repo.seen_business_id == "b1"
     assert result["total"] == 1
-    assert result["items"][0]["id"] == "camp1"
-    assert result["items"][0]["title"] == "Brunch launch"
+    assert result["items"][0].id == "camp1"
+    assert result["items"][0].title == "Brunch launch"

@@ -1,10 +1,14 @@
 from fastapi import HTTPException, status
 
-from app.core.enums import ApplicationDirection
+from app.models.application import CampaignApplication
 from app.repositories.application_repo import ApplicationRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.creator_repo import CreatorRepository
-from app.schemas.application import ApplicationWithCampaign, ApplicationWithCreator
+from app.schemas.application import (
+    ApplicationResponse,
+    ApplicationWithCampaign,
+    ApplicationWithCreator,
+)
 from app.schemas.business import BusinessSummary
 from app.schemas.campaign import CampaignSummary
 from app.schemas.creator import CreatorSummary
@@ -40,34 +44,35 @@ async def _get_business_id_for_user(
     return business_id
 
 
-def _row_to_application_response(row: dict) -> dict:
-    return {
-        "id": row["id"],
-        "campaign_id": row["campaign_id"],
-        "creator_id": row["creator_id"],
-        "direction": row.get("direction", ApplicationDirection.CREATOR_APPLIED.value),
-        "message": row.get("message"),
-        "instagram_handle": row.get("instagram_handle"),
-        "example_content_url": row.get("example_content_url"),
-        "status": row["status"],
-        "revision_reason": row.get("revision_reason"),
-        "created_at": row["created_at"],
-    }
+def _application_to_response(app: CampaignApplication) -> ApplicationResponse:
+    """Convert a CampaignApplication model to ApplicationResponse schema."""
+    return ApplicationResponse(
+        id=app.id,
+        campaign_id=app.campaign_id,
+        creator_id=app.creator_id,
+        direction=app.direction,
+        message=app.message,
+        instagram_handle=app.instagram_handle,
+        example_content_url=app.example_content_url,
+        status=app.status,
+        revision_reason=app.revision_reason,
+        created_at=app.created_at,
+    )
 
 
 async def get_application(
     application_id: str,
     *,
     repo: ApplicationRepository | None = None,
-) -> dict:
+) -> ApplicationResponse:
     repo = repo or ApplicationRepository()
-    row = await repo.get_by_id(application_id)
-    if not row:
+    app = await repo.get_by_id(application_id)
+    if not app:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Application not found",
         )
-    return _row_to_application_response(row)
+    return _application_to_response(app)
 
 
 async def list_my_applications(
@@ -81,16 +86,16 @@ async def list_my_applications(
     creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
 
     app_repo = app_repo or ApplicationRepository()
-    rows, total = await app_repo.list_by_creator(
+    applications, total = await app_repo.list_by_creator(
         creator_id=creator_id,
         page=page,
         page_size=page_size,
     )
 
     items = []
-    for row in rows:
-        campaign_data = row.pop("campaigns", {}) or {}
-        business_data = row.pop("businesses", {}) or {}
+    for app in applications:
+        campaign_data = app.campaign or {}
+        business_data = app.business or {}
         profile_data = business_data.pop("profiles", {}) or {}
 
         campaign_summary = CampaignSummary(
@@ -115,21 +120,22 @@ async def list_my_applications(
             logo_url=business_data.get("logo_url"),
         )
 
-        app = ApplicationWithCampaign(
-            id=row["id"],
-            campaign_id=row["campaign_id"],
-            creator_id=row["creator_id"],
-            direction=row.get("direction", ApplicationDirection.CREATOR_APPLIED.value),
-            message=row.get("message"),
-            instagram_handle=row.get("instagram_handle"),
-            example_content_url=row.get("example_content_url"),
-            status=row["status"],
-            revision_reason=row.get("revision_reason"),
-            created_at=row["created_at"],
-            campaign=campaign_summary,
-            business=business_summary,
+        items.append(
+            ApplicationWithCampaign(
+                id=app.id,
+                campaign_id=app.campaign_id,
+                creator_id=app.creator_id,
+                direction=app.direction,
+                message=app.message,
+                instagram_handle=app.instagram_handle,
+                example_content_url=app.example_content_url,
+                status=app.status,
+                revision_reason=app.revision_reason,
+                created_at=app.created_at,
+                campaign=campaign_summary,
+                business=business_summary,
+            )
         )
-        items.append(app.model_dump(mode="json"))
 
     return {
         "items": items,
@@ -151,7 +157,7 @@ async def list_business_applications(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
 
     app_repo = app_repo or ApplicationRepository()
-    rows, total = await app_repo.list_by_business(
+    applications, total = await app_repo.list_by_business(
         business_id=business_id,
         status=status,
         page=page,
@@ -159,8 +165,8 @@ async def list_business_applications(
     )
 
     items = []
-    for row in rows:
-        creator_data = row.pop("creators", {}) or {}
+    for app in applications:
+        creator_data = app.creator or {}
 
         creator_summary = CreatorSummary(
             id=creator_data.get("id", ""),
@@ -170,20 +176,21 @@ async def list_business_applications(
             niche=creator_data.get("niche"),
         )
 
-        app = ApplicationWithCreator(
-            id=row["id"],
-            campaign_id=row["campaign_id"],
-            creator_id=row["creator_id"],
-            direction=row.get("direction", ApplicationDirection.CREATOR_APPLIED.value),
-            message=row.get("message"),
-            instagram_handle=row.get("instagram_handle"),
-            example_content_url=row.get("example_content_url"),
-            status=row["status"],
-            revision_reason=row.get("revision_reason"),
-            created_at=row["created_at"],
-            creator=creator_summary,
+        items.append(
+            ApplicationWithCreator(
+                id=app.id,
+                campaign_id=app.campaign_id,
+                creator_id=app.creator_id,
+                direction=app.direction,
+                message=app.message,
+                instagram_handle=app.instagram_handle,
+                example_content_url=app.example_content_url,
+                status=app.status,
+                revision_reason=app.revision_reason,
+                created_at=app.created_at,
+                creator=creator_summary,
+            )
         )
-        items.append(app.model_dump(mode="json"))
 
     return {
         "items": items,

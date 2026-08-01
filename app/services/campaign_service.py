@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -8,6 +7,7 @@ from app.core.enums import (
     ApplicationStatus,
     CampaignStatus,
 )
+from app.models.campaign import Campaign
 from app.repositories.application_repo import ApplicationRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
@@ -17,6 +17,8 @@ from app.schemas.campaign import (
     CampaignCategoryResponse,
     CampaignCreateRequest,
     CampaignDeliverablesRequest,
+    CampaignResponse,
+    CampaignSummary,
     CampaignTargetingRequest,
     CampaignUpdateRequest,
 )
@@ -24,59 +26,53 @@ from app.schemas.creator import CreatorSummary
 from app.schemas.user import UserInToken
 
 
-def _row_to_campaign_response(row: dict, counts: dict | None = None) -> dict:
-    deliverables = row.get("deliverables") or []
-    if isinstance(deliverables, str):
-        deliverables = json.loads(deliverables) if deliverables else []
-
-    response: dict[str, Any] = {
-        "id": row["id"],
-        "business_id": row["business_id"],
-        "title": row["title"],
-        "objective": row["objective"],
-        "description": row["description"],
-        "cover_image_url": row.get("cover_image_url"),
-        "deliverables": deliverables,
-        "compensation_type": row.get("compensation_type"),
-        "cash_amount_min": row.get("cash_amount_min"),
-        "cash_amount_max": row.get("cash_amount_max"),
-        "free_product_description": row.get("free_product_description"),
-        "creator_category": row.get("creator_category", ""),
-        "follower_range_min": row.get("follower_range_min"),
-        "follower_range_max": row.get("follower_range_max"),
-        "min_engagement_rate": row.get("min_engagement_rate"),
-        "location": row.get("location", ""),
-        "max_creators": row.get("max_creators", 1),
-        "additional_requirements": row.get("additional_requirements"),
-        "deadline": row.get("deadline"),
-        "status": row["status"],
-        "created_at": row["created_at"],
-    }
-    if counts:
-        response["applicant_count"] = counts.get("applicant_count")
-        response["accepted_count"] = counts.get("accepted_count")
-    return response
+def _campaign_to_response(campaign: Campaign) -> CampaignResponse:
+    """Convert Campaign model to CampaignResponse schema."""
+    return CampaignResponse(
+        id=campaign.id,
+        business_id=campaign.business_id,
+        title=campaign.title,
+        objective=campaign.objective,
+        description=campaign.description,
+        cover_image_url=campaign.cover_image_url,
+        deliverables=[d.to_dict() for d in campaign.deliverables],
+        compensation_type=campaign.compensation_type,
+        cash_amount_min=campaign.cash_amount_min,
+        cash_amount_max=campaign.cash_amount_max,
+        free_product_description=campaign.free_product_description,
+        creator_category=campaign.creator_category,
+        follower_range_min=campaign.follower_range_min,
+        follower_range_max=campaign.follower_range_max,
+        min_engagement_rate=campaign.min_engagement_rate,
+        location=campaign.location,
+        max_creators=campaign.max_creators,
+        additional_requirements=campaign.additional_requirements,
+        deadline=campaign.deadline,
+        status=campaign.status,
+        created_at=campaign.created_at,
+        applicant_count=campaign.applicant_count,
+        accepted_count=campaign.accepted_count,
+    )
 
 
-def _row_to_campaign_summary(row: dict, counts: dict | None = None) -> dict:
-    response: dict[str, Any] = {
-        "id": row["id"],
-        "business_id": row["business_id"],
-        "title": row["title"],
-        "cover_image_url": row.get("cover_image_url"),
-        "objective": row.get("objective"),
-        "compensation_type": row.get("compensation_type"),
-        "cash_amount_min": row.get("cash_amount_min"),
-        "cash_amount_max": row.get("cash_amount_max"),
-        "creator_category": row.get("creator_category", ""),
-        "location": row.get("location", ""),
-        "deadline": row.get("deadline"),
-        "status": row["status"],
-        "created_at": row["created_at"],
-    }
-    if counts:
-        response["applicant_count"] = counts.get("applicant_count")
-    return response
+def _campaign_to_summary(campaign: Campaign) -> CampaignSummary:
+    """Convert Campaign model to CampaignSummary schema."""
+    return CampaignSummary(
+        id=campaign.id,
+        business_id=campaign.business_id,
+        title=campaign.title,
+        cover_image_url=campaign.cover_image_url,
+        objective=campaign.objective,
+        compensation_type=campaign.compensation_type,
+        cash_amount_min=campaign.cash_amount_min,
+        cash_amount_max=campaign.cash_amount_max,
+        creator_category=campaign.creator_category,
+        location=campaign.location,
+        deadline=campaign.deadline,
+        status=campaign.status,
+        created_at=campaign.created_at,
+        applicant_count=campaign.applicant_count,
+    )
 
 
 async def _get_business_id_for_user(
@@ -94,19 +90,21 @@ async def _get_business_id_for_user(
     return business_id
 
 
-async def _ensure_campaign_owner(campaign_repo: CampaignRepository, campaign_id: str, business_id: str) -> dict:
-    row = await campaign_repo.get_by_id(campaign_id)
-    if not row:
+async def _ensure_campaign_owner(
+    campaign_repo: CampaignRepository, campaign_id: str, business_id: str
+) -> Campaign:
+    campaign = await campaign_repo.get_by_id(campaign_id)
+    if not campaign:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Campaign not found",
         )
-    if row["business_id"] != business_id:
+    if campaign.business_id != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not own this campaign",
         )
-    return row
+    return campaign
 
 
 async def create_campaign_step1(
@@ -115,7 +113,7 @@ async def create_campaign_step1(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
-) -> dict:
+) -> CampaignResponse:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
 
@@ -131,14 +129,14 @@ async def create_campaign_step1(
         "max_creators": 1,
     }
 
-    row = await campaign_repo.insert_campaign(insert_data)
-    if not row:
+    campaign = await campaign_repo.insert_campaign(insert_data)
+    if not campaign:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create campaign",
         )
 
-    return _row_to_campaign_response(row)
+    return _campaign_to_response(campaign)
 
 
 async def update_campaign_deliverables(
@@ -148,7 +146,7 @@ async def update_campaign_deliverables(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
-) -> dict:
+) -> CampaignResponse:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
@@ -159,14 +157,14 @@ async def update_campaign_deliverables(
         **data.model_dump(exclude={"deliverables", "compensation_type"}, exclude_none=True),
     }
 
-    row = await campaign_repo.update_campaign(campaign_id, update_data)
-    if not row:
+    campaign = await campaign_repo.update_campaign(campaign_id, update_data)
+    if not campaign:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Campaign not found",
         )
 
-    return _row_to_campaign_response(row)
+    return _campaign_to_response(campaign)
 
 
 async def update_campaign_targeting(
@@ -176,21 +174,21 @@ async def update_campaign_targeting(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
-) -> dict:
+) -> CampaignResponse:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     update_data: dict[str, Any] = data.model_dump(exclude_none=True)
 
-    row = await campaign_repo.update_campaign(campaign_id, update_data)
-    if not row:
+    campaign = await campaign_repo.update_campaign(campaign_id, update_data)
+    if not campaign:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Campaign not found",
         )
 
-    return _row_to_campaign_response(row)
+    return _campaign_to_response(campaign)
 
 
 async def update_campaign_general(
@@ -200,14 +198,14 @@ async def update_campaign_general(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
-) -> dict:
+) -> CampaignResponse:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    row = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     update_data: dict[str, Any] = data.model_dump(exclude_none=True)
     if not update_data:
-        return _row_to_campaign_response(row)
+        return _campaign_to_response(campaign)
 
     if update_data.get("deliverables"):
         update_data["deliverables"] = [d.model_dump() for d in data.deliverables]
@@ -223,7 +221,7 @@ async def update_campaign_general(
             detail="Campaign not found",
         )
 
-    return _row_to_campaign_response(updated)
+    return _campaign_to_response(updated)
 
 
 async def publish_campaign(
@@ -232,25 +230,21 @@ async def publish_campaign(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
-) -> dict:
+) -> CampaignResponse:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    row = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
-
-    deliverables = row.get("deliverables") or []
-    if isinstance(deliverables, str):
-        deliverables = json.loads(deliverables) if deliverables else []
+    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     required = {
-        "title": row.get("title"),
-        "objective": row.get("objective"),
-        "description": row.get("description"),
-        "deliverables": deliverables,
-        "compensation_type": row.get("compensation_type"),
-        "creator_category": row.get("creator_category"),
-        "location": row.get("location"),
-        "max_creators": row.get("max_creators"),
-        "deadline": row.get("deadline"),
+        "title": campaign.title,
+        "objective": campaign.objective,
+        "description": campaign.description,
+        "deliverables": campaign.deliverables,
+        "compensation_type": campaign.compensation_type,
+        "creator_category": campaign.creator_category,
+        "location": campaign.location,
+        "max_creators": campaign.max_creators,
+        "deadline": campaign.deadline,
     }
     missing = [field for field, value in required.items() if not value]
     if missing:
@@ -268,7 +262,7 @@ async def publish_campaign(
             detail="Campaign not found",
         )
 
-    return _row_to_campaign_response(updated)
+    return _campaign_to_response(updated)
 
 
 async def list_campaigns(
@@ -290,15 +284,24 @@ async def list_campaigns(
         if niche:
             category = niche
 
-    rows, total = await campaign_repo.list_active(
+    campaigns, total = await campaign_repo.list_active(
         search=search,
         category=category,
         page=page,
         page_size=page_size,
     )
 
-    counts = await campaign_repo.fetch_application_counts([r["id"] for r in rows])
-    items = [_row_to_campaign_summary(r, counts.get(r["id"])) for r in rows]
+    campaign_ids = [c.id for c in campaigns]
+    counts = await campaign_repo.fetch_application_counts(campaign_ids)
+
+    # Update campaigns with counts
+    for campaign in campaigns:
+        count_data = counts.get(campaign.id)
+        if count_data:
+            campaign.applicant_count = count_data.get("applicant_count")
+            campaign.accepted_count = count_data.get("accepted_count")
+
+    items = [_campaign_to_summary(c) for c in campaigns]
 
     return {
         "items": items,
@@ -312,18 +315,23 @@ async def get_campaign(
     campaign_id: str,
     *,
     campaign_repo: CampaignRepository | None = None,
-) -> dict:
+) -> CampaignResponse:
     campaign_repo = campaign_repo or CampaignRepository()
-    row = await campaign_repo.get_by_id(campaign_id)
+    campaign = await campaign_repo.get_by_id(campaign_id)
 
-    if not row:
+    if not campaign:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Campaign not found",
         )
 
     counts = await campaign_repo.fetch_application_counts([campaign_id])
-    return _row_to_campaign_response(row, counts.get(campaign_id))
+    count_data = counts.get(campaign_id)
+    if count_data:
+        campaign.applicant_count = count_data.get("applicant_count")
+        campaign.accepted_count = count_data.get("accepted_count")
+
+    return _campaign_to_response(campaign)
 
 
 async def delete_campaign(
@@ -368,17 +376,17 @@ async def list_campaign_applications(
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
     app_repo: ApplicationRepository | None = None,
-) -> list[dict]:
+) -> list[ApplicationWithCreator]:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     app_repo = app_repo or ApplicationRepository()
-    rows = await app_repo.list_by_campaign(campaign_id)
+    applications = await app_repo.list_by_campaign(campaign_id)
 
-    items: list[dict] = []
-    for row in rows:
-        creator_data = row.pop("creators", {}) or {}
+    items: list[ApplicationWithCreator] = []
+    for app in applications:
+        creator_data = app.creator or {}
         creator = CreatorSummary(
             id=creator_data.get("id", ""),
             name=creator_data.get("name", ""),
@@ -386,20 +394,21 @@ async def list_campaign_applications(
             follower_count=creator_data.get("follower_count"),
             niche=creator_data.get("niche"),
         )
-        app = ApplicationWithCreator(
-            id=row["id"],
-            campaign_id=row["campaign_id"],
-            creator_id=row["creator_id"],
-            direction=row.get("direction", ApplicationDirection.CREATOR_APPLIED.value),
-            message=row.get("message"),
-            instagram_handle=row.get("instagram_handle"),
-            example_content_url=row.get("example_content_url"),
-            status=row["status"],
-            revision_reason=row.get("revision_reason"),
-            created_at=row["created_at"],
-            creator=creator,
+        items.append(
+            ApplicationWithCreator(
+                id=app.id,
+                campaign_id=app.campaign_id,
+                creator_id=app.creator_id,
+                direction=app.direction,
+                message=app.message,
+                instagram_handle=app.instagram_handle,
+                example_content_url=app.example_content_url,
+                status=app.status,
+                revision_reason=app.revision_reason,
+                created_at=app.created_at,
+                creator=creator,
+            )
         )
-        items.append(app.model_dump(mode="json"))
 
     return items
 
@@ -414,7 +423,7 @@ async def invite_creator(
     business_repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     app_repo: ApplicationRepository | None = None,
-) -> dict:
+) -> ApplicationResponse:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
@@ -443,22 +452,22 @@ async def invite_creator(
         "status": ApplicationStatus.PENDING.value,
     }
 
-    row = await app_repo.insert_application(insert_data)
-    if not row:
+    application = await app_repo.insert_application(insert_data)
+    if not application:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create invite",
         )
 
     return ApplicationResponse(
-        id=row["id"],
-        campaign_id=row["campaign_id"],
-        creator_id=row["creator_id"],
-        direction=row.get("direction", ApplicationDirection.BUSINESS_INVITED.value),
-        message=row.get("message"),
-        instagram_handle=row.get("instagram_handle"),
-        example_content_url=row.get("example_content_url"),
-        status=row["status"],
-        revision_reason=row.get("revision_reason"),
-        created_at=row["created_at"],
-    ).model_dump(mode="json")
+        id=application.id,
+        campaign_id=application.campaign_id,
+        creator_id=application.creator_id,
+        direction=application.direction,
+        message=application.message,
+        instagram_handle=application.instagram_handle,
+        example_content_url=application.example_content_url,
+        status=application.status,
+        revision_reason=application.revision_reason,
+        created_at=application.created_at,
+    )

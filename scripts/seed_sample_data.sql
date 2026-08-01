@@ -16,7 +16,7 @@
 -- EXISTING PROFILES (from auth.users)
 -- ────────────────────────────────────────────────────────────────────────
 -- Profile 1: 0fa49b04-db80-45a3-ba82-1f623df74e95 (business, kolably.cafe@gmail.com)
--- Profile 2: 4417a424-386b-4fae-8d98-36e5787359bd (creator, kolablyofficial@gmail.com)
+-- Profile 2: 4417a424-386b-4fae-8d98-36e5787359bd (creator, testcreator@kolably.com — dev password: TestCreator@123)
 -- Business:  75574dd2-5f1c-4ae7-8e11-e56e9b706da7 (linked to profile 1)
 
 -- ────────────────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status
 
+from app.models.collaboration import Collaboration
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
@@ -35,17 +36,18 @@ async def _get_business_id_for_user(
     return business_id
 
 
-def _row_to_collaboration_response(row: dict) -> dict:
+def _collaboration_to_response(collab: Collaboration) -> dict:
+    """Convert a Collaboration model to a response dict."""
     return {
-        "id": row["id"],
-        "campaign_id": row["campaign_id"],
-        "creator_id": row["creator_id"],
-        "business_id": row["business_id"],
-        "status": row["status"],
+        "id": collab.id,
+        "campaign_id": collab.campaign_id,
+        "creator_id": collab.creator_id,
+        "business_id": collab.business_id,
+        "status": collab.status.value if hasattr(collab.status, "value") else collab.status,
         "content_submissions": [],
-        "affiliate_url": row.get("affiliate_url"),
-        "created_at": row["created_at"],
-        "completed_at": row.get("completed_at"),
+        "affiliate_url": collab.deliverables.get("affiliate_url") if isinstance(collab.deliverables, dict) else None,
+        "created_at": collab.created_at,
+        "completed_at": collab.completed_at,
     }
 
 
@@ -63,14 +65,14 @@ async def list_collaborations(
 
     if role == "creator":
         creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
-        rows, total = await repo.list_by_creator(
+        collabs, total = await repo.list_by_creator(
             creator_id=creator_id,
             page=page,
             page_size=page_size,
         )
     elif role == "business":
         business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
-        rows, total = await repo.list_by_business(
+        collabs, total = await repo.list_by_business(
             business_id=business_id,
             page=page,
             page_size=page_size,
@@ -78,7 +80,7 @@ async def list_collaborations(
     else:
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
-    items = [_row_to_collaboration_response(row) for row in rows]
+    items = [_collaboration_to_response(c) for c in collabs]
 
     return {
         "items": items,
@@ -94,9 +96,9 @@ async def get_collaboration(
     repo: CollaborationRepository | None = None,
 ) -> dict:
     repo = repo or CollaborationRepository()
-    row = await repo.get_by_id(collaboration_id)
+    collab = await repo.get_by_id(collaboration_id)
 
-    if not row:
+    if not collab:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Collaboration not found",
@@ -118,6 +120,6 @@ async def get_collaboration(
         for sub in submissions_raw
     ]
 
-    resp = _row_to_collaboration_response(row)
+    resp = _collaboration_to_response(collab)
     resp["content_submissions"] = submissions
     return resp

@@ -1,8 +1,9 @@
+from app.models.chat import Conversation, Message
 from app.repositories.base import BaseRepository
 
 
 class ChatRepository(BaseRepository):
-    async def list_conversations(self, profile_id: str) -> list[dict]:
+    async def list_conversations(self, profile_id: str) -> list[Conversation]:
         query = (
             (await self._table("conversations"))
             .select("*")
@@ -10,16 +11,18 @@ class ChatRepository(BaseRepository):
             .order("last_message_at", desc=True)
         )
         result = await self._execute(query)
-        return result.data or []
+        rows = result.data or []
+        return [Conversation.from_row(row) for row in rows]
 
-    async def get_conversation(self, conversation_id: str) -> dict | None:
-        return await self.select_one(
+    async def get_conversation(self, conversation_id: str) -> Conversation | None:
+        row = await self.select_one(
             "conversations",
             columns="*",
             filters={"id": conversation_id},
         )
+        return Conversation.from_row(row) if row else None
 
-    async def list_messages(self, conversation_id: str) -> list[dict]:
+    async def list_messages(self, conversation_id: str) -> list[Message]:
         query = (
             (await self._table("messages"))
             .select("*")
@@ -27,7 +30,8 @@ class ChatRepository(BaseRepository):
             .order("created_at", desc=False)
         )
         result = await self._execute(query)
-        return result.data or []
+        rows = result.data or []
+        return [Message.from_row(row) for row in rows]
 
     async def upsert_read(self, conversation_id: str, profile_id: str) -> None:
         await self.upsert("conversation_reads", {

@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 from supabase_auth.errors import AuthApiError
 
+from app.models.user import UserProfile
 from app.schemas.auth import GoogleAuthRequest
 from app.services import auth_service
 
@@ -21,6 +22,20 @@ PROFILE = {
     "role": "creator",
     "is_active": True,
 }
+
+
+def _make_profile(data: dict) -> UserProfile:
+    """Build a UserProfile model from a raw dict (mirrors repo from_row)."""
+    from app.core.enums import UserRole
+
+    return UserProfile(
+        id=data["id"],
+        auth_id=data["auth_id"],
+        email=data["email"],
+        role=UserRole(data["role"]),
+        is_active=data.get("is_active", True),
+        created_at=data.get("created_at", NOW),
+    )
 
 
 class FakeUser:
@@ -66,12 +81,12 @@ class FakeProfileRepo:
         self.update_role_calls = []
 
     async def get_by_auth_id(self, auth_id):
-        return self._profile
+        return _make_profile(self._profile)
 
     async def update_role(self, profile_id, role):
         self.update_role_calls.append((profile_id, role))
         self._profile = {**self._profile, "role": role}
-        return self._profile
+        return _make_profile(self._profile)
 
 
 class FakeCreatorRepo:

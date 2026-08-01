@@ -4,43 +4,46 @@ from fastapi import HTTPException, status
 
 from app.core.crypto import decrypt_token, encrypt_token
 from app.core.enums import UserRole
+from app.models.campaign import Campaign
+from app.models.creator import Creator, PortfolioItem
 from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.schemas.creator import (
     CreatorResponse,
+    CreatorStatsResponse,
     CreatorUpdateRequest,
     PortfolioItemCreateRequest,
 )
 from app.services import instagram_service
-from app.services.campaign_service import _row_to_campaign_response
+from app.services.campaign_service import _campaign_to_response
 
 _TOKEN_REFRESH_THRESHOLD = timedelta(days=10)
 _DEFAULT_TOKEN_LIFETIME_SECONDS = 5_184_000  # ~60 days
 
 
-def _row_to_creator_response(row: dict) -> CreatorResponse:
-    """Single source of truth for mapping a `creators` row to a CreatorResponse.
+def _creator_to_response(creator: Creator) -> CreatorResponse:
+    """Single source of truth for mapping a Creator model to a CreatorResponse.
 
     `user_id` is `profile_id` — the FK already IS the profile's id.
     """
     return CreatorResponse(
-        id=row["id"],
-        user_id=row["profile_id"],
-        name=row["name"],
-        username=row.get("username"),
-        profile_photo_url=row.get("profile_photo_url"),
-        niche=row.get("niche"),
-        city=row.get("city"),
-        follower_count=row.get("follower_count"),
-        engagement_rate=row.get("engagement_rate"),
-        bio=row.get("bio"),
-        instagram_handle=row.get("instagram_handle"),
-        created_at=row["created_at"],
-        tiktok_handle=row.get("tiktok_handle"),
-        instagram_connected=bool(row.get("instagram_user_id") and row.get("instagram_access_token")),
-        instagram_synced_at=row.get("instagram_synced_at"),
-        website=row.get("website"),
-        following_count=row.get("following_count"),
+        id=creator.id,
+        user_id=creator.profile_id,
+        name=creator.name,
+        username=creator.username,
+        profile_photo_url=creator.profile_photo_url,
+        niche=creator.niche,
+        city=creator.city,
+        follower_count=creator.follower_count,
+        engagement_rate=creator.engagement_rate,
+        bio=creator.bio,
+        instagram_handle=creator.instagram_handle,
+        created_at=creator.created_at,
+        tiktok_handle=creator.tiktok_handle,
+        instagram_connected=creator.instagram_connected,
+        instagram_synced_at=creator.instagram_synced_at,
+        website=creator.website,
+        following_count=creator.following_count,
     )
 
 
@@ -50,12 +53,12 @@ async def get_creator_by_id(
     repo: CreatorRepository | None = None,
 ) -> CreatorResponse | None:
     repo = repo or CreatorRepository()
-    row = await repo.get_by_id(creator_id)
+    creator = await repo.get_by_id(creator_id)
 
-    if not row:
+    if not creator:
         return None
 
-    return _row_to_creator_response(row)
+    return _creator_to_response(creator)
 
 
 async def list_creators(
@@ -70,7 +73,7 @@ async def list_creators(
     repo: CreatorRepository | None = None,
 ) -> dict:
     repo = repo or CreatorRepository()
-    rows, total = await repo.list_filtered(
+    creators, total = await repo.list_filtered(
         search=search,
         niche=niche,
         city=city,
@@ -81,28 +84,28 @@ async def list_creators(
     )
 
     return {
-        "items": [_row_to_creator_response(row) for row in rows],
+        "items": [_creator_to_response(c) for c in creators],
         "total": total,
         "page": page,
         "page_size": page_size,
     }
 
 
-def _row_to_portfolio_item(row: dict) -> dict:
+def _portfolio_item_to_response(item: PortfolioItem) -> dict:
     return {
-        "id": row["id"],
-        "creator_id": row["creator_id"],
-        "title": row.get("title"),
-        "media_url": row["media_url"],
-        "post_link": row.get("post_link"),
-        "media_type": row.get("media_type", "photo"),
-        "like_count": row.get("like_count"),
-        "comment_count": row.get("comment_count"),
-        "created_at": row["created_at"],
+        "id": item.id,
+        "creator_id": item.creator_id,
+        "title": item.title,
+        "media_url": item.media_url,
+        "post_link": item.post_link,
+        "media_type": item.media_type,
+        "like_count": item.like_count,
+        "comment_count": item.comment_count,
+        "created_at": item.created_at,
     }
 
 
-def _ensure_creator_access(creator: dict | None, profile_id: str, role: UserRole) -> dict:
+def _ensure_creator_access(creator: Creator | None, profile_id: str, role: UserRole) -> Creator:
     """Ownership gate for write paths — the service-role client bypasses RLS,
     so this check is the only backstop. 404 if the creator doesn't exist
     (don't leak existence), 403 if it exists but belongs to someone else.
@@ -113,7 +116,7 @@ def _ensure_creator_access(creator: dict | None, profile_id: str, role: UserRole
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Creator not found",
         )
-    if role != UserRole.SUPERADMIN and creator["profile_id"] != profile_id:
+    if role != UserRole.SUPERADMIN and creator.profile_id != profile_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not own this creator profile",
@@ -140,7 +143,7 @@ async def update_creator(
     creator = await repo.get_by_id(creator_id)
     _ensure_creator_access(creator, profile_id, role)
 
-    if data.follower_count is not None and creator.get("instagram_access_token"):
+    if data.follower_count is not None and creator.instagram_access_token:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="follower_count is managed by your connected Instagram account — use sync instead",
@@ -148,7 +151,7 @@ async def update_creator(
 
     update_data = data.model_dump(exclude_none=True)
     if not update_data:
-        return _row_to_creator_response(creator)
+        return _creator_to_response(creator)
 
     updated = await repo.update_creator(creator_id, update_data)
     if not updated:
@@ -156,7 +159,7 @@ async def update_creator(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Creator not found",
         )
-    return _row_to_creator_response(updated)
+    return _creator_to_response(updated)
 
 
 async def add_portfolio_item(
@@ -171,16 +174,16 @@ async def add_portfolio_item(
     creator = await repo.get_by_id(creator_id)
     _ensure_creator_access(creator, profile_id, role)
 
-    row = await repo.insert_portfolio_item({
+    item = await repo.insert_portfolio_item({
         "creator_id": creator_id,
         **data.model_dump(),
     })
-    if not row:
+    if not item:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to add portfolio item",
         )
-    return _row_to_portfolio_item(row)
+    return _portfolio_item_to_response(item)
 
 
 async def delete_portfolio_item(
@@ -196,7 +199,7 @@ async def delete_portfolio_item(
     _ensure_creator_access(creator, profile_id, role)
 
     item = await repo.get_portfolio_item(item_id)
-    if not item or item["creator_id"] != creator_id:
+    if not item or item.creator_id != creator_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Portfolio item not found",
@@ -257,7 +260,7 @@ async def get_creator_portfolio(
     repo: CreatorRepository | None = None,
 ) -> dict:
     repo = repo or CreatorRepository()
-    rows, total = await repo.list_portfolio(
+    items, total = await repo.list_portfolio(
         creator_id=creator_id,
         media_type=media_type,
         page=page,
@@ -265,7 +268,7 @@ async def get_creator_portfolio(
     )
 
     return {
-        "items": [_row_to_portfolio_item(row) for row in rows],
+        "items": [_portfolio_item_to_response(item) for item in items],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -276,7 +279,7 @@ async def get_creator_stats(
     profile_id: str,
     *,
     repo: CreatorRepository | None = None,
-) -> dict:
+) -> CreatorStatsResponse:
     repo = repo or CreatorRepository()
     creator_id = await repo.get_id_by_profile_id(profile_id)
 
@@ -288,10 +291,10 @@ async def get_creator_stats(
 
     active_count = await repo.count_active_collaborations(creator_id)
 
-    return {
-        "active_collaborations_count": active_count,
-        "engagement_growth_pct": None,
-    }
+    return CreatorStatsResponse(
+        active_collaborations_count=active_count,
+        engagement_growth_pct=None,
+    )
 
 
 async def list_saved_campaigns(
@@ -318,9 +321,10 @@ async def list_saved_campaigns(
 
     items = []
     for row in rows:
-        campaign = row.get("campaigns")
-        if campaign:
-            items.append(_row_to_campaign_response(campaign))
+        campaign_row = row.get("campaigns")
+        if campaign_row:
+            campaign = Campaign.from_row(campaign_row)
+            items.append(_campaign_to_response(campaign))
 
     return {
         "items": items,
@@ -375,7 +379,7 @@ async def connect_instagram(
 
     instagram_user_id = str(ig_profile["user_id"])
     other = await repo.get_by_instagram_user_id(instagram_user_id)
-    if other and other["profile_id"] != profile_id:
+    if other and other.profile_id != profile_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This Instagram account is already connected to a different Kolably account",
@@ -395,7 +399,7 @@ async def connect_instagram(
         **instagram_service.build_profile_prefill(ig_profile, engagement_rate),
     })
 
-    return _row_to_creator_response(updated)
+    return _creator_to_response(updated)
 
 
 async def sync_instagram(
@@ -413,11 +417,11 @@ async def sync_instagram(
     """
     repo = repo or CreatorRepository()
     creator = await repo.get_by_profile_id(profile_id)
-    if not creator or not creator.get("instagram_access_token"):
+    if not creator or not creator.instagram_access_token:
         raise _not_connected()
 
-    access_token = decrypt_token(creator["instagram_access_token"])
-    expires_at = _parse_expiry(creator.get("instagram_token_expires_at"))
+    access_token = decrypt_token(creator.instagram_access_token)
+    expires_at = _parse_expiry(creator.instagram_token_expires_at)
 
     if expires_at is None or expires_at - datetime.now(UTC) < _TOKEN_REFRESH_THRESHOLD:
         refreshed = await instagram_service.refresh_long_lived_token(access_token)
@@ -440,7 +444,7 @@ async def sync_instagram(
         "instagram_synced_at": datetime.now(UTC).isoformat(),
     })
 
-    return _row_to_creator_response(updated)
+    return _creator_to_response(updated)
 
 
 async def disconnect_instagram(
@@ -473,18 +477,18 @@ async def import_instagram_portfolio(
 ) -> list[dict]:
     repo = repo or CreatorRepository()
     creator = await repo.get_by_profile_id(profile_id)
-    if not creator or not creator.get("instagram_access_token"):
+    if not creator or not creator.instagram_access_token:
         raise _not_connected()
 
-    access_token = decrypt_token(creator["instagram_access_token"])
+    access_token = decrypt_token(creator.instagram_access_token)
     media = await instagram_service.fetch_media(access_token)
 
     if not media:
         return []
 
-    items = instagram_service.build_portfolio_items(creator["id"], media)
+    items = instagram_service.build_portfolio_items(creator.id, media)
     inserted = await repo.insert_portfolio_items(items)
-    return [_row_to_portfolio_item(row) for row in inserted]
+    return [_portfolio_item_to_response(item) for item in inserted]
 
 
 def _parse_expiry(value) -> datetime | None:

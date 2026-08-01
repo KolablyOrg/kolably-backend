@@ -1,47 +1,51 @@
 from fastapi import HTTPException, status
 
+from app.models.business import Business
 from app.repositories.business_repo import BusinessRepository
-from app.schemas.business import BusinessResponse
+from app.schemas.business import BusinessResponse, BusinessStatsResponse
+from app.schemas.campaign import CampaignSummary
 
 
-def _row_to_business_response(row: dict) -> BusinessResponse:
-    """Single source of truth for mapping a `businesses` row to a BusinessResponse.
+def _business_to_response(business: Business) -> BusinessResponse:
+    """Single source of truth for mapping a Business model to a BusinessResponse.
 
     `user_id` is `profile_id` — the FK already IS the profile's id.
     """
     return BusinessResponse(
-        id=row["id"],
-        user_id=row["profile_id"],
-        business_name=row["business_name"],
-        owner_name=row.get("owner_name", ""),
-        category=row.get("category", ""),
-        city=row.get("city", ""),
-        description=row.get("description"),
-        address=row.get("address"),
-        logo_url=row.get("logo_url"),
-        instagram_page=row.get("instagram_page"),
-        website=row.get("website"),
-        created_at=row["created_at"],
-        is_verified=row.get("is_verified", False),
+        id=business.id,
+        user_id=business.profile_id,
+        business_name=business.business_name,
+        owner_name=business.owner_name,
+        category=business.category,
+        city=business.city,
+        description=business.description,
+        address=business.address,
+        logo_url=business.logo_url,
+        instagram_page=business.instagram_page,
+        website=business.website,
+        created_at=business.created_at,
+        is_verified=business.is_verified,
     )
 
 
-def _row_to_campaign_summary(row: dict) -> dict:
-    return {
-        "id": row["id"],
-        "business_id": row["business_id"],
-        "title": row["title"],
-        "cover_image_url": row.get("cover_image_url"),
-        "objective": row.get("objective"),
-        "compensation_type": row.get("compensation_type"),
-        "cash_amount_min": row.get("cash_amount_min"),
-        "cash_amount_max": row.get("cash_amount_max"),
-        "creator_category": row.get("creator_category", ""),
-        "location": row.get("location", ""),
-        "deadline": row.get("deadline"),
-        "status": row["status"],
-        "created_at": row["created_at"],
-    }
+def _campaign_to_summary(campaign) -> CampaignSummary:
+    """Convert a Campaign model to CampaignSummary schema."""
+    return CampaignSummary(
+        id=campaign.id,
+        business_id=campaign.business_id,
+        title=campaign.title,
+        cover_image_url=campaign.cover_image_url,
+        objective=campaign.objective,
+        compensation_type=campaign.compensation_type,
+        cash_amount_min=campaign.cash_amount_min,
+        cash_amount_max=campaign.cash_amount_max,
+        creator_category=campaign.creator_category,
+        location=campaign.location,
+        deadline=campaign.deadline,
+        status=campaign.status,
+        created_at=campaign.created_at,
+        applicant_count=campaign.applicant_count,
+    )
 
 
 async def _get_business_id_for_user(
@@ -69,7 +73,7 @@ async def list_businesses(
     repo: BusinessRepository | None = None,
 ) -> dict:
     repo = repo or BusinessRepository()
-    rows, total = await repo.list_filtered(
+    businesses, total = await repo.list_filtered(
         search=search,
         category=category,
         city=city,
@@ -78,7 +82,7 @@ async def list_businesses(
     )
 
     return {
-        "items": [_row_to_business_response(row) for row in rows],
+        "items": [_business_to_response(b) for b in businesses],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -91,12 +95,12 @@ async def get_business_by_id(
     repo: BusinessRepository | None = None,
 ) -> BusinessResponse | None:
     repo = repo or BusinessRepository()
-    row = await repo.get_by_id(business_id)
+    business = await repo.get_by_id(business_id)
 
-    if not row:
+    if not business:
         return None
 
-    return _row_to_business_response(row)
+    return _business_to_response(business)
 
 
 async def list_business_campaigns(
@@ -108,7 +112,7 @@ async def list_business_campaigns(
     repo: BusinessRepository | None = None,
 ) -> dict:
     repo = repo or BusinessRepository()
-    rows, total = await repo.list_campaigns(
+    campaigns, total = await repo.list_campaigns(
         business_id=business_id,
         status=status,
         page=page,
@@ -116,7 +120,7 @@ async def list_business_campaigns(
     )
 
     return {
-        "items": [_row_to_campaign_summary(row) for row in rows],
+        "items": [_campaign_to_summary(c) for c in campaigns],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -147,7 +151,7 @@ async def get_business_stats(
     profile_id: str,
     *,
     repo: BusinessRepository | None = None,
-) -> dict:
+) -> BusinessStatsResponse:
     repo = repo or BusinessRepository()
     business_id = await repo.get_id_by_profile_id(profile_id)
 
@@ -167,9 +171,9 @@ async def get_business_stats(
             for sub in subs:
                 total_reach += sub.get("views", 0) or 0
 
-    return {
-        "total_reach": total_reach,
-        "reach_change_pct": 0.0,
-        "avg_engagement_rate": 0.0,
-        "engagement_series": [0.0] * 7,
-    }
+    return BusinessStatsResponse(
+        total_reach=total_reach,
+        reach_change_pct=0.0,
+        avg_engagement_rate=0.0,
+        engagement_series=[0.0] * 7,
+    )

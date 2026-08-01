@@ -7,6 +7,8 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.core.enums import UserRole
+from app.models.campaign import Campaign
+from app.models.creator import Creator, PortfolioItem
 from app.schemas.creator import (
     CreatorResponse,
     CreatorUpdateRequest,
@@ -72,6 +74,14 @@ PORTFOLIO_ITEM_ROW = {
 }
 
 
+def _make_creator(row: dict) -> Creator:
+    return Creator.from_row(row)
+
+
+def _make_portfolio_item(row: dict) -> PortfolioItem:
+    return PortfolioItem.from_row(row)
+
+
 class FakeCreatorRepo:
     """Duck-typed stand-in for CreatorRepository."""
 
@@ -101,10 +111,10 @@ class FakeCreatorRepo:
         self.unsaved = None
 
     async def get_by_id(self, creator_id: str):
-        return self._row
+        return _make_creator(self._row) if self._row else None
 
     async def list_filtered(self, **kwargs):
-        return self._rows, self._total
+        return [_make_creator(r) for r in self._rows], self._total
 
     async def get_id_by_profile_id(self, profile_id: str):
         return self._creator_id
@@ -114,14 +124,14 @@ class FakeCreatorRepo:
 
     async def update_creator(self, creator_id: str, data: dict):
         self.updated_with = data
-        return {**self._row, **data} if self._row else None
+        return _make_creator({**self._row, **data}) if self._row else None
 
     async def get_portfolio_item(self, item_id: str):
-        return self._portfolio_item
+        return _make_portfolio_item(self._portfolio_item) if self._portfolio_item else None
 
     async def insert_portfolio_item(self, data: dict):
         self.inserted_item = data
-        return {**data, "id": "pi1", "created_at": "2024-01-01T00:00:00+00:00"}
+        return _make_portfolio_item({**data, "id": "pi1", "created_at": "2024-01-01T00:00:00+00:00"})
 
     async def delete_portfolio_item(self, item_id: str, creator_id: str):
         self.deleted = (item_id, creator_id)
@@ -142,7 +152,7 @@ class FakeCampaignRepo:
         self._row = row
 
     async def get_by_id(self, campaign_id: str):
-        return self._row
+        return Campaign.from_row(self._row) if self._row else None
 
 
 async def test_get_creator_by_id_returns_none_when_missing():
@@ -183,7 +193,7 @@ async def test_list_creators_uses_same_serialization_as_get():
     assert len(result["items"]) == 1
     item = result["items"][0]
     assert isinstance(item, CreatorResponse)
-    assert item.model_dump() == creator_service._row_to_creator_response(dict(CREATOR_ROW)).model_dump()
+    assert item.model_dump() == creator_service._creator_to_response(_make_creator(dict(CREATOR_ROW))).model_dump()
 
 
 async def test_get_creator_stats_404_without_creator_profile():
@@ -200,7 +210,7 @@ async def test_get_creator_stats_counts_active_collaborations():
 
     stats = await creator_service.get_creator_stats(profile_id="p1", repo=repo)
 
-    assert stats["active_collaborations_count"] == 3
+    assert stats.active_collaborations_count == 3
 
 
 # ── Serialization ─────────────────────────────────────
@@ -209,7 +219,7 @@ async def test_get_creator_stats_counts_active_collaborations():
 async def test_row_to_creator_response_includes_instagram_handle():
     """Regression: instagram_handle is a public CreatorBase field and must be
     mapped through (it was silently dropped, always serializing as None)."""
-    creator = creator_service._row_to_creator_response(dict(CREATOR_ROW))
+    creator = creator_service._creator_to_response(_make_creator(dict(CREATOR_ROW)))
 
     assert creator.instagram_handle == "@alice"
 
@@ -489,7 +499,7 @@ async def test_list_saved_campaigns_returns_full_campaign_objects():
 
     assert result["total"] == 1
     item = result["items"][0]
-    assert item["id"] == "camp1"
-    assert item["description"] == "Promote the summer menu"
-    assert item["deliverables"][0]["platform"] == "instagram"
-    assert item["max_creators"] == 5
+    assert item.id == "camp1"
+    assert item.description == "Promote the summer menu"
+    assert item.deliverables[0].platform.value == "instagram"
+    assert item.max_creators == 5

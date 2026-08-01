@@ -1,27 +1,30 @@
+from app.models.application import CampaignApplication
 from app.repositories.base import BaseRepository
 
 
 class ApplicationRepository(BaseRepository):
-    async def get_by_id(self, application_id: str) -> dict | None:
-        return await self.select_one(
+    async def get_by_id(self, application_id: str) -> CampaignApplication | None:
+        row = await self.select_one(
             "campaign_applications",
             columns="*",
             filters={"id": application_id},
         )
+        return CampaignApplication.from_row(row) if row else None
 
-    async def get_existing(self, campaign_id: str, creator_id: str) -> dict | None:
-        return await self.select_one(
+    async def get_existing(self, campaign_id: str, creator_id: str) -> CampaignApplication | None:
+        row = await self.select_one(
             "campaign_applications",
-            columns="id",
+            columns="*",
             filters={"campaign_id": campaign_id, "creator_id": creator_id},
         )
+        return CampaignApplication.from_row(row) if row else None
 
     async def list_by_creator(
         self,
         creator_id: str,
         page: int = 1,
         page_size: int = 20,
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[CampaignApplication], int]:
         query = (
             (await self._table("campaign_applications"))
             .select(
@@ -37,7 +40,8 @@ class ApplicationRepository(BaseRepository):
         end = start + page_size - 1
         result = await self._execute(query.range(start, end))
 
-        return result.data or [], result.count or 0
+        rows = result.data or []
+        return [CampaignApplication.from_row(row) for row in rows], result.count or 0
 
     async def list_by_business(
         self,
@@ -45,7 +49,7 @@ class ApplicationRepository(BaseRepository):
         status: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[CampaignApplication], int]:
         query = (
             (await self._table("campaign_applications"))
             .select(
@@ -64,9 +68,10 @@ class ApplicationRepository(BaseRepository):
         end = start + page_size - 1
         result = await self._execute(query.range(start, end))
 
-        return result.data or [], result.count or 0
+        rows = result.data or []
+        return [CampaignApplication.from_row(row) for row in rows], result.count or 0
 
-    async def list_by_campaign(self, campaign_id: str) -> list[dict]:
+    async def list_by_campaign(self, campaign_id: str) -> list[CampaignApplication]:
         query = (
             (await self._table("campaign_applications"))
             .select("*, creators(id,name,profile_photo_url,follower_count,niche)")
@@ -74,8 +79,9 @@ class ApplicationRepository(BaseRepository):
         )
 
         result = await self._execute(query)
-        return result.data or []
+        rows = result.data or []
+        return [CampaignApplication.from_row(row) for row in rows]
 
-    async def insert_application(self, data: dict) -> dict | None:
+    async def insert_application(self, data: dict) -> CampaignApplication | None:
         rows = await self.insert("campaign_applications", data)
-        return rows[0] if rows else None
+        return CampaignApplication.from_row(rows[0]) if rows else None

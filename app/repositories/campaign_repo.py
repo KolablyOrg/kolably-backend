@@ -1,13 +1,15 @@
+from app.models.campaign import Campaign
 from app.repositories.base import BaseRepository
 
 
 class CampaignRepository(BaseRepository):
-    async def get_by_id(self, campaign_id: str) -> dict | None:
-        return await self.select_one(
+    async def get_by_id(self, campaign_id: str) -> Campaign | None:
+        row = await self.select_one(
             "campaigns",
             columns="*",
             filters={"id": campaign_id},
         )
+        return Campaign.from_row(row) if row else None
 
     async def list_active(
         self,
@@ -15,7 +17,7 @@ class CampaignRepository(BaseRepository):
         category: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[Campaign], int]:
         query = (
             (await self._table("campaigns"))
             .select("*", count="exact")
@@ -31,15 +33,16 @@ class CampaignRepository(BaseRepository):
         end = start + page_size - 1
         result = await self._execute(query.range(start, end))
 
-        return result.data or [], result.count or 0
+        rows = result.data or []
+        return [Campaign.from_row(row) for row in rows], result.count or 0
 
-    async def insert_campaign(self, data: dict) -> dict | None:
+    async def insert_campaign(self, data: dict) -> Campaign | None:
         rows = await self.insert("campaigns", data)
-        return rows[0] if rows else None
+        return Campaign.from_row(rows[0]) if rows else None
 
-    async def update_campaign(self, campaign_id: str, data: dict) -> dict | None:
+    async def update_campaign(self, campaign_id: str, data: dict) -> Campaign | None:
         rows = await self.update("campaigns", data, {"id": campaign_id})
-        return rows[0] if rows else None
+        return Campaign.from_row(rows[0]) if rows else None
 
     async def delete_campaign(self, campaign_id: str) -> None:
         await self.delete("campaigns", {"id": campaign_id})
