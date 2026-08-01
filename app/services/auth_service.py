@@ -593,17 +593,24 @@ async def get_user_profile(
 
     response = _profile_to_dict(profile)
 
+    # profiles.full_name is never written by handle_new_auth_user() (the
+    # signup trigger only sets auth_id/email/role), so it's always NULL —
+    # fall back to the role-specific record every client actually reads.
     if profile.role.value in ("creator", "superadmin"):
         creator_repo = creator_repo or CreatorRepository()
         creator = await creator_repo.get_by_profile_id(profile.id)
         if creator:
             response["creator"] = creator.to_public_row()
+            if not response["full_name"]:
+                response["full_name"] = creator.name
 
     if profile.role.value in ("business", "superadmin"):
         business_repo = business_repo or BusinessRepository()
         business = await business_repo.get_by_profile_id(profile.id)
         if business:
             response["business"] = business.to_row()
+            if not response["full_name"]:
+                response["full_name"] = business.owner_name or business.business_name
 
     return response
 
