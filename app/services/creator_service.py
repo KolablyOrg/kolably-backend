@@ -525,14 +525,14 @@ async def preview_instagram_media(
     return [
         {
             "id": str(item["id"]),
-            "media_url": item.get("media_url"),
+            "media_url": instagram_service.get_media_url_or_thumbnail(item),
             "permalink": item.get("permalink"),
             "media_type": "video" if item.get("media_type") == "VIDEO" else "photo",
             "like_count": item.get("like_count"),
             "comment_count": item.get("comments_count"),
         }
         for item in media
-        if item.get("media_url")
+        if instagram_service.get_media_url_or_thumbnail(item)
     ]
 
 

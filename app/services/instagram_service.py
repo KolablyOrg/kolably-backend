@@ -30,8 +30,8 @@ _PROFILE_FIELDS = (
     "followers_count,follows_count,media_count,profile_picture_url"
 )
 _MEDIA_FIELDS = (
-    "id,caption,media_type,media_product_type,media_url,permalink,"
-    "like_count,comments_count,timestamp,children{media_url,media_type}"
+    "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,"
+    "like_count,comments_count,timestamp,children{media_url,thumbnail_url,media_type}"
 )
 _INSIGHT_METRICS = ["reach", "likes", "comments", "shares", "saved", "total_interactions"]
 
@@ -93,22 +93,23 @@ def build_profile_prefill(ig_profile: dict, engagement_rate: float | None) -> di
     }
 
 
+def get_media_url_or_thumbnail(item: dict) -> str | None:
+    """Safely extract a viewable image URL for any media type (photo, video, carousel)."""
+    url = item.get("thumbnail_url") or item.get("media_url")
+    if url:
+        return url
+    children = item.get("children", {}).get("data", [])
+    if children:
+        return children[0].get("thumbnail_url") or children[0].get("media_url")
+    return None
+
+
 def build_portfolio_items(creator_id: str, media: list[dict]) -> list[dict]:
     """Shared shape for mapping fetched IG media into `portfolio_items` rows."""
-    def get_url(item: dict) -> str | None:
-        url = item.get("media_url")
-        if url:
-            return url
-        # Fallback for CAROUSEL_ALBUM
-        children = item.get("children", {}).get("data", [])
-        if children and children[0].get("media_url"):
-            return children[0]["media_url"]
-        return None
-
     return [
         {
             "creator_id": creator_id,
-            "media_url": get_url(item),
+            "media_url": get_media_url_or_thumbnail(item),
             "post_link": item.get("permalink"),
             "media_type": "video" if item.get("media_type") == "VIDEO" else "photo",
             "like_count": item.get("like_count"),
