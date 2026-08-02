@@ -30,6 +30,9 @@ class MessageResponse(BaseModel):
     sender_id: str
     content: str
     created_at: datetime
+    # Only meaningful for messages the requesting user sent — true once the
+    # other participant's last_read_at has passed this message's timestamp.
+    seen: bool = False
 
 
 class ConversationResponse(BaseModel):
@@ -41,6 +44,9 @@ class ConversationResponse(BaseModel):
     last_message_at: datetime | None = None
     unread_count: int = 0
     created_at: datetime
+    # Only populated by GET /chat/conversations/{id} — the list endpoint
+    # doesn't fetch messages, so this defaults to empty there.
+    messages: list[MessageResponse] = []
 
 
 class UnreadCountResponse(BaseModel):

@@ -206,6 +206,74 @@ async def test_get_conversation_marks_read_and_returns_messages():
     assert ("conv1", "p-creator") in repo.reads
 
 
+async def test_get_conversation_marks_own_messages_seen_once_other_participant_read_past_them():
+    """WhatsApp/Instagram-style single-vs-double-tick: a message I sent shows
+    seen once the other participant's last_read_at has passed its timestamp,
+    and not before — even for a later message I sent that they haven't
+    scrolled to yet."""
+    repo = FakeChatRepo(messages=[
+        Message.from_row({
+            "id": "m1", "conversation_id": "conv1", "sender_id": "p-creator",
+            "content": "Hey!", "created_at": "2024-01-01T12:00:00+00:00",
+        }),
+        Message.from_row({
+            "id": "m2", "conversation_id": "conv1", "sender_id": "p-creator",
+            "content": "You there?", "created_at": "2024-01-01T13:00:00+00:00",
+        }),
+    ])
+    # Business read up through 12:30 — sees m1 but not m2 yet.
+    repo.reads[("conv1", "p-business")] = "2024-01-01T12:30:00+00:00"
+
+    result = await chat_service.get_conversation("conv1", "p-creator", repo=repo, **_repos())
+
+    by_id = {m["id"]: m for m in result["messages"]}
+    assert by_id["m1"]["seen"] is True
+    assert by_id["m2"]["seen"] is False
+
+
+async def test_get_conversation_never_marks_received_messages_seen():
+    """`seen` is a property of what I sent — it shouldn't ever apply to a
+    message I received, regardless of my own read state."""
+    repo = FakeChatRepo(messages=[Message.from_row({
+        "id": "m1", "conversation_id": "conv1", "sender_id": "p-business",
+        "content": "Hello", "created_at": "2024-01-01T12:00:00+00:00",
+    })])
+    repo.reads[("conv1", "p-business")] = "2024-01-02T00:00:00+00:00"
+
+    result = await chat_service.get_conversation("conv1", "p-creator", repo=repo, **_repos())
+
+    assert result["messages"][0]["seen"] is False
+
+
+def test_conversation_response_schema_round_trips_messages():
+    """Regression: ConversationResponse had no `messages` field at all, so
+    FastAPI's response_model silently dropped whatever
+    chat_service.get_conversation() put there — every real HTTP response
+    came back with no message history, no matter what the service fetched."""
+    from app.schemas.chat import ConversationResponse
+
+    payload = {
+        "id": "conv1",
+        "participant_ids": ["p1", "p2"],
+        "other_participant": {"id": "p2", "name": "Acme", "avatar_url": None},
+        "collaboration_id": None,
+        "last_message": "hi",
+        "last_message_at": "2024-01-01T00:00:00+00:00",
+        "unread_count": 0,
+        "created_at": "2024-01-01T00:00:00+00:00",
+        "messages": [{
+            "id": "m1", "conversation_id": "conv1", "sender_id": "p1",
+            "content": "hi", "created_at": "2024-01-01T00:00:00+00:00", "seen": True,
+        }],
+    }
+
+    dumped = ConversationResponse(**payload).model_dump()
+
+    assert len(dumped["messages"]) == 1
+    assert dumped["messages"][0]["content"] == "hi"
+    assert dumped["messages"][0]["seen"] is True
+
+
 async def test_get_conversation_rejects_non_participant():
     repo = FakeChatRepo()
     with pytest.raises(HTTPException) as exc:

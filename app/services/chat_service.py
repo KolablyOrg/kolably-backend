@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import HTTPException, status
 
 from app.core.enums import NotificationType
@@ -7,6 +9,14 @@ from app.repositories.chat_repo import ChatRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.profile_repo import ProfileRepository
 from app.services import notification_service
+
+
+def _parse_dt(value) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(value)
 
 
 async def _resolve_participant_summary(
@@ -32,14 +42,28 @@ async def _resolve_participant_summary(
     return {"id": profile_id, "name": profile.email, "avatar_url": None}
 
 
-def _message_to_response(msg: Message) -> dict:
+def _message_to_response(msg: Message, *, seen: bool = False) -> dict:
     return {
         "id": msg.id,
         "conversation_id": msg.conversation_id,
         "sender_id": msg.sender_id,
         "content": msg.content,
         "created_at": msg.created_at,
+        "seen": seen,
     }
+
+
+def _is_seen_by_other(msg: Message, my_id: str, other_last_read_at) -> bool:
+    """A message only shows as "seen" if it's mine and the other participant
+    has read up to (or past) its timestamp — not meaningful for messages I
+    received, so those always report False regardless of my own read state."""
+    if msg.sender_id != my_id:
+        return False
+    other_read = _parse_dt(other_last_read_at)
+    msg_created = _parse_dt(msg.created_at)
+    if not other_read or not msg_created:
+        return False
+    return msg_created <= other_read
 
 
 async def _conversation_to_response(
@@ -134,11 +158,17 @@ async def get_conversation(
     messages = await repo.list_messages(conversation_id)
     await repo.upsert_read(conversation_id, profile_id)
 
+    other_id = next((pid for pid in participant_ids if pid != profile_id), None)
+    other_last_read_at = await repo.get_last_read_at(conversation_id, other_id) if other_id else None
+
     resp = await _conversation_to_response(
         conversation, profile_id, repo=repo, profile_repo=profile_repo,
         creator_repo=creator_repo, business_repo=business_repo,
     )
-    resp["messages"] = [_message_to_response(m) for m in messages]
+    resp["messages"] = [
+        _message_to_response(m, seen=_is_seen_by_other(m, profile_id, other_last_read_at))
+        for m in messages
+    ]
     return resp
 
 
