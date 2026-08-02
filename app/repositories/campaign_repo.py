@@ -2,6 +2,14 @@ from app.models.campaign import Campaign
 from app.repositories.base import BaseRepository
 
 
+def _sanitize_search_term(term: str) -> str:
+    """Strip PostgREST `or_()` grammar breakers and LIKE wildcards from user input."""
+    cleaned = term.strip()
+    for ch in (",", "(", ")", ".", "%", "_", "*", '"', "'", "&"):
+        cleaned = cleaned.replace(ch, " ")
+    return " ".join(cleaned.split())
+
+
 class CampaignRepository(BaseRepository):
     async def get_by_id(self, campaign_id: str) -> Campaign | None:
         row = await self.select_one(
@@ -11,21 +19,50 @@ class CampaignRepository(BaseRepository):
         )
         return Campaign.from_row(row) if row else None
 
+    async def _business_ids_matching_name(self, term: str) -> list[str]:
+        result = await self._execute(
+            (await self._table("businesses"))
+            .select("id")
+            .ilike("business_name", f"%{term}%")
+            .limit(50)
+        )
+        return [row["id"] for row in (result.data or []) if row.get("id")]
+
     async def list_active(
         self,
         search: str | None = None,
         category: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        *,
+        extra_category_values: list[str] | None = None,
     ) -> tuple[list[Campaign], int]:
         query = (
             (await self._table("campaigns"))
             .select("*", count="exact")
             .eq("status", "active")
+            .order("created_at", desc=True)
         )
 
         if search:
-            query = query.ilike("title", f"%{search}%")
+            term = _sanitize_search_term(search)
+            if term:
+                brand_ids = await self._business_ids_matching_name(term)
+                clauses = [
+                    f"title.ilike.%{term}%",
+                    f"description.ilike.%{term}%",
+                    f"location.ilike.%{term}%",
+                    f"creator_category.ilike.%{term}%",
+                ]
+                if extra_category_values:
+                    # Exact category matches from label→value mapping (e.g. "Food & Dining" → food)
+                    unique_cats = list(dict.fromkeys(extra_category_values))
+                    if unique_cats:
+                        clauses.append(f"creator_category.in.({','.join(unique_cats)})")
+                if brand_ids:
+                    clauses.append(f"business_id.in.({','.join(brand_ids)})")
+                query = query.or_(",".join(clauses))
+
         if category:
             query = query.eq("creator_category", category)
 

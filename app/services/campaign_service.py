@@ -57,7 +57,13 @@ def _campaign_to_response(campaign: Campaign) -> CampaignResponse:
     )
 
 
-def _campaign_to_summary(campaign: Campaign) -> CampaignSummary:
+def _campaign_to_summary(
+    campaign: Campaign,
+    *,
+    business_name: str | None = None,
+    business_logo_url: str | None = None,
+    is_verified: bool | None = None,
+) -> CampaignSummary:
     """Convert Campaign model to CampaignSummary schema."""
     return CampaignSummary(
         id=campaign.id,
@@ -74,7 +80,25 @@ def _campaign_to_summary(campaign: Campaign) -> CampaignSummary:
         status=campaign.status,
         created_at=campaign.created_at,
         applicant_count=campaign.applicant_count,
+        business_name=business_name,
+        business_logo_url=business_logo_url,
+        is_verified=is_verified,
     )
+
+
+def _category_values_matching_search(term: str) -> list[str]:
+    """Map free-text search onto category values via label/value match."""
+    needle = term.strip().lower()
+    if not needle:
+        return []
+    matches: list[str] = []
+    for cat in CAMPAIGN_CATEGORIES:
+        label = cat.label.lower()
+        if needle == cat.value or needle == label:
+            matches.append(cat.value)
+        elif len(needle) >= 3 and (needle in label or cat.value.startswith(needle)):
+            matches.append(cat.value)
+    return matches
 
 
 async def _get_business_id_for_user(
@@ -277,8 +301,10 @@ async def list_campaigns(
     *,
     campaign_repo: CampaignRepository | None = None,
     creator_repo: CreatorRepository | None = None,
+    business_repo: BusinessRepository | None = None,
 ) -> dict:
     campaign_repo = campaign_repo or CampaignRepository()
+    business_repo = business_repo or BusinessRepository()
 
     if recommended and user and user.role.value == "creator":
         creator_repo = creator_repo or CreatorRepository()
@@ -286,11 +312,14 @@ async def list_campaigns(
         if niche:
             category = niche
 
+    extra_cats = _category_values_matching_search(search) if search else []
+
     campaigns, total = await campaign_repo.list_active(
         search=search,
         category=category,
         page=page,
         page_size=page_size,
+        extra_category_values=extra_cats or None,
     )
 
     campaign_ids = [c.id for c in campaigns]
@@ -303,7 +332,21 @@ async def list_campaigns(
             campaign.applicant_count = count_data.get("applicant_count")
             campaign.accepted_count = count_data.get("accepted_count")
 
-    items = [_campaign_to_summary(c) for c in campaigns]
+    business_ids = list({c.business_id for c in campaigns if c.business_id})
+    businesses = await business_repo.get_by_ids(business_ids)
+    biz_map = {b.id: b for b in businesses}
+
+    items = []
+    for c in campaigns:
+        biz = biz_map.get(c.business_id)
+        items.append(
+            _campaign_to_summary(
+                c,
+                business_name=biz.business_name if biz else None,
+                business_logo_url=biz.logo_url if biz else None,
+                is_verified=biz.is_verified if biz else None,
+            )
+        )
 
     return {
         "items": items,

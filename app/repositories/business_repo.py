@@ -28,6 +28,16 @@ class BusinessRepository(BaseRepository):
         )
         return row["id"] if row else None
 
+    async def get_by_ids(self, business_ids: list[str]) -> list[Business]:
+        if not business_ids:
+            return []
+        rows = await self.select(
+            "businesses",
+            columns="*",
+            filters={"id": business_ids},
+        )
+        return [Business.from_row(row) for row in rows]
+
     async def list_filtered(
         self,
         search: str | None = None,

@@ -131,6 +131,10 @@ class CampaignSummary(BaseModel):
     status: CampaignStatus
     created_at: datetime
     applicant_count: int | None = None
+    # Joined from businesses — present on list/search so cards can render brand info
+    business_name: str | None = None
+    business_logo_url: str | None = None
+    is_verified: bool | None = None
 
 
 class CampaignCategoryResponse(BaseModel):
