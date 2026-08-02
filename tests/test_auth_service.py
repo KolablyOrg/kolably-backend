@@ -328,11 +328,11 @@ async def test_google_auth_omits_nonce_when_not_provided(monkeypatch):
     assert "nonce" not in gotrue.last_credentials
 
 
-async def test_forgot_password_sends_deep_link_redirect(monkeypatch):
+async def test_forgot_password_defaults_to_web_redirect_when_none_given(monkeypatch):
     """Regression: with no redirect_to, Supabase falls back to the project's
-    dashboard Site URL — a stale localhost value for this mobile-only app,
-    so recovery links opened on a phone landed on a dead page instead of
-    coming back into the app."""
+    dashboard Site URL — a stale localhost value, so recovery links opened
+    anywhere landed on a dead page instead of a real destination. The web
+    URL is the safe default since it works with or without the mobile app."""
     from app.core.config import settings
 
     gotrue = FakeGoTrue()
@@ -343,7 +343,42 @@ async def test_forgot_password_sends_deep_link_redirect(monkeypatch):
     assert result == {"message": "Password reset link sent to your email"}
     assert gotrue.last_reset_password_call == (
         "alice@example.com",
-        {"redirect_to": settings.PASSWORD_RESET_REDIRECT_URL},
+        {"redirect_to": settings.WEB_PASSWORD_RESET_REDIRECT_URL},
+    )
+
+
+async def test_forgot_password_uses_mobile_redirect_when_requested(monkeypatch):
+    from app.core.config import settings
+
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.forgot_password(
+        "alice@example.com", redirect_to=settings.MOBILE_PASSWORD_RESET_REDIRECT_URL
+    )
+
+    assert gotrue.last_reset_password_call == (
+        "alice@example.com",
+        {"redirect_to": settings.MOBILE_PASSWORD_RESET_REDIRECT_URL},
+    )
+
+
+async def test_forgot_password_ignores_unrecognized_redirect_to(monkeypatch):
+    """An arbitrary caller-supplied redirect_to must never be forwarded as-is
+    — otherwise this endpoint becomes an open redirect for the recovery
+    link. Falls back to the web URL just like the no-redirect_to case."""
+    from app.core.config import settings
+
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.forgot_password(
+        "alice@example.com", redirect_to="https://evil.example.com/phish"
+    )
+
+    assert gotrue.last_reset_password_call == (
+        "alice@example.com",
+        {"redirect_to": settings.WEB_PASSWORD_RESET_REDIRECT_URL},
     )
 
 

@@ -126,7 +126,7 @@ async def refresh_token(data: RefreshTokenRequest):
 @router.post("/forgot-password", response_model=MessageResponse)
 async def forgot_password(data: ForgotPasswordRequest):
     """Send password reset email."""
-    return await auth_service.forgot_password(data.email)
+    return await auth_service.forgot_password(data.email, redirect_to=data.redirect_to)
 
 
 @router.post("/reset-password", response_model=MessageResponse)

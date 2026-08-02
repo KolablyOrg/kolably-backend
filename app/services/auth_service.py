@@ -553,13 +553,27 @@ async def logout(access_token: str) -> dict:
     return {"message": "Logged out successfully"}
 
 
-async def forgot_password(email: str) -> dict:
+_ALLOWED_PASSWORD_RESET_REDIRECTS = {
+    settings.WEB_PASSWORD_RESET_REDIRECT_URL,
+    settings.MOBILE_PASSWORD_RESET_REDIRECT_URL,
+}
+
+
+async def forgot_password(email: str, redirect_to: str | None = None) -> dict:
     supabase = await get_supabase_client()
 
+    # Only ever forward a redirect_to we recognize — an arbitrary
+    # client-supplied URL here would otherwise let anyone turn this endpoint
+    # into an open redirect for the recovery link. Falls back to the web
+    # URL since that works whether or not the caller has the mobile app.
+    target = (
+        redirect_to
+        if redirect_to in _ALLOWED_PASSWORD_RESET_REDIRECTS
+        else settings.WEB_PASSWORD_RESET_REDIRECT_URL
+    )
+
     try:
-        await supabase.auth.reset_password_email(
-            email, {"redirect_to": settings.PASSWORD_RESET_REDIRECT_URL}
-        )
+        await supabase.auth.reset_password_email(email, {"redirect_to": target})
     except AuthApiError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

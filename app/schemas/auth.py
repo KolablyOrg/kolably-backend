@@ -78,6 +78,10 @@ class RefreshTokenRequest(BaseModel):
 # ── Password Reset ────────────────────────────────────
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+    # Which client the recovery link should return to — validated against a
+    # fixed allow-list in auth_service.forgot_password. Optional so existing
+    # callers that don't send it still get a safe default.
+    redirect_to: str | None = None
 
 
 class ResetPasswordRequest(BaseModel):
