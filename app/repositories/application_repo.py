@@ -28,10 +28,10 @@ class ApplicationRepository(BaseRepository):
         query = (
             (await self._table("campaign_applications"))
             .select(
-                "*,",
-                "campaigns!campaign_applications_campaign_id_fkey(",
-                "  *,",
-                "  businesses!campaigns_business_id_fkey(id, business_name, logo_url)",
+                "*, "
+                "campaigns!campaign_applications_campaign_id_fkey("
+                "  *, "
+                "  businesses!campaigns_business_id_fkey(id, business_name, logo_url)"
                 ")",
                 count="exact",
             )
@@ -56,9 +56,9 @@ class ApplicationRepository(BaseRepository):
         query = (
             (await self._table("campaign_applications"))
             .select(
-                "*,",
-                "campaigns!campaign_applications_campaign_id_fkey!inner(*, business_id),",
-                "creators!campaign_applications_creator_id_fkey(",
+                "*, "
+                "campaigns!campaign_applications_campaign_id_fkey!inner(*, business_id), "
+                "creators!campaign_applications_creator_id_fkey("
                 "id, name, profile_photo_url, follower_count, niche)",
                 count="exact",
             )

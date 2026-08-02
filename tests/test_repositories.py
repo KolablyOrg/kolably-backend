@@ -33,6 +33,7 @@ class FakeQuery:
         return self
 
     def select(self, *args, **kwargs) -> "FakeQuery":
+        self.select_args = args
         return self._record("select")
 
     def insert(self, *args, **kwargs) -> "FakeQuery":
@@ -55,6 +56,9 @@ class FakeQuery:
 
     def order(self, *args, **kwargs) -> "FakeQuery":
         return self._record("order")
+
+    def range(self, *args, **kwargs) -> "FakeQuery":
+        return self._record("range")
 
     def maybe_single(self, *args, **kwargs) -> "FakeQuery":
         return self._record("maybe_single")
@@ -146,3 +150,18 @@ async def test_update_and_insert_roundtrip_data():
     assert await repo.insert("creators", {"name": "Alice"}) == rows
     assert await repo.update("creators", {"name": "Bob"}, {"id": "c1"}) == rows
     assert query.calls == ["insert", "update", "eq"]
+
+
+async def test_application_repo_list_by_creator_query_format():
+    from app.repositories.application_repo import ApplicationRepository
+    query = FakeQuery(FakeResponse(data=[], count=0))
+    repo = ApplicationRepository(client=FakeClient(query))
+
+    await repo.list_by_creator("c1")
+
+    assert len(query.select_args) == 1
+    select_str = query.select_args[0]
+    assert ", ," not in select_str
+    assert "campaigns!campaign_applications_campaign_id_fkey" in select_str
+    assert "businesses!campaigns_business_id_fkey" in select_str
+
