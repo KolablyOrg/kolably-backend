@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import HTTPException, status
 from supabase_auth.errors import AuthApiError
 
+from app.core.config import settings
 from app.core.crypto import encrypt_token
 from app.core.supabase import get_supabase_admin_client, get_supabase_client
 from app.models.user import UserProfile
@@ -556,7 +557,9 @@ async def forgot_password(email: str) -> dict:
     supabase = await get_supabase_client()
 
     try:
-        await supabase.auth.reset_password_email(email)
+        await supabase.auth.reset_password_email(
+            email, {"redirect_to": settings.PASSWORD_RESET_REDIRECT_URL}
+        )
     except AuthApiError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

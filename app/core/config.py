@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     # relays the result on to whatever URI the client actually wants
     # (see app/api/routes/auth.py:instagram_oauth_callback).
     PUBLIC_API_BASE_URL: str = "https://api.kolably.com"
+    # Deep link the password-reset email sends users to. Supabase falls back
+    # to the project's dashboard "Site URL" when redirect_to isn't passed
+    # explicitly — for this mobile-only app that's a stale localhost value,
+    # so every recovery link opened on a phone died on "can't connect".
+    # This scheme must also be added to Supabase's Redirect URLs allow list
+    # (Authentication → URL Configuration) or GoTrue rejects it outright.
+    PASSWORD_RESET_REDIRECT_URL: str = "mobile://reset-password"
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",

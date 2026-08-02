@@ -62,12 +62,18 @@ class FakeGoTrue:
         self._response = response
         self._error = error
         self.last_credentials = None
+        self.last_reset_password_call = None
 
     async def sign_in_with_id_token(self, credentials):
         self.last_credentials = credentials
         if self._error:
             raise self._error
         return self._response
+
+    async def reset_password_email(self, email, options=None):
+        self.last_reset_password_call = (email, options)
+        if self._error:
+            raise self._error
 
 
 class FakeSupabaseClient:
@@ -320,3 +326,32 @@ async def test_google_auth_omits_nonce_when_not_provided(monkeypatch):
     )
 
     assert "nonce" not in gotrue.last_credentials
+
+
+async def test_forgot_password_sends_deep_link_redirect(monkeypatch):
+    """Regression: with no redirect_to, Supabase falls back to the project's
+    dashboard Site URL — a stale localhost value for this mobile-only app,
+    so recovery links opened on a phone landed on a dead page instead of
+    coming back into the app."""
+    from app.core.config import settings
+
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    result = await auth_service.forgot_password("alice@example.com")
+
+    assert result == {"message": "Password reset link sent to your email"}
+    assert gotrue.last_reset_password_call == (
+        "alice@example.com",
+        {"redirect_to": settings.PASSWORD_RESET_REDIRECT_URL},
+    )
+
+
+async def test_forgot_password_raises_400_on_auth_api_error(monkeypatch):
+    gotrue = FakeGoTrue(error=AuthApiError("rate limited", 429, None))
+    _patch_supabase(monkeypatch, gotrue)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.forgot_password("alice@example.com")
+
+    assert exc_info.value.status_code == 400
