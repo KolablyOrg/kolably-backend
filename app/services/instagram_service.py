@@ -95,12 +95,14 @@ def build_profile_prefill(ig_profile: dict, engagement_rate: float | None) -> di
 
 def get_media_url_or_thumbnail(item: dict) -> str | None:
     """Safely extract a viewable image URL for any media type (photo, video, carousel)."""
+    if item.get("media_type") == "CAROUSEL_ALBUM":
+        children = item.get("children", {}).get("data", [])
+        if children:
+            return children[0].get("thumbnail_url") or children[0].get("media_url")
+
     url = item.get("thumbnail_url") or item.get("media_url")
     if url:
         return url
-    children = item.get("children", {}).get("data", [])
-    if children:
-        return children[0].get("thumbnail_url") or children[0].get("media_url")
     return None
 
 
