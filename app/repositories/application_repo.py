@@ -71,16 +71,28 @@ class ApplicationRepository(BaseRepository):
         rows = result.data or []
         return [CampaignApplication.from_row(row) for row in rows], result.count or 0
 
-    async def list_by_campaign(self, campaign_id: str) -> list[CampaignApplication]:
+    async def list_by_campaign(
+        self,
+        campaign_id: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[CampaignApplication], int]:
         query = (
             (await self._table("campaign_applications"))
-            .select("*, creators(id,name,profile_photo_url,follower_count,niche)")
+            .select(
+                "*, creators(id,name,profile_photo_url,follower_count,niche)",
+                count="exact",
+            )
             .eq("campaign_id", campaign_id)
+            .order("created_at", desc=True)
         )
 
-        result = await self._execute(query)
+        start = (page - 1) * page_size
+        end = start + page_size - 1
+        result = await self._execute(query.range(start, end))
+
         rows = result.data or []
-        return [CampaignApplication.from_row(row) for row in rows]
+        return [CampaignApplication.from_row(row) for row in rows], result.count or 0
 
     async def insert_application(self, data: dict) -> CampaignApplication | None:
         rows = await self.insert("campaign_applications", data)
@@ -90,6 +102,12 @@ class ApplicationRepository(BaseRepository):
         rows = await self.update(
             "campaign_applications", {"status": status}, {"id": application_id}
         )
+        return CampaignApplication.from_row(rows[0]) if rows else None
+
+    async def update_application(
+        self, application_id: str, data: dict
+    ) -> CampaignApplication | None:
+        rows = await self.update("campaign_applications", data, {"id": application_id})
         return CampaignApplication.from_row(rows[0]) if rows else None
 
     async def delete_application(self, application_id: str) -> None:

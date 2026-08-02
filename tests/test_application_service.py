@@ -9,7 +9,11 @@ from app.models.application import CampaignApplication
 from app.models.business import Business
 from app.models.campaign import Campaign
 from app.models.creator import Creator
-from app.schemas.application import ApplicationCreateRequest
+from app.schemas.application import (
+    ApplicationCreateRequest,
+    ApplicationRevisionRequest,
+    ApplicationUpdateRequest,
+)
 from app.services import application_service
 
 CAMPAIGN_ROW = {
@@ -112,6 +116,7 @@ class FakeApplicationRepo:
         self._row = row
         self.inserted = None
         self.status_updates = []
+        self.application_updates = []
         self.deleted = None
 
     async def get_existing(self, campaign_id, creator_id):
@@ -128,6 +133,13 @@ class FakeApplicationRepo:
     async def update_status(self, application_id: str, status: str):
         self.status_updates.append((application_id, status))
         row = {**self._row, "status": status}
+        self._row = row
+        return CampaignApplication.from_row(row)
+
+    async def update_application(self, application_id: str, data: dict):
+        self.application_updates.append((application_id, data))
+        row = {**self._row, **data}
+        self._row = row
         return CampaignApplication.from_row(row)
 
     async def delete_application(self, application_id: str):
@@ -370,3 +382,77 @@ async def test_reject_notifies_creator_and_does_not_create_collaboration(_stub_n
     assert result.status.value == "rejected"
     assert _stub_notifications[0]["profile_id"] == "p-creator"
     assert _stub_notifications[0]["type"].value == "application_rejected"
+
+
+async def test_request_revision_sets_status_and_reason(_stub_notifications):
+    app_repo = FakeApplicationRepo(row=dict(APPLICATION_ROW))
+
+    result = await application_service.request_revision(
+        application_id="app1",
+        profile_id="p-business",
+        role="business",
+        data=ApplicationRevisionRequest(reason="Please add more portfolio links"),
+        app_repo=app_repo,
+        campaign_repo=FakeCampaignRepo(),
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result.status.value == "revision_requested"
+    assert result.revision_reason == "Please add more portfolio links"
+    assert app_repo.application_updates[0][1]["status"] == "revision_requested"
+    assert _stub_notifications[0]["type"].value == "revision_requested"
+    assert _stub_notifications[0]["profile_id"] == "p-creator"
+
+
+async def test_request_revision_rejects_creator_on_creator_applied():
+    with pytest.raises(HTTPException) as exc:
+        await application_service.request_revision(
+            application_id="app1",
+            profile_id="p-creator",
+            role="creator",
+            data=ApplicationRevisionRequest(reason="n/a"),
+            app_repo=FakeApplicationRepo(row=dict(APPLICATION_ROW)),
+            campaign_repo=FakeCampaignRepo(),
+            creator_repo=FakeCreatorRepo(),
+            business_repo=FakeBusinessRepo(),
+        )
+    assert exc.value.status_code == 403
+
+
+async def test_resubmit_application_resets_to_pending(_stub_notifications):
+    app_repo = FakeApplicationRepo(
+        row={
+            **APPLICATION_ROW,
+            "status": "revision_requested",
+            "revision_reason": "Need better examples",
+        }
+    )
+
+    result = await application_service.resubmit_application(
+        application_id="app1",
+        profile_id="p-creator",
+        data=ApplicationUpdateRequest(message="Updated pitch", example_content_url="https://ig.com/x"),
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+        campaign_repo=FakeCampaignRepo(),
+        app_repo=app_repo,
+    )
+
+    assert result.status.value == "pending"
+    assert result.revision_reason is None
+    assert result.message == "Updated pitch"
+    assert _stub_notifications[0]["type"].value == "application_resubmitted"
+    assert _stub_notifications[0]["profile_id"] == "p-business"
+
+
+async def test_resubmit_rejects_when_not_revision_requested():
+    with pytest.raises(HTTPException) as exc:
+        await application_service.resubmit_application(
+            application_id="app1",
+            profile_id="p-creator",
+            data=ApplicationUpdateRequest(message="Nope"),
+            creator_repo=FakeCreatorRepo(),
+            app_repo=FakeApplicationRepo(row=dict(APPLICATION_ROW)),
+        )
+    assert exc.value.status_code == 400

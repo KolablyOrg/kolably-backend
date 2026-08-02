@@ -102,6 +102,12 @@ def _category_values_matching_search(term: str) -> list[str]:
     return matches
 
 
+def _niche_to_category(niche: str) -> str | None:
+    """Map a creator niche (label or value) to a campaign category enum value."""
+    matches = _category_values_matching_search(niche)
+    return matches[0] if matches else None
+
+
 async def _get_business_id_for_user(
     profile_id: str,
     *,
@@ -195,7 +201,7 @@ async def update_campaign_deliverables(
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     update_data: dict[str, Any] = {
-        "deliverables": [d.model_dump() for d in data.deliverables],
+        "deliverables": [d.model_dump(mode="json") for d in data.deliverables],
         "compensation_type": data.compensation_type.value,
         **data.model_dump(exclude={"deliverables", "compensation_type"}, exclude_none=True),
     }
@@ -251,7 +257,7 @@ async def update_campaign_general(
         return _campaign_to_response(campaign)
 
     if update_data.get("deliverables"):
-        update_data["deliverables"] = [d.model_dump() for d in data.deliverables]
+        update_data["deliverables"] = [d.model_dump(mode="json") for d in data.deliverables]
     if update_data.get("objective"):
         update_data["objective"] = data.objective.value
     if update_data.get("compensation_type"):
@@ -327,7 +333,10 @@ async def list_campaigns(
         creator_repo = creator_repo or CreatorRepository()
         niche = await creator_repo.get_niche_by_profile_id(user.id)
         if niche:
-            category = niche
+            # Niche is free text (e.g. "Food & Dining"); feed filters on enum values (e.g. "food").
+            mapped = _niche_to_category(niche)
+            if mapped:
+                category = mapped
 
     extra_cats = _category_values_matching_search(search) if search else []
 
@@ -444,17 +453,21 @@ async def get_campaign_categories() -> list[CampaignCategoryResponse]:
 async def list_campaign_applications(
     campaign_id: str,
     profile_id: str,
+    page: int = 1,
+    page_size: int = 20,
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
     app_repo: ApplicationRepository | None = None,
-) -> list[ApplicationWithCreator]:
+) -> dict:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
     app_repo = app_repo or ApplicationRepository()
-    applications = await app_repo.list_by_campaign(campaign_id)
+    applications, total = await app_repo.list_by_campaign(
+        campaign_id, page=page, page_size=page_size
+    )
 
     items: list[ApplicationWithCreator] = []
     for app in applications:
@@ -482,7 +495,70 @@ async def list_campaign_applications(
             )
         )
 
-    return items
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+async def close_campaign(
+    campaign_id: str,
+    profile_id: str,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> CampaignResponse:
+    """Transition an active campaign to closed — stops new applications/invites."""
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
+    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+
+    if campaign.status != CampaignStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active campaigns can be closed",
+        )
+
+    updated = await campaign_repo.update_campaign(
+        campaign_id, {"status": CampaignStatus.CLOSED.value}
+    )
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found",
+        )
+    return _campaign_to_response(updated)
+
+
+async def complete_campaign(
+    campaign_id: str,
+    profile_id: str,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> CampaignResponse:
+    """Mark a campaign as completed (from active or closed)."""
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
+    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+
+    if campaign.status not in (CampaignStatus.ACTIVE, CampaignStatus.CLOSED):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active or closed campaigns can be completed",
+        )
+
+    updated = await campaign_repo.update_campaign(
+        campaign_id, {"status": CampaignStatus.COMPLETED.value}
+    )
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found",
+        )
+    return _campaign_to_response(updated)
 
 
 async def invite_creator(
@@ -499,6 +575,12 @@ async def invite_creator(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+
+    if campaign.status != CampaignStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This campaign is not open for invites",
+        )
 
     creator_repo = creator_repo or CreatorRepository()
     creator = await creator_repo.get_by_id(creator_id)

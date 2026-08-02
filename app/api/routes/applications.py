@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user, require_instagram_connected, require_role
 from app.core.enums import UserRole
-from app.schemas.application import ApplicationCreateRequest, ApplicationResponse, ApplicationWithCampaign
+from app.schemas.application import (
+    ApplicationCreateRequest,
+    ApplicationResponse,
+    ApplicationRevisionRequest,
+    ApplicationUpdateRequest,
+    ApplicationWithCampaign,
+)
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.user import UserInToken
 from app.services import application_service
@@ -86,6 +92,39 @@ async def reject_application(
         application_id=application_id,
         profile_id=user.id,
         role=user.role.value,
+    )
+
+
+@router.patch("/{application_id}/request-revision", response_model=ApplicationResponse)
+async def request_revision(
+    application_id: str,
+    data: ApplicationRevisionRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Request a revision — same direction-based authorization as accept/reject."""
+    return await application_service.request_revision(
+        application_id=application_id,
+        profile_id=user.id,
+        role=user.role.value,
+        data=data,
+    )
+
+
+@router.patch(
+    "/{application_id}",
+    response_model=ApplicationResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
+async def resubmit_application(
+    application_id: str,
+    data: ApplicationUpdateRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Creator resubmits after a revision request — resets status to pending."""
+    return await application_service.resubmit_application(
+        application_id=application_id,
+        profile_id=user.id,
+        data=data,
     )
 
 

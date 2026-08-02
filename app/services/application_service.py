@@ -11,6 +11,8 @@ from app.repositories.creator_repo import CreatorRepository
 from app.schemas.application import (
     ApplicationCreateRequest,
     ApplicationResponse,
+    ApplicationRevisionRequest,
+    ApplicationUpdateRequest,
     ApplicationWithCampaign,
     ApplicationWithCreator,
 )
@@ -493,5 +495,119 @@ async def reject_application(
             body=f'Your application for "{campaign.title}" was not accepted.',
             related_id=application.id,
         )
+
+    return _application_to_response(updated)
+
+
+async def request_revision(
+    application_id: str,
+    profile_id: str,
+    role: str,
+    data: ApplicationRevisionRequest,
+    *,
+    app_repo: ApplicationRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> ApplicationResponse:
+    """Request revision — same direction-based auth as accept/reject."""
+    app_repo = app_repo or ApplicationRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
+    creator_repo = creator_repo or CreatorRepository()
+    business_repo = business_repo or BusinessRepository()
+
+    application, campaign = await _load_application_and_campaign(
+        application_id, app_repo=app_repo, campaign_repo=campaign_repo
+    )
+    await _authorize_decision(
+        application, profile_id, role,
+        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo,
+    )
+
+    updated = await app_repo.update_application(
+        application_id,
+        {
+            "status": ApplicationStatus.REVISION_REQUESTED.value,
+            "revision_reason": data.reason,
+        },
+    )
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to request revision",
+        )
+
+    notify_profile_id = await _other_party_profile_id(
+        application, campaign, creator_repo=creator_repo, business_repo=business_repo
+    )
+    if notify_profile_id:
+        await notification_service.create_notification(
+            profile_id=notify_profile_id,
+            type=NotificationType.REVISION_REQUESTED,
+            title="Revision requested",
+            body=f'Revision was requested for your application to "{campaign.title}".',
+            related_id=application.id,
+        )
+
+    return _application_to_response(updated)
+
+
+async def resubmit_application(
+    application_id: str,
+    profile_id: str,
+    data: ApplicationUpdateRequest,
+    *,
+    creator_repo: CreatorRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
+    app_repo: ApplicationRepository | None = None,
+) -> ApplicationResponse:
+    """Creator resubmits after a revision request — resets status to pending."""
+    creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
+
+    app_repo = app_repo or ApplicationRepository()
+    application = await app_repo.get_by_id(application_id)
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found",
+        )
+    if application.creator_id != creator_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only resubmit your own applications",
+        )
+    if application.status != ApplicationStatus.REVISION_REQUESTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only applications with a revision request can be resubmitted",
+        )
+
+    update_data = {
+        "status": ApplicationStatus.PENDING.value,
+        "revision_reason": None,
+        **data.model_dump(exclude_none=True),
+    }
+
+    updated = await app_repo.update_application(application_id, update_data)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to resubmit application",
+        )
+
+    campaign_repo = campaign_repo or CampaignRepository()
+    business_repo = business_repo or BusinessRepository()
+    campaign = await campaign_repo.get_by_id(application.campaign_id)
+    if campaign:
+        business = await business_repo.get_by_id(campaign.business_id)
+        if business:
+            await notification_service.create_notification(
+                profile_id=business.profile_id,
+                type=NotificationType.APPLICATION_RESUBMITTED,
+                title="Application resubmitted",
+                body=f'A creator resubmitted their application for "{campaign.title}".',
+                related_id=application.id,
+            )
 
     return _application_to_response(updated)

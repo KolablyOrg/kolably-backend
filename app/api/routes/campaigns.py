@@ -100,6 +100,32 @@ async def publish_campaign(
     return await campaign_service.publish_campaign(campaign_id, user.id)
 
 
+@router.patch(
+    "/{campaign_id}/close",
+    response_model=CampaignResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
+async def close_campaign(
+    campaign_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Close an active campaign — stops new applications and invites."""
+    return await campaign_service.close_campaign(campaign_id, user.id)
+
+
+@router.patch(
+    "/{campaign_id}/complete",
+    response_model=CampaignResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
+async def complete_campaign(
+    campaign_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Mark a campaign as completed (from active or closed)."""
+    return await campaign_service.complete_campaign(campaign_id, user.id)
+
+
 # ── Feed & Discovery ──────────────────────────────────
 
 @router.get("/", response_model=PaginatedResponse[CampaignSummary])
@@ -156,15 +182,19 @@ async def delete_campaign(
 
 @router.get(
     "/{campaign_id}/applications",
-    response_model=list[ApplicationWithCreator],
+    response_model=PaginatedResponse[ApplicationWithCreator],
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def list_campaign_applications(
     campaign_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     user: UserInToken = Depends(get_current_user),
 ):
-    """List all applications for a campaign (business owner only)."""
-    return await campaign_service.list_campaign_applications(campaign_id, user.id)
+    """List applications for a campaign (business owner only)."""
+    return await campaign_service.list_campaign_applications(
+        campaign_id, user.id, page=page, page_size=page_size
+    )
 
 
 @router.post(
