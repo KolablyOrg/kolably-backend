@@ -157,6 +157,7 @@ async def update_creator(
     is connected, after which it's Instagram-verified and this rejects
     attempts to override it — otherwise a connected creator could inflate
     it and nothing would resync it until the next explicit `sync` call."""
+    repo = repo or CreatorRepository()
     creator = await repo.get_by_id(creator_id)
     if not creator:
         creator = await repo.get_by_profile_id(creator_id)
