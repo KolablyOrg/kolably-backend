@@ -11,6 +11,9 @@ class ParticipantSummary(BaseModel):
     id: str
     name: str
     avatar_url: str | None = None
+    # Only set when the other participant is a business — lets the client
+    # link straight to GET /businesses/{business_id} for a profile view.
+    business_id: str | None = None
 
 
 class MessageCreateRequest(BaseModel):

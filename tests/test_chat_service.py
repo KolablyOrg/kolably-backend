@@ -190,8 +190,21 @@ async def test_list_conversations_resolves_other_participant_and_last_message():
     conv = result[0]
     assert conv["other_participant"]["name"] == "Acme Co"
     assert conv["other_participant"]["avatar_url"] == "https://example.com/acme.png"
+    assert conv["other_participant"]["business_id"] == "b1"
     assert conv["last_message"] == "Hi there!"
     assert conv["unread_count"] == 1  # from business, never read by creator
+
+
+async def test_list_conversations_omits_business_id_when_other_participant_is_a_creator():
+    """The service returns a raw dict — no business_id key at all here for a
+    creator participant. The Pydantic response schema fills in None for the
+    HTTP response (see test_conversation_response_schema_round_trips_messages
+    for that layer)."""
+    repo = FakeChatRepo(participants=("p-business", "p-creator"))
+
+    result = await chat_service.list_conversations("p-business", repo=repo, **_repos())
+
+    assert "business_id" not in result[0]["other_participant"]
 
 
 async def test_get_conversation_marks_read_and_returns_messages():
@@ -271,6 +284,7 @@ def test_conversation_response_schema_round_trips_messages():
 
     assert len(dumped["messages"]) == 1
     assert dumped["messages"][0]["content"] == "hi"
+    assert dumped["other_participant"]["business_id"] is None
     assert dumped["messages"][0]["seen"] is True
 
 
