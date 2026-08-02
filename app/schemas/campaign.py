@@ -122,7 +122,7 @@ class CampaignSummary(BaseModel):
     title: str
     cover_image_url: str | None = None
     objective: CampaignObjective
-    compensation_type: CompensationType
+    compensation_type: CompensationType | None = None  # None until Step 2
     cash_amount_min: float | None = None
     cash_amount_max: float | None = None
     creator_category: str

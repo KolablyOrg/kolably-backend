@@ -12,6 +12,7 @@ from app.repositories.creator_repo import CreatorRepository
 from app.schemas.user import UserInToken
 
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -73,6 +74,18 @@ async def get_current_user(
         role=UserRole(profile["role"]),
         is_active=profile["is_active"],
     )
+
+
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
+) -> UserInToken | None:
+    """Return the authenticated user when a valid token is present; otherwise None."""
+    if credentials is None:
+        return None
+    try:
+        return await get_current_user(credentials)
+    except HTTPException:
+        return None
 
 
 def require_role(*allowed_roles: UserRole):

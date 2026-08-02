@@ -71,6 +71,7 @@ class FakeBusinessRepo:
 
     async def list_campaigns(self, business_id: str, **kwargs):
         self.seen_business_id = business_id
+        self.seen_status = kwargs.get("status")
         return [_make_campaign(c) for c in self._campaigns], len(self._campaigns)
 
 
@@ -110,3 +111,28 @@ async def test_list_my_campaigns_resolves_business_id_from_profile():
     assert result["total"] == 1
     assert result["items"][0].id == "camp1"
     assert result["items"][0].title == "Brunch launch"
+
+
+async def test_list_business_campaigns_passes_status_filter():
+    repo = FakeBusinessRepo(business_id="b1", campaigns=[dict(CAMPAIGN_ROW)])
+
+    await business_service.list_business_campaigns(
+        business_id="b1",
+        status="active",
+        repo=repo,
+    )
+
+    assert repo.seen_status == "active"
+
+
+async def test_list_my_campaigns_includes_draft_with_null_compensation_type():
+    draft_row = dict(CAMPAIGN_ROW)
+    draft_row["status"] = "draft"
+    draft_row["compensation_type"] = None
+    repo = FakeBusinessRepo(business_id="b1", campaigns=[draft_row])
+
+    result = await business_service.list_my_campaigns(profile_id="p1", repo=repo)
+
+    assert result["total"] == 1
+    assert result["items"][0].status.value == "draft"
+    assert result["items"][0].compensation_type is None

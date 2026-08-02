@@ -4,7 +4,7 @@ Campaign routes — CRUD, 4-step create/publish flow, feed, categories, and invi
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.dependencies import get_current_user, require_role
+from app.core.dependencies import get_current_user, get_optional_user, require_role
 from app.core.enums import UserRole
 from app.schemas.application import ApplicationResponse, ApplicationWithCreator
 from app.schemas.campaign import (
@@ -131,9 +131,12 @@ async def get_campaign_categories():
 # ── Detail & General CRUD ─────────────────────────────
 
 @router.get("/{campaign_id}", response_model=CampaignResponse)
-async def get_campaign(campaign_id: str):
-    """Get full campaign details."""
-    return await campaign_service.get_campaign(campaign_id)
+async def get_campaign(
+    campaign_id: str,
+    user: UserInToken | None = Depends(get_optional_user),
+):
+    """Get full campaign details. Draft campaigns are visible only to the owner."""
+    return await campaign_service.get_campaign(campaign_id, user=user)
 
 
 @router.delete(

@@ -5,6 +5,7 @@ Business routes — profile, discovery, dashboard.
 from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user
+from app.core.enums import CampaignStatus
 from app.schemas.application import ApplicationWithCreator
 from app.schemas.business import BusinessResponse, BusinessStatsResponse
 from app.schemas.campaign import CampaignSummary
@@ -86,12 +87,14 @@ async def get_business(business_id: str) -> BusinessResponse:
 @router.get("/{business_id}/campaigns", response_model=PaginatedResponse[CampaignSummary])
 async def list_business_campaigns(
     business_id: str,
+    status: str | None = Query(CampaignStatus.ACTIVE.value),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    """List public campaigns for a business."""
+    """List public campaigns for a business (defaults to active only)."""
     return await business_service.list_business_campaigns(
         business_id=business_id,
+        status=status,
         page=page,
         page_size=page_size,
     )

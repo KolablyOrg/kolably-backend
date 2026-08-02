@@ -88,11 +88,22 @@ class FakeBusinessRepo:
 
 
 class FakeCampaignRepo:
-    def __init__(self, row=None):
+    def __init__(self, row=None, accepted_count: int = 0):
         self._row = row if row is not None else dict(CAMPAIGN_ROW)
+        self._accepted_count = accepted_count
 
     async def get_by_id(self, campaign_id: str):
         return Campaign.from_row(self._row) if self._row else None
+
+    async def fetch_application_counts(self, campaign_ids: list[str]):
+        if not campaign_ids:
+            return {}
+        return {
+            campaign_ids[0]: {
+                "applicant_count": 1,
+                "accepted_count": self._accepted_count,
+            }
+        }
 
 
 class FakeApplicationRepo:
@@ -295,6 +306,25 @@ async def test_accept_rejects_already_decided_application():
             collab_repo=FakeCollaborationRepo(),
         )
     assert exc.value.status_code == 400
+
+
+async def test_accept_rejects_when_max_creators_reached():
+    with pytest.raises(HTTPException) as exc:
+        await application_service.accept_application(
+            application_id="app1",
+            profile_id="p-business",
+            role="business",
+            app_repo=FakeApplicationRepo(row=dict(APPLICATION_ROW)),
+            campaign_repo=FakeCampaignRepo(
+                row={**CAMPAIGN_ROW, "max_creators": 2},
+                accepted_count=2,
+            ),
+            creator_repo=FakeCreatorRepo(),
+            business_repo=FakeBusinessRepo(),
+            collab_repo=FakeCollaborationRepo(),
+        )
+    assert exc.value.status_code == 400
+    assert "maximum number of creators" in exc.value.detail
 
 
 async def test_reject_notifies_creator_and_does_not_create_collaboration(_stub_notifications):

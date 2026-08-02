@@ -406,6 +406,14 @@ async def accept_application(
         campaign=campaign, creator_repo=creator_repo, business_repo=business_repo,
     )
 
+    counts = await campaign_repo.fetch_application_counts([campaign.id])
+    accepted_count = counts.get(campaign.id, {}).get("accepted_count", 0)
+    if accepted_count >= campaign.max_creators:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This campaign has reached its maximum number of creators",
+        )
+
     updated = await app_repo.update_status(application_id, ApplicationStatus.ACCEPTED.value)
     if not updated:
         raise HTTPException(

@@ -7,6 +7,7 @@ from app.core.enums import (
     ApplicationStatus,
     CampaignStatus,
     NotificationType,
+    UserRole,
 )
 from app.models.campaign import Campaign
 from app.repositories.application_repo import ApplicationRepository
@@ -114,6 +115,22 @@ async def _get_business_id_for_user(
             detail="Business profile not found",
         )
     return business_id
+
+
+async def _can_view_draft_campaign(
+    campaign: Campaign,
+    user: UserInToken | None,
+    *,
+    business_repo: BusinessRepository | None = None,
+) -> bool:
+    """Draft campaigns are visible only to the owning business or superadmin."""
+    if not user:
+        return False
+    if user.role == UserRole.SUPERADMIN:
+        return True
+    business_repo = business_repo or BusinessRepository()
+    business_id = await business_repo.get_id_by_profile_id(user.id)
+    return business_id is not None and campaign.business_id == business_id
 
 
 async def _ensure_campaign_owner(
@@ -358,10 +375,13 @@ async def list_campaigns(
 
 async def get_campaign(
     campaign_id: str,
+    user: UserInToken | None = None,
     *,
     campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
 ) -> CampaignResponse:
     campaign_repo = campaign_repo or CampaignRepository()
+    business_repo = business_repo or BusinessRepository()
     campaign = await campaign_repo.get_by_id(campaign_id)
 
     if not campaign:
@@ -369,6 +389,13 @@ async def get_campaign(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Campaign not found",
         )
+
+    if campaign.status == CampaignStatus.DRAFT:
+        if not await _can_view_draft_campaign(campaign, user, business_repo=business_repo):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Campaign not found",
+            )
 
     counts = await campaign_repo.fetch_application_counts([campaign_id])
     count_data = counts.get(campaign_id)

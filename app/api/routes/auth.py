@@ -4,7 +4,7 @@ Authentication routes — backend facade over Supabase Auth.
 Frontend calls these endpoints only. Supabase is a hidden implementation detail.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -82,7 +82,14 @@ async def get_instagram_login_url(
     redirect_uri (see `instagram_service.relay_redirect_uri`), so this
     returns an authorize URL that relays back to the client's real
     `redirect_uri` via `/auth/instagram/callback`."""
-    return {"url": instagram_service.build_authorize_url_with_relay(redirect_uri)}
+    try:
+        return {"url": instagram_service.build_authorize_url_with_relay(redirect_uri)}
+    except RuntimeError as exc:
+        # Common local-dev miss: TOKEN_ENCRYPTION_KEY unset → encrypt_token fails.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/instagram/callback")
