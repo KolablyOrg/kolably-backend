@@ -16,10 +16,14 @@ from app.schemas.creator import (
     CreatorResponse,
     CreatorStatsResponse,
     CreatorUpdateRequest,
+    IdentityStatusResponse,
+    IdentitySubmitRequest,
     InstagramAuthUrlResponse,
     InstagramConnectRequest,
     InstagramImportRequest,
     InstagramMediaPreviewItem,
+    PayoutResponse,
+    PayoutSetupRequest,
     PortfolioItemCreateRequest,
     PortfolioItemResponse,
 )
@@ -142,6 +146,42 @@ async def import_instagram_portfolio(
     return await creator_service.import_instagram_portfolio(
         profile_id=user.id, media_ids=data.media_ids
     )
+
+
+# ── Payout & Tax Setup ──────────────────────────────────
+@router.get("/me/payout", response_model=PayoutResponse)
+async def get_payout_details(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Get payout & tax details for current creator."""
+    return await creator_service.get_payout_details(profile_id=user.id)
+
+
+@router.post("/me/payout", response_model=PayoutResponse)
+async def save_payout_details(
+    data: PayoutSetupRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Save & verify payout method (Bank or UPI) + PAN/GST details."""
+    return await creator_service.save_payout_details(profile_id=user.id, data=data)
+
+
+# ── Identity Verification ──────────────────────────────
+@router.get("/me/identity", response_model=IdentityStatusResponse)
+async def get_identity_status(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Get identity verification status for current creator."""
+    return await creator_service.get_identity_status(profile_id=user.id)
+
+
+@router.post("/me/identity", response_model=IdentityStatusResponse)
+async def submit_identity_verification(
+    data: IdentitySubmitRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Submit PAN and document for identity verification."""
+    return await creator_service.submit_identity_verification(profile_id=user.id, data=data)
 
 
 @router.get("/", response_model=PaginatedResponse[CreatorResponse])

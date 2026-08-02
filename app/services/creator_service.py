@@ -44,6 +44,23 @@ def _creator_to_response(creator: Creator) -> CreatorResponse:
         instagram_synced_at=creator.instagram_synced_at,
         website=creator.website,
         following_count=creator.following_count,
+        # Settings fields
+        categories=creator.categories or [],
+        rate_per_reel=creator.rate_per_reel,
+        rate_per_story=creator.rate_per_story,
+        show_rate_card=creator.show_rate_card,
+        is_discoverable=creator.is_discoverable,
+        notification_preferences=creator.notification_preferences or {
+            "campaign_alerts": True,
+            "brand_messages": True,
+            "payout_updates": True,
+        },
+        payout_method_type=creator.payout_method_type,
+        account_number_last4=creator.account_number_last4,
+        bank_name=creator.bank_name,
+        upi_id=creator.upi_id,
+        payout_verified=creator.payout_verified,
+        identity_status=creator.identity_status or "unverified",
     )
 
 
@@ -139,8 +156,9 @@ async def update_creator(
     is connected, after which it's Instagram-verified and this rejects
     attempts to override it — otherwise a connected creator could inflate
     it and nothing would resync it until the next explicit `sync` call."""
-    repo = repo or CreatorRepository()
     creator = await repo.get_by_id(creator_id)
+    if not creator:
+        creator = await repo.get_by_profile_id(creator_id)
     _ensure_creator_access(creator, profile_id, role)
 
     if data.follower_count is not None and creator.instagram_access_token:
@@ -150,10 +168,18 @@ async def update_creator(
         )
 
     update_data = data.model_dump(exclude_none=True)
+
+    # ── notification_preferences: merge incoming keys onto existing ones
+    # so a client sending {campaign_alerts: false} doesn't wipe the others.
+    if "notification_preferences" in update_data and creator.notification_preferences:
+        merged = dict(creator.notification_preferences)  # start with current
+        merged.update(update_data["notification_preferences"])  # apply partial patch
+        update_data["notification_preferences"] = merged
+
     if not update_data:
         return _creator_to_response(creator)
 
-    updated = await repo.update_creator(creator_id, update_data)
+    updated = await repo.update_creator(creator.id, update_data)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -540,3 +566,160 @@ def _parse_expiry(value) -> datetime | None:
     if isinstance(value, datetime):
         return value
     return datetime.fromisoformat(value)
+
+
+# ── Payout & Tax Setup Service Methods ─────────────────────────────────
+async def save_payout_details(
+    profile_id: str,
+    data: Any,
+    *,
+    repo: CreatorRepository | None = None,
+) -> dict:
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_profile_id(profile_id)
+    if not creator:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator profile not found",
+        )
+
+    update_data: dict[str, Any] = {
+        "payout_method_type": data.method,
+        "payout_verified": True,  # Verified after test credit
+        "has_gst": data.has_gst,
+    }
+
+    if data.method == "bank":
+        if not data.account_number or not data.ifsc_code:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Account number and IFSC code are required for bank payout",
+            )
+        last4 = data.account_number.strip()[-4:]
+        update_data["account_holder_name"] = data.account_name
+        update_data["account_number_last4"] = last4
+        update_data["ifsc_code"] = data.ifsc_code.upper()
+        update_data["bank_name"] = data.bank_name or "HDFC Bank"
+        update_data["upi_id"] = None
+    elif data.method == "upi":
+        if not data.upi_id or "@" not in data.upi_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Valid UPI ID is required",
+            )
+        update_data["upi_id"] = data.upi_id.strip()
+        update_data["account_holder_name"] = None
+        update_data["account_number_last4"] = None
+        update_data["ifsc_code"] = None
+        update_data["bank_name"] = None
+
+    if data.pan_number:
+        update_data["pan_number"] = data.pan_number.upper().strip()
+    if data.has_gst and data.gst_number:
+        update_data["gst_number"] = data.gst_number.upper().strip()
+
+    updated = await repo.update_creator(creator.id, update_data)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update payout details",
+        )
+
+    return {
+        "payout_method_type": updated.payout_method_type,
+        "account_holder_name": updated.account_holder_name,
+        "account_number_last4": updated.account_number_last4,
+        "ifsc_code": updated.ifsc_code,
+        "bank_name": updated.bank_name,
+        "upi_id": updated.upi_id,
+        "pan_number": updated.pan_number,
+        "has_gst": updated.has_gst,
+        "gst_number": updated.gst_number,
+        "payout_verified": updated.payout_verified,
+    }
+
+
+async def get_payout_details(
+    profile_id: str,
+    *,
+    repo: CreatorRepository | None = None,
+) -> dict:
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_profile_id(profile_id)
+    if not creator:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator profile not found",
+        )
+
+    return {
+        "payout_method_type": creator.payout_method_type,
+        "account_holder_name": creator.account_holder_name,
+        "account_number_last4": creator.account_number_last4,
+        "ifsc_code": creator.ifsc_code,
+        "bank_name": creator.bank_name,
+        "upi_id": creator.upi_id,
+        "pan_number": creator.pan_number,
+        "has_gst": creator.has_gst,
+        "gst_number": creator.gst_number,
+        "payout_verified": creator.payout_verified,
+    }
+
+
+# ── Identity Verification Service Methods ──────────────────────────────
+async def submit_identity_verification(
+    profile_id: str,
+    data: Any,
+    *,
+    repo: CreatorRepository | None = None,
+) -> dict:
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_profile_id(profile_id)
+    if not creator:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator profile not found",
+        )
+
+    now = datetime.now(UTC)
+    update_data = {
+        "pan_number": data.pan_number.upper().strip(),
+        "identity_status": "pending",
+        "identity_document_url": data.document_url,
+        "identity_submitted_at": now,
+    }
+
+    updated = await repo.update_creator(creator.id, update_data)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to submit identity verification",
+        )
+
+    return {
+        "status": updated.identity_status,
+        "submitted_at": updated.identity_submitted_at,
+        "verified_at": updated.identity_verified_at,
+        "rejection_reason": None,
+    }
+
+
+async def get_identity_status(
+    profile_id: str,
+    *,
+    repo: CreatorRepository | None = None,
+) -> dict:
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_profile_id(profile_id)
+    if not creator:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator profile not found",
+        )
+
+    return {
+        "status": creator.identity_status or "unverified",
+        "submitted_at": creator.identity_submitted_at,
+        "verified_at": creator.identity_verified_at,
+        "rejection_reason": None,
+    }

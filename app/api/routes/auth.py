@@ -162,3 +162,11 @@ async def update_me(
         role=user.role,
         data=data,
     )
+
+
+@router.delete("/me", response_model=MessageResponse)
+async def delete_me(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Deactivate / delete current user's account."""
+    return await auth_service.delete_user_account(profile_id=user.id)

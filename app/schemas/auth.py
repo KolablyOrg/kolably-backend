@@ -133,6 +133,9 @@ class UpdateProfileRequest(BaseModel):
     profile_photo_url: str | None = None
     bio: str | None = None
     categories: list[str] | None = None
+    rate_per_reel: int | None = Field(None, ge=0)
+    rate_per_story: int | None = Field(None, ge=0)
+    show_rate_card: bool | None = None
 
     # Business specific
     business_name: str | None = None

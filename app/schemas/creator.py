@@ -3,7 +3,7 @@ Creator-related Pydantic schemas.
 """
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,24 @@ class CreatorResponse(CreatorBase):
     instagram_synced_at: datetime | None = None
     website: str | None = None
     following_count: int | None = None
+    # ── Settings fields ──────────────────────────────────────────
+    categories: list[str] = []
+    rate_per_reel: int | None = None
+    rate_per_story: int | None = None
+    show_rate_card: bool = False
+    is_discoverable: bool = True
+    notification_preferences: dict[str, Any] = {
+        "campaign_alerts": True,
+        "brand_messages": True,
+        "payout_updates": True,
+    }
+    # ── Payout & Identity summary ────────────────────────────────
+    payout_method_type: Literal["bank", "upi"] | None = None
+    account_number_last4: str | None = None
+    bank_name: str | None = None
+    upi_id: str | None = None
+    payout_verified: bool = False
+    identity_status: Literal["unverified", "pending", "verified", "rejected"] = "unverified"
 
 
 class CreatorUpdateRequest(BaseModel):
@@ -44,6 +62,13 @@ class CreatorUpdateRequest(BaseModel):
     tiktok_handle: str | None = None
     youtube_handle: str | None = None
     profile_photo_url: str | None = None
+    # ── Settings fields ──────────────────────────────────────────
+    categories: list[str] | None = None
+    rate_per_reel: int | None = Field(None, ge=0)
+    rate_per_story: int | None = Field(None, ge=0)
+    show_rate_card: bool | None = None
+    is_discoverable: bool | None = None
+    notification_preferences: dict[str, Any] | None = None
 
 
 class CreatorSummary(BaseModel):
@@ -108,3 +133,45 @@ class InstagramImportRequest(BaseModel):
     """`media_ids` selects specific previewed items to import; omitted/None
     imports everything (back-compat with the original bulk-import call)."""
     media_ids: list[str] | None = None
+
+
+# ── Payout & Tax Setup ──────────────────────────────────
+class PayoutSetupRequest(BaseModel):
+    method: Literal["bank", "upi"]
+    # Bank fields
+    account_name: str | None = None
+    account_number: str | None = None
+    ifsc_code: str | None = None
+    bank_name: str | None = None
+    # UPI field
+    upi_id: str | None = None
+    # Tax fields
+    pan_number: str | None = Field(None, min_length=10, max_length=10)
+    has_gst: bool = False
+    gst_number: str | None = None
+
+
+class PayoutResponse(BaseModel):
+    payout_method_type: Literal["bank", "upi"] | None = None
+    account_holder_name: str | None = None
+    account_number_last4: str | None = None
+    ifsc_code: str | None = None
+    bank_name: str | None = None
+    upi_id: str | None = None
+    pan_number: str | None = None
+    has_gst: bool = False
+    gst_number: str | None = None
+    payout_verified: bool = False
+
+
+# ── Identity Verification ──────────────────────────────
+class IdentitySubmitRequest(BaseModel):
+    pan_number: str = Field(..., min_length=10, max_length=10)
+    document_url: str | None = None
+
+
+class IdentityStatusResponse(BaseModel):
+    status: Literal["unverified", "pending", "verified", "rejected"]
+    submitted_at: datetime | None = None
+    verified_at: datetime | None = None
+    rejection_reason: str | None = None

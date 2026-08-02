@@ -72,6 +72,34 @@ class Creator:
     website: str | None = None
     following_count: int | None = None
     portfolio: list[PortfolioItem] = field(default_factory=list)
+    # ── Settings fields (added via migration 20260802) ───────────────
+    categories: list[str] = field(default_factory=list)
+    rate_per_reel: int | None = None
+    rate_per_story: int | None = None
+    show_rate_card: bool = False
+    is_discoverable: bool = True
+    notification_preferences: dict[str, Any] = field(
+        default_factory=lambda: {
+            "campaign_alerts": True,
+            "brand_messages": True,
+            "payout_updates": True,
+        }
+    )
+    # ── Payout & Identity fields (added via migration 20260802) ──────
+    payout_method_type: str | None = None
+    account_holder_name: str | None = None
+    account_number_last4: str | None = None
+    ifsc_code: str | None = None
+    bank_name: str | None = None
+    upi_id: str | None = None
+    pan_number: str | None = None
+    has_gst: bool = False
+    gst_number: str | None = None
+    payout_verified: bool = False
+    identity_status: str = "unverified"
+    identity_document_url: str | None = None
+    identity_submitted_at: datetime | None = None
+    identity_verified_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Creator":
@@ -96,6 +124,29 @@ class Creator:
             instagram_connected=bool(row.get("instagram_user_id")),
             website=row.get("website"),
             following_count=row.get("following_count"),
+            categories=row.get("categories") or [],
+            rate_per_reel=row.get("rate_per_reel"),
+            rate_per_story=row.get("rate_per_story"),
+            show_rate_card=bool(row.get("show_rate_card", False)),
+            is_discoverable=bool(row.get("is_discoverable", True)),
+            notification_preferences=row.get(
+                "notification_preferences",
+                {"campaign_alerts": True, "brand_messages": True, "payout_updates": True},
+            ),
+            payout_method_type=row.get("payout_method_type"),
+            account_holder_name=row.get("account_holder_name"),
+            account_number_last4=row.get("account_number_last4"),
+            ifsc_code=row.get("ifsc_code"),
+            bank_name=row.get("bank_name"),
+            upi_id=row.get("upi_id"),
+            pan_number=row.get("pan_number"),
+            has_gst=bool(row.get("has_gst", False)),
+            gst_number=row.get("gst_number"),
+            payout_verified=bool(row.get("payout_verified", False)),
+            identity_status=row.get("identity_status", "unverified"),
+            identity_document_url=row.get("identity_document_url"),
+            identity_submitted_at=row.get("identity_submitted_at"),
+            identity_verified_at=row.get("identity_verified_at"),
         )
 
     def to_row(self) -> dict[str, Any]:
@@ -120,6 +171,26 @@ class Creator:
             "instagram_synced_at": self.instagram_synced_at,
             "website": self.website,
             "following_count": self.following_count,
+            "categories": self.categories,
+            "rate_per_reel": self.rate_per_reel,
+            "rate_per_story": self.rate_per_story,
+            "show_rate_card": self.show_rate_card,
+            "is_discoverable": self.is_discoverable,
+            "notification_preferences": self.notification_preferences,
+            "payout_method_type": self.payout_method_type,
+            "account_holder_name": self.account_holder_name,
+            "account_number_last4": self.account_number_last4,
+            "ifsc_code": self.ifsc_code,
+            "bank_name": self.bank_name,
+            "upi_id": self.upi_id,
+            "pan_number": self.pan_number,
+            "has_gst": self.has_gst,
+            "gst_number": self.gst_number,
+            "payout_verified": self.payout_verified,
+            "identity_status": self.identity_status,
+            "identity_document_url": self.identity_document_url,
+            "identity_submitted_at": self.identity_submitted_at,
+            "identity_verified_at": self.identity_verified_at,
         }
 
     def to_public_row(self) -> dict[str, Any]:

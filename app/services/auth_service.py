@@ -663,6 +663,9 @@ async def update_user_profile(
             "profile_photo_url",
             "bio",
             "categories",
+            "rate_per_reel",
+            "rate_per_story",
+            "show_rate_card",
         }
     elif role == "business":
         repo = business_repo or BusinessRepository()
@@ -692,6 +695,11 @@ async def update_user_profile(
             else:
                 final_update[k] = v
 
+    if role == "creator" and "categories" in final_update:
+        cats = final_update["categories"]
+        if isinstance(cats, list) and len(cats) > 0:
+            final_update["niche"] = cats[0]
+
     if not final_update:
         return await get_user_profile(auth_id)
 
@@ -705,3 +713,19 @@ async def update_user_profile(
         )
 
     return await get_user_profile(auth_id)
+
+
+async def delete_user_account(
+    profile_id: str,
+    *,
+    profile_repo: ProfileRepository | None = None,
+) -> dict:
+    """Deactivate user account and set is_active = False."""
+    profile_repo = profile_repo or ProfileRepository()
+    updated = await profile_repo.update(profile_id, {"is_active": False})
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found",
+        )
+    return {"message": "Account deactivated successfully"}
