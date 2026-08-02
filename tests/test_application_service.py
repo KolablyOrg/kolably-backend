@@ -127,6 +127,11 @@ class FakeApplicationRepo:
         row = {**data, "id": "app-new", "created_at": "2024-01-01T00:00:00+00:00"}
         return CampaignApplication.from_row(row)
 
+    async def list_by_creator(self, creator_id: str, page: int = 1, page_size: int = 20):
+        if self._row:
+            return [CampaignApplication.from_row(self._row)], 1
+        return [], 0
+
     async def get_by_id(self, application_id: str):
         return CampaignApplication.from_row(self._row) if self._row else None
 
@@ -456,3 +461,31 @@ async def test_resubmit_rejects_when_not_revision_requested():
             app_repo=FakeApplicationRepo(row=dict(APPLICATION_ROW)),
         )
     assert exc.value.status_code == 400
+
+
+async def test_list_my_applications_returns_paginated_response():
+    app_row = {
+        **APPLICATION_ROW,
+        "campaigns": {
+            **CAMPAIGN_ROW,
+            "businesses": {
+                "id": "b1",
+                "business_name": "Acme Co",
+                "logo_url": "https://img.com/logo.jpg",
+            },
+        },
+    }
+    app_repo = FakeApplicationRepo(row=app_row)
+    res = await application_service.list_my_applications(
+        profile_id="p-creator",
+        creator_repo=FakeCreatorRepo(),
+        app_repo=app_repo,
+    )
+    assert res["total"] == 1
+    assert len(res["items"]) == 1
+    item = res["items"][0]
+    assert item.id == "app1"
+    assert item.campaign.title == "Summer Campaign"
+    assert item.business.business_name == "Acme Co"
+    assert item.business.logo_url == "https://img.com/logo.jpg"
+

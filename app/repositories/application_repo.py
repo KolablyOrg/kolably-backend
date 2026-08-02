@@ -29,11 +29,14 @@ class ApplicationRepository(BaseRepository):
             (await self._table("campaign_applications"))
             .select(
                 "*,",
-                "campaigns!campaign_applications_campaign_id_fkey(*),",
-                "businesses!campaigns_business_id_fkey(*,",
-                "profiles!businesses_profile_id_fkey(business_name, logo_url))",
+                "campaigns!campaign_applications_campaign_id_fkey(",
+                "  *,",
+                "  businesses!campaigns_business_id_fkey(id, business_name, logo_url)",
+                ")",
+                count="exact",
             )
             .eq("creator_id", creator_id)
+            .order("created_at", desc=True)
         )
 
         start = (page - 1) * page_size
@@ -54,11 +57,13 @@ class ApplicationRepository(BaseRepository):
             (await self._table("campaign_applications"))
             .select(
                 "*,",
-                "campaigns!campaign_applications_campaign_id_fkey(*, business_id),",
+                "campaigns!campaign_applications_campaign_id_fkey!inner(*, business_id),",
                 "creators!campaign_applications_creator_id_fkey(",
                 "id, name, profile_photo_url, follower_count, niche)",
+                count="exact",
             )
             .eq("campaigns.business_id", business_id)
+            .order("created_at", desc=True)
         )
 
         if status:

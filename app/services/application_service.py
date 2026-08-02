@@ -103,8 +103,7 @@ async def list_my_applications(
     items = []
     for app in applications:
         campaign_data = app.campaign or {}
-        business_data = app.business or {}
-        profile_data = business_data.pop("profiles", {}) or {}
+        business_data = app.business or campaign_data.get("businesses") or {}
 
         campaign_summary = CampaignSummary(
             id=campaign_data.get("id", ""),
@@ -124,7 +123,7 @@ async def list_my_applications(
 
         business_summary = BusinessSummary(
             id=business_data.get("id", ""),
-            business_name=profile_data.get("business_name", ""),
+            business_name=business_data.get("business_name", ""),
             logo_url=business_data.get("logo_url"),
         )
 
