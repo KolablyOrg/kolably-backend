@@ -5,7 +5,9 @@ from fastapi import HTTPException, status
 from app.core.enums import NotificationType
 from app.models.chat import Conversation, Message
 from app.repositories.business_repo import BusinessRepository
+from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.chat_repo import ChatRepository
+from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.profile_repo import ProfileRepository
 from app.services import notification_service
@@ -42,9 +44,36 @@ async def _resolve_participant_summary(
                 "name": business.business_name,
                 "avatar_url": business.logo_url,
                 "business_id": business.id,
+                "is_verified": business.is_verified,
             }
 
     return {"id": profile_id, "name": profile.email, "avatar_url": None}
+
+
+async def _resolve_collaboration_context(
+    collaboration_id: str | None,
+    *,
+    collab_repo: CollaborationRepository,
+    campaign_repo: CampaignRepository,
+) -> dict | None:
+    if not collaboration_id:
+        return None
+    collab = await collab_repo.get_by_id(collaboration_id)
+    if not collab:
+        return None
+    campaign = await campaign_repo.get_by_id(collab.campaign_id)
+    if not campaign:
+        return None
+    return {
+        "id": collab.id,
+        "status": collab.status.value,
+        "campaign_id": campaign.id,
+        "campaign_title": campaign.title,
+        "compensation_type": campaign.compensation_type.value if campaign.compensation_type else None,
+        "cash_amount_min": campaign.cash_amount_min,
+        "cash_amount_max": campaign.cash_amount_max,
+        "deadline": campaign.deadline,
+    }
 
 
 def _message_to_response(msg: Message, *, seen: bool = False) -> dict:
@@ -79,6 +108,8 @@ async def _conversation_to_response(
     profile_repo: ProfileRepository,
     creator_repo: CreatorRepository,
     business_repo: BusinessRepository,
+    collab_repo: CollaborationRepository,
+    campaign_repo: CampaignRepository,
 ) -> dict:
     participant_ids = await repo.get_participant_ids(conv.id)
     other_id = next((pid for pid in participant_ids if pid != profile_id), None)
@@ -92,14 +123,19 @@ async def _conversation_to_response(
 
     last_message = await repo.get_last_message(conv.id)
     unread_count = await repo.count_unread(conv.id, profile_id)
+    collaboration = await _resolve_collaboration_context(
+        conv.collaboration_id, collab_repo=collab_repo, campaign_repo=campaign_repo
+    )
 
     return {
         "id": conv.id,
         "participant_ids": participant_ids,
         "other_participant": other_participant,
         "collaboration_id": conv.collaboration_id,
+        "collaboration": collaboration,
         "last_message": last_message.content if last_message else None,
         "last_message_at": last_message.created_at if last_message else None,
+        "last_message_sender_id": last_message.sender_id if last_message else None,
         "unread_count": unread_count,
         "created_at": conv.created_at,
     }
@@ -112,11 +148,15 @@ async def list_conversations(
     profile_repo: ProfileRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    collab_repo: CollaborationRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
 ) -> list[dict]:
     repo = repo or ChatRepository()
     profile_repo = profile_repo or ProfileRepository()
     creator_repo = creator_repo or CreatorRepository()
     business_repo = business_repo or BusinessRepository()
+    collab_repo = collab_repo or CollaborationRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
 
     conversation_ids = await repo.list_conversation_ids_for_profile(profile_id)
     conversations = await repo.get_conversations_by_ids(conversation_ids)
@@ -125,6 +165,7 @@ async def list_conversations(
         await _conversation_to_response(
             c, profile_id, repo=repo, profile_repo=profile_repo,
             creator_repo=creator_repo, business_repo=business_repo,
+            collab_repo=collab_repo, campaign_repo=campaign_repo,
         )
         for c in conversations
     ]
@@ -140,11 +181,15 @@ async def get_conversation(
     profile_repo: ProfileRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    collab_repo: CollaborationRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
 ) -> dict:
     repo = repo or ChatRepository()
     profile_repo = profile_repo or ProfileRepository()
     creator_repo = creator_repo or CreatorRepository()
     business_repo = business_repo or BusinessRepository()
+    collab_repo = collab_repo or CollaborationRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
 
     conversation = await repo.get_conversation(conversation_id)
     if not conversation:
@@ -169,6 +214,7 @@ async def get_conversation(
     resp = await _conversation_to_response(
         conversation, profile_id, repo=repo, profile_repo=profile_repo,
         creator_repo=creator_repo, business_repo=business_repo,
+        collab_repo=collab_repo, campaign_repo=campaign_repo,
     )
     resp["messages"] = [
         _message_to_response(m, seen=_is_seen_by_other(m, profile_id, other_last_read_at))
@@ -237,12 +283,16 @@ async def get_or_create_conversation(
     profile_repo: ProfileRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    collab_repo: CollaborationRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
 ) -> tuple[dict, bool]:
     """Returns (conversation_response, created)."""
     repo = repo or ChatRepository()
     profile_repo = profile_repo or ProfileRepository()
     creator_repo = creator_repo or CreatorRepository()
     business_repo = business_repo or BusinessRepository()
+    collab_repo = collab_repo or CollaborationRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
 
     if other_profile_id == profile_id:
         raise HTTPException(
@@ -280,6 +330,7 @@ async def get_or_create_conversation(
     resp = await _conversation_to_response(
         conversation, profile_id, repo=repo, profile_repo=profile_repo,
         creator_repo=creator_repo, business_repo=business_repo,
+        collab_repo=collab_repo, campaign_repo=campaign_repo,
     )
     return resp, created
 

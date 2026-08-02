@@ -17,7 +17,7 @@ from app.schemas.application import (
 from app.schemas.business import BusinessSummary
 from app.schemas.campaign import CampaignSummary
 from app.schemas.creator import CreatorSummary
-from app.services import notification_service
+from app.services import chat_service, notification_service
 
 
 async def _get_creator_id_for_user(
@@ -428,6 +428,14 @@ async def accept_application(
         "business_id": campaign.business_id,
         "status": CollaborationStatus.ACTIVE.value,
     })
+
+    if collaboration:
+        creator = await creator_repo.get_by_id(application.creator_id)
+        business = await business_repo.get_by_id(campaign.business_id)
+        if creator and business:
+            await chat_service.get_or_create_conversation(
+                creator.profile_id, business.profile_id, collaboration.id,
+            )
 
     notify_profile_id = await _other_party_profile_id(
         application, campaign, creator_repo=creator_repo, business_repo=business_repo

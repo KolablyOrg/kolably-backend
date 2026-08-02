@@ -156,6 +156,28 @@ def _stub_notifications(monkeypatch):
     return sent
 
 
+@pytest.fixture(autouse=True)
+def _stub_chat(monkeypatch):
+    """accept_application auto-creates a conversation for the new
+    collaboration — stub it out so tests don't hit the real Supabase client
+    (get_or_create_conversation instantiates real repos when none are
+    injected, exactly like notification_service above)."""
+    calls = []
+
+    async def _fake_get_or_create_conversation(profile_id, other_profile_id, collaboration_id, **kwargs):
+        calls.append({
+            "profile_id": profile_id,
+            "other_profile_id": other_profile_id,
+            "collaboration_id": collaboration_id,
+        })
+        return {"id": "conv1"}, True
+
+    monkeypatch.setattr(
+        application_service.chat_service, "get_or_create_conversation", _fake_get_or_create_conversation
+    )
+    return calls
+
+
 async def test_apply_to_campaign_creates_pending_application_and_notifies_business(_stub_notifications):
     result = await application_service.apply_to_campaign(
         profile_id="p-creator",
@@ -239,7 +261,7 @@ async def test_withdraw_application_rejects_already_decided():
     assert exc.value.status_code == 400
 
 
-async def test_accept_creator_applied_requires_business_role_and_creates_collaboration(_stub_notifications):
+async def test_accept_creator_applied_requires_business_role_and_creates_collaboration(_stub_notifications, _stub_chat):
     app_repo = FakeApplicationRepo(row=dict(APPLICATION_ROW))
     collab_repo = FakeCollaborationRepo()
 
@@ -261,6 +283,14 @@ async def test_accept_creator_applied_requires_business_role_and_creates_collabo
     assert len(_stub_notifications) == 1
     assert _stub_notifications[0]["profile_id"] == "p-creator"  # creator gets notified
 
+    # Accepting should auto-create the chat conversation for the new
+    # collaboration — there was previously no way to message at all once a
+    # collaboration started unless someone happened to have messaged before.
+    assert len(_stub_chat) == 1
+    assert _stub_chat[0]["profile_id"] == CREATOR_ROW["profile_id"]
+    assert _stub_chat[0]["other_profile_id"] == BUSINESS_ROW["profile_id"]
+    assert _stub_chat[0]["collaboration_id"] == "collab1"
+
 
 async def test_accept_creator_applied_rejects_creator_role():
     with pytest.raises(HTTPException) as exc:
@@ -277,7 +307,7 @@ async def test_accept_creator_applied_rejects_creator_role():
     assert exc.value.status_code == 403
 
 
-async def test_accept_business_invited_lets_creator_decide(_stub_notifications):
+async def test_accept_business_invited_lets_creator_decide(_stub_notifications, _stub_chat):
     invited_row = {**APPLICATION_ROW, "direction": "business_invited"}
     result = await application_service.accept_application(
         application_id="app1",

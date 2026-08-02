@@ -10,7 +10,9 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.business import Business
+from app.models.campaign import Campaign
 from app.models.chat import Conversation, Message
+from app.models.collaboration import Collaboration
 from app.models.creator import Creator
 from app.models.user import UserProfile
 from app.services import chat_service
@@ -67,9 +69,12 @@ class FakeCreatorRepo:
 
 
 class FakeBusinessRepo:
+    def __init__(self, row=None):
+        self._row = row or BUSINESS_ROW
+
     async def get_by_profile_id(self, profile_id: str):
         if profile_id == "p-business":
-            return Business.from_row(BUSINESS_ROW)
+            return Business.from_row(self._row)
         return None
 
 
@@ -174,8 +179,30 @@ class FakeChatRepo:
         return count
 
 
-def _repos():
-    return dict(profile_repo=FakeProfileRepo(), creator_repo=FakeCreatorRepo(), business_repo=FakeBusinessRepo())
+class FakeCollaborationRepo:
+    def __init__(self, rows=None):
+        self._by_id = rows or {}
+
+    async def get_by_id(self, collaboration_id: str):
+        return self._by_id.get(collaboration_id)
+
+
+class FakeCampaignRepo:
+    def __init__(self, rows=None):
+        self._by_id = rows or {}
+
+    async def get_by_id(self, campaign_id: str):
+        return self._by_id.get(campaign_id)
+
+
+def _repos(collab_repo=None, campaign_repo=None):
+    return dict(
+        profile_repo=FakeProfileRepo(),
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+        collab_repo=collab_repo or FakeCollaborationRepo(),
+        campaign_repo=campaign_repo or FakeCampaignRepo(),
+    )
 
 
 async def test_list_conversations_resolves_other_participant_and_last_message():
@@ -192,7 +219,53 @@ async def test_list_conversations_resolves_other_participant_and_last_message():
     assert conv["other_participant"]["avatar_url"] == "https://example.com/acme.png"
     assert conv["other_participant"]["business_id"] == "b1"
     assert conv["last_message"] == "Hi there!"
+    assert conv["last_message_sender_id"] == "p-business"
     assert conv["unread_count"] == 1  # from business, never read by creator
+
+
+async def test_get_conversation_includes_collaboration_context_and_verified_badge():
+    """The chat thread's banner needs the campaign title/compensation/
+    deadline for whatever collaboration the conversation is scoped to, and
+    the inbox's Active tag needs to know if the business side is verified."""
+    verified_business_row = {**BUSINESS_ROW, "is_verified": True}
+    repo = FakeChatRepo(collaboration_id="collab1")
+    collab_repo = FakeCollaborationRepo({
+        "collab1": Collaboration.from_row({
+            "id": "collab1", "campaign_id": "camp1", "creator_id": "c1",
+            "business_id": "b1", "status": "active",
+            "created_at": "2024-01-01T00:00:00+00:00",
+        }),
+    })
+    campaign_repo = FakeCampaignRepo({
+        "camp1": Campaign.from_row({
+            "id": "camp1", "business_id": "b1", "title": "Summer Drop",
+            "objective": "brand_awareness", "description": "...",
+            "compensation_type": "cash", "cash_amount_min": 5000, "cash_amount_max": 12000,
+            "deadline": "2026-09-01T00:00:00+00:00", "status": "active",
+            "created_at": "2024-01-01T00:00:00+00:00",
+        }),
+    })
+
+    result = await chat_service.get_conversation(
+        "conv1", "p-creator", repo=repo,
+        profile_repo=FakeProfileRepo(), creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(verified_business_row),
+        collab_repo=collab_repo, campaign_repo=campaign_repo,
+    )
+
+    assert result["other_participant"]["is_verified"] is True
+    assert result["collaboration"]["campaign_title"] == "Summer Drop"
+    assert result["collaboration"]["compensation_type"] == "cash"
+    assert result["collaboration"]["cash_amount_max"] == 12000
+    assert result["collaboration"]["status"] == "active"
+
+
+async def test_get_conversation_omits_collaboration_context_when_not_scoped_to_one():
+    repo = FakeChatRepo(collaboration_id=None)
+
+    result = await chat_service.get_conversation("conv1", "p-creator", repo=repo, **_repos())
+
+    assert result["collaboration"] is None
 
 
 async def test_list_conversations_omits_business_id_when_other_participant_is_a_creator():
