@@ -3,6 +3,7 @@ name: Fetch Prod Logs
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   fetch-logs:
