@@ -661,6 +661,8 @@ async def update_user_profile(
             "niche",
             "follower_count",
             "profile_photo_url",
+            "bio",
+            "categories",
         }
     elif role == "business":
         repo = business_repo or BusinessRepository()

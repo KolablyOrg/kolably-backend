@@ -131,6 +131,8 @@ class UpdateProfileRequest(BaseModel):
     niche: str | None = None
     follower_count: int | None = Field(None, ge=0)
     profile_photo_url: str | None = None
+    bio: str | None = None
+    categories: list[str] | None = None
 
     # Business specific
     business_name: str | None = None
