@@ -90,12 +90,14 @@ def _make_portfolio_item(data: dict) -> PortfolioItem:
 
 
 class FakeCreatorRepo:
-    def __init__(self, creator=None, other_by_ig_id=None):
+    def __init__(self, creator=None, other_by_ig_id=None, existing_portfolio=()):
         self._creator = creator
         self._other_by_ig_id = other_by_ig_id
+        self._existing_portfolio = list(existing_portfolio)
         self.updated = None
         self.updated_profile_id = None
         self.portfolio_inserted = None
+        self.portfolio_updated = []
 
     async def get_by_profile_id(self, profile_id):
         return _make_creator(self._creator) if self._creator else None
@@ -114,6 +116,18 @@ class FakeCreatorRepo:
             _make_portfolio_item({**item, "id": f"pi-{i}", "created_at": "2026-01-01T00:00:00+00:00"})
             for i, item in enumerate(items)
         ]
+
+    async def get_portfolio_items_by_post_links(self, creator_id, post_links):
+        return [
+            _make_portfolio_item(row)
+            for row in self._existing_portfolio
+            if row.get("post_link") in post_links
+        ]
+
+    async def update_portfolio_item(self, item_id, data):
+        self.portfolio_updated.append((item_id, data))
+        existing = next((r for r in self._existing_portfolio if r["id"] == item_id), None)
+        return _make_portfolio_item({**existing, **data}) if existing else None
 
 
 def _patch_instagram_service(monkeypatch, refresh_calls=None):
@@ -329,6 +343,44 @@ async def test_import_instagram_portfolio_inserts_items(monkeypatch):
     assert items[0]["media_url"] == IG_MEDIA[0]["media_url"]
     assert items[0]["media_type"] == "video"
     assert repo.portfolio_inserted[0]["creator_id"] == "creator-1"
+
+
+async def test_import_instagram_portfolio_refreshes_existing_item_instead_of_duplicating(monkeypatch):
+    """Regression: a reel imported before the thumbnail-extraction fix landed
+    could be stuck with a stale, broken media_url (the raw video file, not a
+    displayable thumbnail) forever, since import previously only ever
+    inserted. Re-selecting the same post (matched by its stable permalink)
+    must update the existing row in place with the now-correct thumbnail,
+    not create a duplicate."""
+    _patch_instagram_service(monkeypatch)
+
+    async def fake_fetch_media(access_token):
+        return [{**IG_MEDIA[0], "thumbnail_url": "https://cdn.instagram.com/reel-thumb.jpg"}]
+
+    monkeypatch.setattr(creator_service.instagram_service, "fetch_media", fake_fetch_media)
+
+    connected = {**CREATOR_ROW, "instagram_access_token": encrypt_token("some-tok")}
+    stale_row = {
+        "id": "pi-stale",
+        "creator_id": "creator-1",
+        "media_url": "https://cdn.instagram.com/reel.mp4",  # broken: raw video, not a thumbnail
+        "post_link": IG_MEDIA[0]["permalink"],
+        "media_type": "video",
+        "like_count": 0,
+        "comment_count": 0,
+        "created_at": "2025-01-01T00:00:00+00:00",
+    }
+    repo = FakeCreatorRepo(creator=connected, existing_portfolio=[stale_row])
+
+    items = await creator_service.import_instagram_portfolio(profile_id="profile-1", repo=repo)
+
+    assert len(items) == 1
+    assert items[0]["id"] == "pi-stale"
+    assert repo.portfolio_inserted == []
+    assert len(repo.portfolio_updated) == 1
+    updated_id, updated_data = repo.portfolio_updated[0]
+    assert updated_id == "pi-stale"
+    assert updated_data["media_url"] == "https://cdn.instagram.com/reel-thumb.jpg"
 
 
 async def test_preview_instagram_media_does_not_insert_anything(monkeypatch):

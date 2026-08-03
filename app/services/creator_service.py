@@ -1,5 +1,5 @@
-from typing import Any
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import HTTPException, status
 
@@ -542,6 +542,17 @@ async def import_instagram_portfolio(
     *,
     repo: CreatorRepository | None = None,
 ) -> list[dict]:
+    """Pull selected (or all recent) Instagram media into the portfolio.
+
+    Upserts by `post_link` (the Instagram permalink, stable per post) rather
+    than always inserting: re-selecting a post that's already in the
+    portfolio refreshes its stored media_url/like_count/comment_count in
+    place instead of creating a duplicate row. This is also the only way a
+    creator can currently fix an older portfolio item stuck with a stale/
+    broken media_url (e.g. a reel imported before a thumbnail-extraction fix
+    landed) — re-picking it here corrects it, since there's no separate
+    portfolio-refresh action.
+    """
     repo = repo or CreatorRepository()
     creator = await repo.get_by_profile_id(profile_id)
     if not creator or not creator.instagram_access_token:
@@ -558,8 +569,30 @@ async def import_instagram_portfolio(
         return []
 
     items = instagram_service.build_portfolio_items(creator.id, media)
-    inserted = await repo.insert_portfolio_items(items)
-    return [_portfolio_item_to_response(item) for item in inserted]
+
+    post_links = [item["post_link"] for item in items if item.get("post_link")]
+    existing_by_link = {
+        item.post_link: item
+        for item in await repo.get_portfolio_items_by_post_links(creator.id, post_links)
+    }
+
+    to_insert = []
+    updated = []
+    for item in items:
+        existing = existing_by_link.get(item.get("post_link"))
+        if existing:
+            refreshed = await repo.update_portfolio_item(existing.id, {
+                "media_url": item["media_url"],
+                "like_count": item["like_count"],
+                "comment_count": item["comment_count"],
+            })
+            if refreshed:
+                updated.append(refreshed)
+        else:
+            to_insert.append(item)
+
+    inserted = await repo.insert_portfolio_items(to_insert)
+    return [_portfolio_item_to_response(item) for item in [*updated, *inserted]]
 
 
 def _parse_expiry(value) -> datetime | None:

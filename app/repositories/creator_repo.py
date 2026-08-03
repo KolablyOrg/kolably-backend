@@ -127,6 +127,22 @@ class CreatorRepository(BaseRepository):
         rows = await self.insert("portfolio_items", data)
         return PortfolioItem.from_row(rows[0]) if rows else None
 
+    async def get_portfolio_items_by_post_links(
+        self, creator_id: str, post_links: list[str]
+    ) -> list[PortfolioItem]:
+        if not post_links:
+            return []
+        rows = await self.select(
+            "portfolio_items",
+            columns="*",
+            filters={"creator_id": creator_id, "post_link": post_links},
+        )
+        return [PortfolioItem.from_row(row) for row in rows]
+
+    async def update_portfolio_item(self, item_id: str, data: dict) -> PortfolioItem | None:
+        rows = await self.update("portfolio_items", data, {"id": item_id})
+        return PortfolioItem.from_row(rows[0]) if rows else None
+
     async def delete_portfolio_item(self, item_id: str, creator_id: str) -> list[dict]:
         return await self.delete("portfolio_items", {"id": item_id, "creator_id": creator_id})
 
