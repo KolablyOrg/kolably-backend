@@ -55,10 +55,10 @@ async def upload_image(
         error_msg = str(e)
         if "Bucket not found" in error_msg or "row-level security" in error_msg:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Storage error: {error_msg}. Please ensure bucket '{BUCKET_NAME}' exists."
             )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to upload image: {error_msg}"
         )
