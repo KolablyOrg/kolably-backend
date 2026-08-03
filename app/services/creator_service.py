@@ -659,7 +659,6 @@ async def save_payout_details(
         update_data["account_number_last4"] = last4
         update_data["ifsc_code"] = data.ifsc_code.upper()
         update_data["bank_name"] = data.bank_name or "HDFC Bank"
-        update_data["upi_id"] = None
     elif data.method == "upi":
         if not data.upi_id or "@" not in data.upi_id:
             raise HTTPException(
@@ -667,10 +666,6 @@ async def save_payout_details(
                 detail="Valid UPI ID is required",
             )
         update_data["upi_id"] = data.upi_id.strip()
-        update_data["account_holder_name"] = None
-        update_data["account_number_last4"] = None
-        update_data["ifsc_code"] = None
-        update_data["bank_name"] = None
 
     if data.pan_number:
         update_data["pan_number"] = data.pan_number.upper().strip()
