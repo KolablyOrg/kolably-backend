@@ -14,11 +14,12 @@ from app.schemas.auth import (
     BusinessSignupRequest,
     CreatorSignupRequest,
     GoogleAuthRequest,
+    GoogleCodeAuthRequest,
     InstagramAuthRequest,
     LoginRequest,
     UpdateProfileRequest,
 )
-from app.services import instagram_service
+from app.services import google_oauth_service, instagram_service
 
 # GoTrue sets last_sign_in_at == created_at (to the second) only on the very
 # first sign-in for an auth.users row; a small tolerance absorbs clock/DB skew.
@@ -352,6 +353,16 @@ async def google_auth(
         },
         "is_new_user": is_new_user,
     }
+
+
+async def google_code_auth(data: GoogleCodeAuthRequest) -> dict:
+    """Code-exchange counterpart to `google_auth` — for clients using the
+    backend's OAuth relay (GET /auth/google/login-url + /callback) instead
+    of a native Google Sign-In dev-client build. Exchanges the authorization
+    `code` for an id_token server-side, then defers to the exact same
+    sign-in/sign-up logic as the direct id_token flow."""
+    id_token = await google_oauth_service.exchange_code_for_id_token(data.code)
+    return await google_auth(GoogleAuthRequest(id_token=id_token, role=data.role))
 
 
 async def _mint_session_for_email(email: str):

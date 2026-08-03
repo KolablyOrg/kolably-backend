@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
 
+    # ── Google OAuth (code-exchange relay for mobile clients without a
+    # native Google Sign-In dev-client build — see
+    # app/services/google_oauth_service.py). This is the existing "Web
+    # application" client (same GOOGLE_CLIENT_ID the web app's Google
+    # Identity Services flow already uses) — its client secret is only
+    # needed server-side for this authorization-code exchange.
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+
     # ── Instagram (Instagram API with Instagram Login) ─
     INSTAGRAM_APP_ID: str = ""
     INSTAGRAM_APP_SECRET: str = ""

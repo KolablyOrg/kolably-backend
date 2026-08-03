@@ -113,6 +113,9 @@ class FakeCreatorRepo:
     async def get_by_id(self, creator_id: str):
         return _make_creator(self._row) if self._row else None
 
+    async def get_by_profile_id(self, profile_id: str):
+        return _make_creator(self._row) if self._row else None
+
     async def list_filtered(self, **kwargs):
         return [_make_creator(r) for r in self._rows], self._total
 

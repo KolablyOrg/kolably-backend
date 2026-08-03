@@ -16,6 +16,7 @@ from app.schemas.auth import (
     ForgotPasswordRequest,
     GoogleAuthRequest,
     GoogleAuthResponse,
+    GoogleCodeAuthRequest,
     InstagramAuthRequest,
     InstagramAuthResponse,
     LoginRequest,
@@ -25,7 +26,7 @@ from app.schemas.auth import (
     UpdateProfileRequest,
 )
 from app.schemas.user import UserInToken
-from app.services import auth_service, instagram_service
+from app.services import auth_service, google_oauth_service, instagram_service
 
 router = APIRouter()
 security = HTTPBearer()
@@ -61,6 +62,52 @@ async def google_auth(data: GoogleAuthRequest):
     `is_new_user` responses to a profile-completion step (`PATCH /me`).
     """
     return await auth_service.google_auth(data)
+
+
+@router.get("/google/login-url")
+async def get_google_login_url(
+    redirect_uri: str = Query(..., description="Where the client wants the flow to end up (its own app-scheme URI)"),
+):
+    """Public — no session exists yet. Google's Web-application OAuth client
+    only accepts https redirect_uris, so this returns an authorize URL that
+    relays back to the client's real `redirect_uri` via `/auth/google/callback`
+    (same relay pattern as `/auth/instagram/login-url`)."""
+    try:
+        return {"url": google_oauth_service.build_authorize_url_with_relay(redirect_uri)}
+    except RuntimeError as exc:
+        # Common local-dev miss: TOKEN_ENCRYPTION_KEY unset → encrypt_token fails.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/google/callback")
+async def google_oauth_callback(
+    code: str | None = Query(None),
+    state: str | None = Query(None),
+    error: str | None = Query(None),
+):
+    """The single fixed HTTPS redirect_uri every relayed Google OAuth flow
+    gives to Google. Google redirects here; this relays the result on to
+    whatever URI the client packed into `state` when it started the flow."""
+    app_redirect_uri = google_oauth_service.decode_app_redirect(state) if state else None
+    if not app_redirect_uri:
+        return {"detail": "Invalid or expired Google authentication request."}
+
+    separator = "&" if "?" in app_redirect_uri else "?"
+    if code:
+        return RedirectResponse(url=f"{app_redirect_uri}{separator}code={code}")
+    return RedirectResponse(url=f"{app_redirect_uri}{separator}error={error or 'access_denied'}")
+
+
+@router.post("/google/code", response_model=GoogleAuthResponse)
+async def google_code_auth(data: GoogleCodeAuthRequest):
+    """Sign in or sign up with a Google authorization `code` obtained via the
+    relay flow above — the code-exchange counterpart to `POST /auth/google`'s
+    direct id_token flow, for clients without a native Google Sign-In
+    dev-client build."""
+    return await auth_service.google_code_auth(data)
 
 
 @router.post("/instagram", response_model=InstagramAuthResponse)

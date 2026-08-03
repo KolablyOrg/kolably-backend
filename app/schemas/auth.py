@@ -56,6 +56,18 @@ class GoogleAuthRequest(BaseModel):
     either both exist or not.'"""
 
 
+class GoogleCodeAuthRequest(BaseModel):
+    """Authorization-code counterpart to `GoogleAuthRequest`, for clients
+    that can't obtain an `id_token` directly (no native Google Sign-In
+    dev-client build — see GET /auth/google/login-url + google_oauth_service.py).
+    The backend exchanges `code` for an id_token itself, then follows the
+    exact same sign-in/sign-up logic as the direct id_token flow.
+    """
+
+    code: str = Field(..., min_length=1)
+    role: Literal["creator", "business"] | None = None
+
+
 # ── Instagram Sign-In ─────────────────────────────────
 class InstagramAuthRequest(BaseModel):
     """Instagram API with Instagram Login — authorization code exchange.
