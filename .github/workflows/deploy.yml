@@ -43,7 +43,7 @@ jobs:
             fi
             
             # Build and Deploy
-            sudo docker build -t kolably-backend-cicd .
+            sudo docker build --no-cache -t kolably-backend-cicd .
             sudo docker rm -f kolably-backend-prod || true
             sudo docker run -d --name kolably-backend-prod -p 8001:8000 --env-file .env kolably-backend-cicd
             
