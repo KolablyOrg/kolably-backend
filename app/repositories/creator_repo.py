@@ -146,6 +146,10 @@ class CreatorRepository(BaseRepository):
     async def delete_portfolio_item(self, item_id: str, creator_id: str) -> list[dict]:
         return await self.delete("portfolio_items", {"id": item_id, "creator_id": creator_id})
 
+    async def update_portfolio_item(self, item_id: str, data: dict) -> PortfolioItem | None:
+        rows = await self.update("portfolio_items", data, {"id": item_id})
+        return PortfolioItem.from_row(rows[0]) if rows else None
+
     async def list_portfolio(
         self,
         creator_id: str,

@@ -295,6 +295,30 @@ async def get_creator_portfolio(
         page_size=page_size,
     )
 
+    # Auto-repair legacy items that have raw .mp4 URLs instead of thumbnails
+    broken = [item for item in items if item.media_url and ".mp4" in item.media_url]
+    if broken:
+        try:
+            creator = await repo.get_by_id(creator_id)
+            if creator and creator.instagram_access_token:
+                access_token = decrypt_token(creator.instagram_access_token)
+                ig_media = await instagram_service.fetch_media(access_token)
+                # Build a lookup: permalink -> thumbnail_url
+                permalink_to_thumb: dict[str, str] = {}
+                for m in ig_media:
+                    plink = m.get("permalink")
+                    thumb = instagram_service.get_media_url_or_thumbnail(m)
+                    if plink and thumb and ".mp4" not in thumb:
+                        permalink_to_thumb[plink] = thumb
+
+                for item in broken:
+                    new_url = permalink_to_thumb.get(item.post_link) if item.post_link else None
+                    if new_url:
+                        await repo.update_portfolio_item(str(item.id), {"media_url": new_url})
+                        item.media_url = new_url
+        except Exception:
+            pass  # Best-effort repair; don't block portfolio response
+
     return {
         "items": [_portfolio_item_to_response(item) for item in items],
         "total": total,
