@@ -175,3 +175,7 @@ class IdentityStatusResponse(BaseModel):
     submitted_at: datetime | None = None
     verified_at: datetime | None = None
     rejection_reason: str | None = None
+
+
+class BulkDeletePortfolioRequest(BaseModel):
+    item_ids: list[str]

@@ -16,6 +16,7 @@ from app.schemas.creator import (
     CreatorResponse,
     CreatorStatsResponse,
     CreatorUpdateRequest,
+    BulkDeletePortfolioRequest,
     IdentityStatusResponse,
     IdentitySubmitRequest,
     InstagramAuthUrlResponse,
@@ -288,3 +289,21 @@ async def delete_portfolio_item(
         profile_id=user.id,
         role=user.role,
     )
+
+@router.delete(
+    "/{creator_id}/portfolio",
+    dependencies=[Depends(require_role(UserRole.CREATOR, UserRole.SUPERADMIN))],
+)
+async def bulk_delete_portfolio_items(
+    creator_id: str,
+    request: BulkDeletePortfolioRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Bulk delete portfolio items (owner or superadmin only)."""
+    await creator_service.bulk_delete_portfolio_items(
+        creator_id=creator_id,
+        item_ids=request.item_ids,
+        profile_id=user.id,
+        role=user.role,
+    )
+    return {"status": "success", "deleted": len(request.item_ids)}

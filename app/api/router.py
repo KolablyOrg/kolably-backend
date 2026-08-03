@@ -15,6 +15,7 @@ from app.api.routes import (
     meta,
     notifications,
     users,
+    upload,
 )
 
 api_router = APIRouter()
@@ -29,3 +30,4 @@ api_router.include_router(collaborations.router, prefix="/collaborations", tags=
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(meta.router, prefix="/meta", tags=["meta"])
+api_router.include_router(upload.router)

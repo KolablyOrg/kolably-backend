@@ -235,6 +235,24 @@ async def delete_portfolio_item(
     await repo.delete_portfolio_item(item_id, creator_id)
 
 
+async def bulk_delete_portfolio_items(
+    creator_id: str,
+    item_ids: list[str],
+    profile_id: str,
+    role: UserRole,
+    *,
+    repo: CreatorRepository | None = None,
+) -> None:
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_id(creator_id)
+    _ensure_creator_access(creator, profile_id, role)
+
+    if not item_ids:
+        return
+
+    await repo.bulk_delete_portfolio_items(item_ids, creator_id)
+
+
 async def save_campaign(
     profile_id: str,
     campaign_id: str,
