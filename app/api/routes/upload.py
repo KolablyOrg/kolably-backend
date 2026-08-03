@@ -3,7 +3,7 @@ from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, status
 
 from app.core.dependencies import get_current_user
 from app.core.supabase import get_supabase_admin_client
-from app.schemas.users import UserInToken
+from app.schemas.user import UserInToken
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
