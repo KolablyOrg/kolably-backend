@@ -12,9 +12,6 @@ class Business:
     """Business domain model — internal representation."""
     id: str
     profile_id: str
-    business_name: str
-    city: str
-    category: str
     description: str | None = None
     address: str | None = None
     logo_url: str | None = None
@@ -23,15 +20,26 @@ class Business:
     owner_name: str = ""
     created_at: datetime = field(default_factory=datetime.utcnow)
     is_verified: bool = False
+    business_name: str | None = None
+    city: str | None = None
+    category: str | None = None
+    legal_entity_name: str | None = None
+    business_type: str | None = None
+    pan_number: str | None = None
+    gst_number: str | None = None
+    business_proof_document_url: str | None = None
+    kyb_status: str = "unverified"
+    kyb_submitted_at: datetime | None = None
+    kyb_verified_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Business":
         return cls(
             id=row["id"],
             profile_id=row["profile_id"],
-            business_name=row["business_name"],
-            city=row["city"],
-            category=row["category"],
+            business_name=row.get("business_name"),
+            city=row.get("city"),
+            category=row.get("category"),
             description=row.get("description"),
             address=row.get("address"),
             logo_url=row.get("logo_url"),
@@ -40,6 +48,14 @@ class Business:
             owner_name=row.get("owner_name", ""),
             created_at=row["created_at"],
             is_verified=row.get("is_verified", False),
+            legal_entity_name=row.get("legal_entity_name"),
+            business_type=row.get("business_type"),
+            pan_number=row.get("pan_number"),
+            gst_number=row.get("gst_number"),
+            business_proof_document_url=row.get("business_proof_document_url"),
+            kyb_status=row.get("kyb_status", "unverified"),
+            kyb_submitted_at=row.get("kyb_submitted_at"),
+            kyb_verified_at=row.get("kyb_verified_at"),
         )
 
     def to_row(self) -> dict[str, Any]:
@@ -58,4 +74,12 @@ class Business:
             "owner_name": self.owner_name,
             "created_at": self.created_at,
             "is_verified": self.is_verified,
+            "legal_entity_name": self.legal_entity_name,
+            "business_type": self.business_type,
+            "pan_number": self.pan_number,
+            "gst_number": self.gst_number,
+            "business_proof_document_url": self.business_proof_document_url,
+            "kyb_status": self.kyb_status,
+            "kyb_submitted_at": self.kyb_submitted_at,
+            "kyb_verified_at": self.kyb_verified_at,
         }

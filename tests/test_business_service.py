@@ -2,9 +2,12 @@
 Unit tests for business_service — repositories injected as fakes, no Supabase.
 """
 
+import pytest
+from fastapi import HTTPException
+
 from app.models.business import Business
 from app.models.campaign import Campaign
-from app.schemas.business import BusinessResponse
+from app.schemas.business import BusinessResponse, KybSubmitRequest
 from app.services import business_service
 
 BUSINESS_ROW = {
@@ -59,6 +62,7 @@ class FakeBusinessRepo:
         self._business_id = business_id
         self._campaigns = list(campaigns)
         self.seen_business_id: str | None = None
+        self.update_calls: list[tuple[str, dict]] = []
 
     async def get_by_id(self, business_id: str):
         return _make_business(self._row) if self._row else None
@@ -68,6 +72,16 @@ class FakeBusinessRepo:
 
     async def get_id_by_profile_id(self, profile_id: str):
         return self._business_id
+
+    async def get_by_profile_id(self, profile_id: str):
+        return _make_business(self._row) if self._row else None
+
+    async def update_by_profile_id(self, profile_id: str, data: dict):
+        self.update_calls.append((profile_id, data))
+        if self._row is None:
+            return None
+        self._row = {**self._row, **data}
+        return _make_business(self._row)
 
     async def list_campaigns(self, business_id: str, **kwargs):
         self.seen_business_id = business_id
@@ -136,3 +150,75 @@ async def test_list_my_campaigns_includes_draft_with_null_compensation_type():
     assert result["total"] == 1
     assert result["items"][0].status.value == "draft"
     assert result["items"][0].compensation_type is None
+
+
+# ── KYB (Know-Your-Business) Verification ───────────────────────────────
+KYB_SUBMIT_DATA = KybSubmitRequest(
+    business_type="company",
+    legal_entity_name="Cafe Kolab Pvt Ltd",
+    pan_number="abcde1234f",
+    gst_number="22AAAAA0000A1Z5",
+    document_url="https://example.com/proof.pdf",
+)
+
+
+async def test_submit_kyb_verification_sets_pending_status_and_normalizes_pan():
+    repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
+
+    result = await business_service.submit_kyb_verification(
+        profile_id="p1", data=KYB_SUBMIT_DATA, repo=repo
+    )
+
+    assert result["status"] == "pending"
+    assert result["submitted_at"] is not None
+    assert result["verified_at"] is None
+    assert result["rejection_reason"] is None
+
+    profile_id, update_data = repo.update_calls[0]
+    assert profile_id == "p1"
+    assert update_data["pan_number"] == "ABCDE1234F"
+    assert update_data["business_type"] == "company"
+    assert update_data["legal_entity_name"] == "Cafe Kolab Pvt Ltd"
+    assert update_data["gst_number"] == "22AAAAA0000A1Z5"
+    assert update_data["business_proof_document_url"] == "https://example.com/proof.pdf"
+    assert update_data["kyb_status"] == "pending"
+
+
+async def test_submit_kyb_verification_404_when_no_business_row():
+    repo = FakeBusinessRepo(row=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await business_service.submit_kyb_verification(
+            profile_id="missing", data=KYB_SUBMIT_DATA, repo=repo
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_get_kyb_status_returns_current_status():
+    row = {**BUSINESS_ROW, "kyb_status": "verified", "kyb_verified_at": "2024-02-01T00:00:00+00:00"}
+    repo = FakeBusinessRepo(row=row)
+
+    result = await business_service.get_kyb_status(profile_id="p1", repo=repo)
+
+    assert result["status"] == "verified"
+    assert result["verified_at"] == "2024-02-01T00:00:00+00:00"
+
+
+async def test_get_kyb_status_defaults_to_unverified():
+    repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
+
+    result = await business_service.get_kyb_status(profile_id="p1", repo=repo)
+
+    assert result["status"] == "unverified"
+    assert result["submitted_at"] is None
+    assert result["verified_at"] is None
+
+
+async def test_get_kyb_status_404_when_no_business_row():
+    repo = FakeBusinessRepo(row=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await business_service.get_kyb_status(profile_id="missing", repo=repo)
+
+    assert exc_info.value.status_code == 404

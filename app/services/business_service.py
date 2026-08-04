@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from typing import Any
+
 from fastapi import HTTPException, status
 
 from app.models.business import Business
@@ -25,6 +28,7 @@ def _business_to_response(business: Business) -> BusinessResponse:
         website=business.website,
         created_at=business.created_at,
         is_verified=business.is_verified,
+        kyb_status=business.kyb_status,
     )
 
 
@@ -177,3 +181,65 @@ async def get_business_stats(
         avg_engagement_rate=0.0,
         engagement_series=[0.0] * 7,
     )
+
+
+# ── KYB (Know-Your-Business) Verification Service Methods ──────────────
+async def submit_kyb_verification(
+    profile_id: str,
+    data: Any,
+    *,
+    repo: BusinessRepository | None = None,
+) -> dict:
+    repo = repo or BusinessRepository()
+    business = await repo.get_by_profile_id(profile_id)
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business profile not found",
+        )
+
+    now = datetime.now(UTC)
+    update_data = {
+        "business_type": data.business_type,
+        "legal_entity_name": data.legal_entity_name,
+        "pan_number": data.pan_number.upper().strip(),
+        "gst_number": data.gst_number,
+        "business_proof_document_url": data.document_url,
+        "kyb_status": "pending",
+        "kyb_submitted_at": now.isoformat(),
+    }
+
+    updated = await repo.update_by_profile_id(profile_id, update_data)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to submit KYB verification",
+        )
+
+    return {
+        "status": updated.kyb_status,
+        "submitted_at": updated.kyb_submitted_at,
+        "verified_at": updated.kyb_verified_at,
+        "rejection_reason": None,
+    }
+
+
+async def get_kyb_status(
+    profile_id: str,
+    *,
+    repo: BusinessRepository | None = None,
+) -> dict:
+    repo = repo or BusinessRepository()
+    business = await repo.get_by_profile_id(profile_id)
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business profile not found",
+        )
+
+    return {
+        "status": business.kyb_status or "unverified",
+        "submitted_at": business.kyb_submitted_at,
+        "verified_at": business.kyb_verified_at,
+        "rejection_reason": None,
+    }

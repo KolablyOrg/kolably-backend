@@ -163,12 +163,7 @@ async def signup_business(
     business_repo = business_repo or BusinessRepository()
     await business_repo.insert_business({
         "profile_id": profile_id,
-        "business_name": data.business_name,
-        "owner_name": data.owner_name,
-        "category": data.business_category,
-        "city": data.city,
-        "address": data.address,
-        "description": data.business_description,
+        "owner_name": data.name,
     })
 
     session = auth_response.session
@@ -181,10 +176,7 @@ async def signup_business(
             "email": data.email,
             "role": "business",
             "business": {
-                "business_name": data.business_name,
-                "owner_name": data.owner_name,
-                "city": data.city,
-                "category": data.business_category,
+                "owner_name": data.name,
             },
         },
     }
@@ -687,6 +679,8 @@ async def update_user_profile(
             "city",
             "address",
             "business_description",
+            "logo_url",
+            "website",
         }
     elif role == "superadmin":
         return await get_user_profile(auth_id)

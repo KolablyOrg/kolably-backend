@@ -7,7 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from app.core.dependencies import get_current_user
 from app.core.enums import CampaignStatus
 from app.schemas.application import ApplicationWithCreator
-from app.schemas.business import BusinessResponse, BusinessStatsResponse
+from app.schemas.business import (
+    BusinessResponse,
+    BusinessStatsResponse,
+    KybStatusResponse,
+    KybSubmitRequest,
+)
 from app.schemas.campaign import CampaignSummary
 from app.schemas.common import PaginatedResponse
 from app.schemas.user import UserInToken
@@ -72,6 +77,23 @@ async def list_my_applications(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/me/verification", response_model=KybStatusResponse)
+async def get_verification_status(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Get KYB verification status for the current business."""
+    return await business_service.get_kyb_status(profile_id=user.id)
+
+
+@router.post("/me/verification", response_model=KybStatusResponse)
+async def submit_verification(
+    data: KybSubmitRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Submit business type, legal entity, PAN/GST, and proof document for KYB verification."""
+    return await business_service.submit_kyb_verification(profile_id=user.id, data=data)
 
 
 @router.get("/{business_id}", response_model=BusinessResponse)

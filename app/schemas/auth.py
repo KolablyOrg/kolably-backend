@@ -21,14 +21,9 @@ class CreatorSignupRequest(BaseModel):
 
 
 class BusinessSignupRequest(BaseModel):
-    business_name: str
-    owner_name: str
+    name: str  # owner's full name
     email: EmailStr
     password: str = Field(..., min_length=8)
-    business_category: str
-    city: str
-    address: str
-    business_description: str | None = None
 
 
 # ── Login ─────────────────────────────────────────────
@@ -155,3 +150,5 @@ class UpdateProfileRequest(BaseModel):
     business_category: str | None = None
     address: str | None = None
     business_description: str | None = None
+    logo_url: str | None = None
+    website: str | None = None

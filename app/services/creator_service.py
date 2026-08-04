@@ -758,7 +758,7 @@ async def submit_identity_verification(
         "pan_number": data.pan_number.upper().strip(),
         "identity_status": "pending",
         "identity_document_url": data.document_url,
-        "identity_submitted_at": now,
+        "identity_submitted_at": now.isoformat(),
     }
 
     updated = await repo.update_creator(creator.id, update_data)
