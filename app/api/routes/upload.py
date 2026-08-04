@@ -1,5 +1,6 @@
 import uuid
-from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, status
+from typing import Literal
+from fastapi import APIRouter, File, Form, UploadFile, Depends, HTTPException, status
 
 from app.core.dependencies import get_current_user
 from app.core.supabase import get_supabase_admin_client
@@ -11,9 +12,15 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 BUCKET_NAME = "media"
 
+# Top-level folder per upload purpose — keeps creator avatars, business
+# logos, and KYB verification documents from all landing in one
+# undifferentiated "avatars" folder.
+UploadPurpose = Literal["avatar", "business-logo", "verification-doc"]
+
 @router.post("/image")
 async def upload_image(
     file: UploadFile = File(...),
+    purpose: UploadPurpose = Form("avatar"),
     user: UserInToken = Depends(get_current_user),
 ):
     """
@@ -24,7 +31,7 @@ async def upload_image(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="Unsupported file type. Must be JPEG, PNG, WEBP, or GIF."
         )
-    
+
     # Read file content to check size and upload
     contents = await file.read()
     if len(contents) > MAX_FILE_SIZE:
@@ -33,9 +40,9 @@ async def upload_image(
             detail="File too large. Maximum size is 5MB."
         )
 
-    # Generate a unique path: e.g. avatars/123e4567-e89b-12d3/uuid.jpg
+    # Generate a unique path: e.g. business-logo/123e4567-e89b-12d3/uuid.jpg
     ext = file.filename.split(".")[-1] if file.filename and "." in file.filename else "jpg"
-    file_path = f"avatars/{user.id}/{uuid.uuid4().hex}.{ext}"
+    file_path = f"{purpose}/{user.id}/{uuid.uuid4().hex}.{ext}"
 
     try:
         # Upload to Supabase Storage
