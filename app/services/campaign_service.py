@@ -322,6 +322,12 @@ async def list_campaigns(
     page_size: int,
     user: UserInToken | None = None,
     *,
+    location: list[str] | None = None,
+    compensation_type: list[str] | None = None,
+    cash_amount_min: float | None = None,
+    cash_amount_max: float | None = None,
+    deliverables: list[str] | None = None,
+    only_qualified: bool | None = None,
     campaign_repo: CampaignRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
@@ -346,6 +352,12 @@ async def list_campaigns(
         page=page,
         page_size=page_size,
         extra_category_values=extra_cats or None,
+        location=location,
+        compensation_type=compensation_type,
+        cash_amount_min=cash_amount_min,
+        cash_amount_max=cash_amount_max,
+        deliverables=deliverables,
+        only_qualified=only_qualified,
     )
 
     campaign_ids = [c.id for c in campaigns]
@@ -633,3 +645,17 @@ async def invite_creator(
         revision_reason=application.revision_reason,
         created_at=application.created_at,
     )
+
+async def get_locations(
+    *,
+    campaign_repo: CampaignRepository | None = None,
+) -> dict:
+    """Get all unique locations from active campaigns."""
+    campaign_repo = campaign_repo or CampaignRepository()
+    locations = await campaign_repo.get_locations()
+    return {
+        "items": locations,
+        "total": len(locations),
+        "page": 1,
+        "page_size": len(locations),
+    }

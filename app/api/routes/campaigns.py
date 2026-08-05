@@ -135,6 +135,12 @@ async def list_campaigns(
     recommended: bool | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    location: list[str] | None = Query(None),
+    compensation_type: list[str] | None = Query(None),
+    cash_amount_min: float | None = Query(None),
+    cash_amount_max: float | None = Query(None),
+    deliverables: list[str] | None = Query(None),
+    only_qualified: bool | None = Query(None),
     user: UserInToken = Depends(get_current_user),
 ):
     """List active campaigns — the main feed for creators."""
@@ -144,6 +150,12 @@ async def list_campaigns(
         recommended=recommended,
         page=page,
         page_size=page_size,
+        location=location,
+        compensation_type=compensation_type,
+        cash_amount_min=cash_amount_min,
+        cash_amount_max=cash_amount_max,
+        deliverables=deliverables,
+        only_qualified=only_qualified,
         user=user,
     )
 
@@ -152,6 +164,12 @@ async def list_campaigns(
 async def get_campaign_categories():
     """Static list of campaign categories."""
     return await campaign_service.get_campaign_categories()
+
+
+@router.get("/locations", response_model=PaginatedResponse[str])
+async def get_locations():
+    """Static list of available campaign locations."""
+    return await campaign_service.get_locations()
 
 
 # ── Detail & General CRUD ─────────────────────────────

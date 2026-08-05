@@ -36,6 +36,12 @@ class CampaignRepository(BaseRepository):
         page_size: int = 20,
         *,
         extra_category_values: list[str] | None = None,
+        location: list[str] | None = None,
+        compensation_type: list[str] | None = None,
+        cash_amount_min: float | None = None,
+        cash_amount_max: float | None = None,
+        deliverables: list[str] | None = None,
+        only_qualified: bool | None = None,
     ) -> tuple[list[Campaign], int]:
         query = (
             (await self._table("campaigns"))
@@ -65,6 +71,25 @@ class CampaignRepository(BaseRepository):
 
         if category:
             query = query.eq("creator_category", category)
+
+        if location:
+            query = query.in_("location", location)
+
+        if compensation_type:
+            query = query.in_("compensation_type", compensation_type)
+
+        if cash_amount_min is not None:
+            query = query.gte("cash_amount_max", cash_amount_min)
+
+        if cash_amount_max is not None:
+            query = query.lte("cash_amount_min", cash_amount_max)
+
+        if deliverables:
+            query = query.contains("deliverables", deliverables)
+
+        # only_qualified is harder to filter strictly in SQL without user profile data,
+        # but if implemented, it could check min_engagement_rate etc. We'll skip for now
+        # or implement it via the service layer if needed.
 
         start = (page - 1) * page_size
         end = start + page_size - 1
@@ -103,3 +128,21 @@ class CampaignRepository(BaseRepository):
                 entry["accepted_count"] += 1
 
         return counts
+
+    async def get_locations(self) -> list[str]:
+        # Fetch all active locations and deduplicate in Python
+        result = await self._execute(
+            (await self._table("campaigns"))
+            .select("location")
+            .eq("status", "active")
+        )
+        rows = result.data or []
+        # Extract location string, filter nulls/empties, trim, and unique
+        seen = set()
+        locations = []
+        for row in rows:
+            loc = (row.get("location") or "").strip()
+            if loc and loc.lower() not in seen:
+                seen.add(loc.lower())
+                locations.append(loc)
+        return sorted(locations)
