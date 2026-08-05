@@ -189,7 +189,7 @@ async def submit_identity_verification(
 async def list_creators(
     search: str | None = Query(None),
     niche: str | None = Query(None),
-    city: str | None = Query(None),
+    city: list[str] | None = Query(None),
     follower_min: int | None = Query(None),
     follower_max: int | None = Query(None),
     engagement_min: float | None = Query(None, ge=0),
@@ -209,6 +209,18 @@ async def list_creators(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/locations", response_model=PaginatedResponse[str])
+async def get_creator_locations():
+    """Distinct cities from discoverable creators (for brand Discover filter pills)."""
+    return await creator_service.get_locations()
+
+
+@router.get("/niches", response_model=PaginatedResponse[str])
+async def get_creator_niches():
+    """Distinct niches from discoverable creators (for brand Discover filter pills)."""
+    return await creator_service.get_niches()
 
 
 @router.get("/{creator_id}", response_model=CreatorResponse)

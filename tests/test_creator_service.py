@@ -213,7 +213,7 @@ async def test_list_creators_forwards_discovery_filters():
     await creator_service.list_creators(
         search="delhi",
         niche="Food",
-        city="South Delhi",
+        city=["South Delhi", "Delhi"],
         follower_min=5000,
         follower_max=50000,
         engagement_min=3.0,
@@ -225,7 +225,7 @@ async def test_list_creators_forwards_discovery_filters():
 
     assert captured["search"] == "delhi"
     assert captured["niche"] == "Food"
-    assert captured["city"] == "South Delhi"
+    assert captured["city"] == ["South Delhi", "Delhi"]
     assert captured["follower_min"] == 5000
     assert captured["follower_max"] == 50000
     assert captured["engagement_min"] == 3.0

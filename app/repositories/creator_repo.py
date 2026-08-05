@@ -1,34 +1,6 @@
 from app.models.creator import Creator, PortfolioItem
 from app.repositories.base import BaseRepository
 
-# Brand Discover location pills → city substrings that should match.
-# Keys are lowercased labels from the mobile filter sheet (and design aliases).
-CITY_REGION_ALIASES: dict[str, tuple[str, ...]] = {
-    "delhi ncr": (
-        "Delhi",
-        "New Delhi",
-        "South Delhi",
-        "Noida",
-        "Gurugram",
-        "Gurgaon",
-        "Faridabad",
-        "Ghaziabad",
-    ),
-    "all delhi ncr": (
-        "Delhi",
-        "New Delhi",
-        "South Delhi",
-        "Noida",
-        "Gurugram",
-        "Gurgaon",
-        "Faridabad",
-        "Ghaziabad",
-    ),
-    "south delhi": ("South Delhi", "Delhi", "New Delhi"),
-    "mumbai": ("Mumbai", "Bombay", "Navi Mumbai", "Thane"),
-    "bengaluru": ("Bengaluru", "Bangalore"),
-}
-
 
 def _sanitize_search_term(term: str) -> str:
     """Strip PostgREST `or_()` grammar breakers and LIKE wildcards from user input."""
@@ -36,18 +8,6 @@ def _sanitize_search_term(term: str) -> str:
     for ch in (",", "(", ")", ".", "%", "_", "*", '"', "'", "&"):
         cleaned = cleaned.replace(ch, " ")
     return " ".join(cleaned.split())
-
-
-def _city_match_terms(city: str) -> list[str]:
-    """Expand a location pill/label into one or more city substrings for ilike."""
-    key = " ".join(city.strip().lower().split())
-    if not key:
-        return []
-    aliases = CITY_REGION_ALIASES.get(key)
-    if aliases:
-        return list(aliases)
-    cleaned = _sanitize_search_term(city)
-    return [cleaned] if cleaned else []
 
 
 class CreatorRepository(BaseRepository):
@@ -87,7 +47,7 @@ class CreatorRepository(BaseRepository):
         self,
         search: str | None = None,
         niche: str | None = None,
-        city: str | None = None,
+        city: list[str] | None = None,
         follower_min: int | None = None,
         follower_max: int | None = None,
         engagement_min: float | None = None,
@@ -117,16 +77,14 @@ class CreatorRepository(BaseRepository):
                     )
                 )
         if niche:
+            # Case-insensitive so a "Food" pill still matches stored "food".
             query = query.ilike("niche", f"%{niche}%")
         if city:
-            terms = _city_match_terms(city)
-            if len(terms) == 1:
-                query = query.ilike("city", f"%{terms[0]}%")
-            elif len(terms) > 1:
-                # Region pills (e.g. Delhi NCR) must OR across common city spellings.
-                query = query.or_(
-                    ",".join(f"city.ilike.%{_sanitize_search_term(t)}%" for t in terms)
-                )
+            # Same pattern as campaign feed locations: exact values from
+            # GET /creators/locations, multi-select via repeated query params.
+            cleaned = [c.strip() for c in city if c and c.strip()]
+            if cleaned:
+                query = query.in_("city", cleaned)
         if follower_min is not None:
             query = query.gte("follower_count", follower_min)
         if follower_max is not None:
@@ -147,6 +105,48 @@ class CreatorRepository(BaseRepository):
 
         rows = result.data or []
         return [Creator.from_row(row) for row in rows], result.count or 0
+
+    async def get_locations(self) -> list[str]:
+        """Distinct cities from discoverable creators — drives brand Discover pills."""
+        result = await self._execute(
+            (await self._table("creators"))
+            .select("city")
+            .eq("is_discoverable", True)
+        )
+        rows = result.data or []
+        seen: set[str] = set()
+        locations: list[str] = []
+        for row in rows:
+            loc = (row.get("city") or "").strip()
+            if not loc:
+                continue
+            key = loc.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            locations.append(loc)
+        return sorted(locations, key=str.lower)
+
+    async def get_niches(self) -> list[str]:
+        """Distinct niches from discoverable creators — drives brand Discover pills."""
+        result = await self._execute(
+            (await self._table("creators"))
+            .select("niche")
+            .eq("is_discoverable", True)
+        )
+        rows = result.data or []
+        seen: set[str] = set()
+        niches: list[str] = []
+        for row in rows:
+            value = (row.get("niche") or "").strip()
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            niches.append(value)
+        return sorted(niches, key=str.lower)
 
     async def insert_creator(self, data: dict) -> Creator | None:
         rows = await self.insert("creators", data)

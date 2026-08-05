@@ -82,7 +82,7 @@ async def get_creator_by_id(
 async def list_creators(
     search: str | None = None,
     niche: str | None = None,
-    city: str | None = None,
+    city: list[str] | None = None,
     follower_min: int | None = None,
     follower_max: int | None = None,
     engagement_min: float | None = None,
@@ -110,6 +110,36 @@ async def list_creators(
         "total": total,
         "page": page,
         "page_size": page_size,
+    }
+
+
+async def get_locations(
+    *,
+    repo: CreatorRepository | None = None,
+) -> dict:
+    """Distinct cities from discoverable creators (mirrors campaign locations)."""
+    repo = repo or CreatorRepository()
+    locations = await repo.get_locations()
+    return {
+        "items": locations,
+        "total": len(locations),
+        "page": 1,
+        "page_size": len(locations),
+    }
+
+
+async def get_niches(
+    *,
+    repo: CreatorRepository | None = None,
+) -> dict:
+    """Distinct niches from discoverable creators."""
+    repo = repo or CreatorRepository()
+    niches = await repo.get_niches()
+    return {
+        "items": niches,
+        "total": len(niches),
+        "page": 1,
+        "page_size": len(niches),
     }
 
 
