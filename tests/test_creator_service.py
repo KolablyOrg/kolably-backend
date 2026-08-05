@@ -199,6 +199,41 @@ async def test_list_creators_uses_same_serialization_as_get():
     assert item.model_dump() == creator_service._creator_to_response(_make_creator(dict(CREATOR_ROW))).model_dump()
 
 
+async def test_list_creators_forwards_discovery_filters():
+    """Brand discover filters (engagement, verified) must reach the repo."""
+    repo = FakeCreatorRepo(rows=[dict(CREATOR_ROW)], total=1)
+    captured: dict = {}
+
+    async def capture_list_filtered(**kwargs):
+        captured.update(kwargs)
+        return [_make_creator(dict(CREATOR_ROW))], 1
+
+    repo.list_filtered = capture_list_filtered  # type: ignore[method-assign]
+
+    await creator_service.list_creators(
+        search="delhi",
+        niche="Food",
+        city="South Delhi",
+        follower_min=5000,
+        follower_max=50000,
+        engagement_min=3.0,
+        verified_only=True,
+        page=2,
+        page_size=10,
+        repo=repo,
+    )
+
+    assert captured["search"] == "delhi"
+    assert captured["niche"] == "Food"
+    assert captured["city"] == "South Delhi"
+    assert captured["follower_min"] == 5000
+    assert captured["follower_max"] == 50000
+    assert captured["engagement_min"] == 3.0
+    assert captured["verified_only"] is True
+    assert captured["page"] == 2
+    assert captured["page_size"] == 10
+
+
 async def test_get_creator_stats_404_without_creator_profile():
     repo = FakeCreatorRepo(creator_id=None)
 

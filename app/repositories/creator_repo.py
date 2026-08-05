@@ -2,6 +2,14 @@ from app.models.creator import Creator, PortfolioItem
 from app.repositories.base import BaseRepository
 
 
+def _sanitize_search_term(term: str) -> str:
+    """Strip PostgREST `or_()` grammar breakers and LIKE wildcards from user input."""
+    cleaned = term.strip()
+    for ch in (",", "(", ")", ".", "%", "_", "*", '"', "'", "&"):
+        cleaned = cleaned.replace(ch, " ")
+    return " ".join(cleaned.split())
+
+
 class CreatorRepository(BaseRepository):
     async def get_by_id(self, creator_id: str) -> Creator | None:
         row = await self.select_one(
@@ -42,21 +50,45 @@ class CreatorRepository(BaseRepository):
         city: str | None = None,
         follower_min: int | None = None,
         follower_max: int | None = None,
+        engagement_min: float | None = None,
+        verified_only: bool = False,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Creator], int]:
-        query = (await self._table("creators")).select("*", count="exact")
+        query = (
+            (await self._table("creators"))
+            .select("*", count="exact")
+            # Brands must not see creators who opted out of discovery.
+            .eq("is_discoverable", True)
+        )
 
         if search:
-            query = query.ilike("name", f"%{search}%")
+            term = _sanitize_search_term(search)
+            if term:
+                query = query.or_(
+                    ",".join(
+                        [
+                            f"name.ilike.%{term}%",
+                            f"username.ilike.%{term}%",
+                            f"instagram_handle.ilike.%{term}%",
+                            f"niche.ilike.%{term}%",
+                            f"city.ilike.%{term}%",
+                        ]
+                    )
+                )
         if niche:
-            query = query.eq("niche", niche)
+            query = query.ilike("niche", f"%{niche}%")
         if city:
             query = query.ilike("city", f"%{city}%")
         if follower_min is not None:
             query = query.gte("follower_count", follower_min)
         if follower_max is not None:
             query = query.lte("follower_count", follower_max)
+        if engagement_min is not None:
+            query = query.gte("engagement_rate", engagement_min)
+        if verified_only:
+            # "Instagram insights confirmed" — connected accounts have a user id.
+            query = query.not_.is_("instagram_user_id", "null")
 
         start = (page - 1) * page_size
         end = start + page_size - 1

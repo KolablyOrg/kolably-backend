@@ -85,6 +85,8 @@ async def list_creators(
     city: str | None = None,
     follower_min: int | None = None,
     follower_max: int | None = None,
+    engagement_min: float | None = None,
+    verified_only: bool = False,
     page: int = 1,
     page_size: int = 20,
     *,
@@ -97,6 +99,8 @@ async def list_creators(
         city=city,
         follower_min=follower_min,
         follower_max=follower_max,
+        engagement_min=engagement_min,
+        verified_only=verified_only,
         page=page,
         page_size=page_size,
     )

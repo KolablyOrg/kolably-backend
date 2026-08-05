@@ -192,16 +192,20 @@ async def list_creators(
     city: str | None = Query(None),
     follower_min: int | None = Query(None),
     follower_max: int | None = Query(None),
+    engagement_min: float | None = Query(None, ge=0),
+    verified_only: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    """List and filter creators."""
+    """List and filter discoverable creators for brand search."""
     return await creator_service.list_creators(
         search=search,
         niche=niche,
         city=city,
         follower_min=follower_min,
         follower_max=follower_max,
+        engagement_min=engagement_min,
+        verified_only=verified_only,
         page=page,
         page_size=page_size,
     )
