@@ -38,8 +38,7 @@ class CampaignRepository(BaseRepository):
         extra_category_values: list[str] | None = None,
         location: list[str] | None = None,
         compensation_type: list[str] | None = None,
-        cash_amount_min: float | None = None,
-        cash_amount_max: float | None = None,
+        budget_ranges: list[str] | None = None,
         deliverables: list[str] | None = None,
         only_qualified: bool | None = None,
     ) -> tuple[list[Campaign], int]:
@@ -78,11 +77,23 @@ class CampaignRepository(BaseRepository):
         if compensation_type:
             query = query.in_("compensation_type", compensation_type)
 
-        if cash_amount_min is not None:
-            query = query.gte("cash_amount_max", cash_amount_min)
-
-        if cash_amount_max is not None:
-            query = query.lte("cash_amount_min", cash_amount_max)
+        if budget_ranges:
+            # We want to support multi-select budgets (e.g. "under_10k" AND "10k_25k").
+            # A campaign matches if its range overlaps with ANY selected budget range.
+            # E.g. for 10k-25k, campaign matches if max >= 10k AND min <= 25k.
+            budget_clauses = []
+            for r in budget_ranges:
+                if r == "under_10k":
+                    budget_clauses.append("cash_amount_max.lte.10000")
+                elif r == "10k_25k":
+                    budget_clauses.append("and(cash_amount_min.lte.25000,cash_amount_max.gte.10000)")
+                elif r == "25k_50k":
+                    budget_clauses.append("and(cash_amount_min.lte.50000,cash_amount_max.gte.25000)")
+                elif r == "50k_plus":
+                    budget_clauses.append("cash_amount_min.gte.50000")
+            
+            if budget_clauses:
+                query = query.or_(",".join(budget_clauses))
 
         if deliverables:
             query = query.contains("deliverables", deliverables)
