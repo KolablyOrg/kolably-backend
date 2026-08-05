@@ -1,6 +1,34 @@
 from app.models.creator import Creator, PortfolioItem
 from app.repositories.base import BaseRepository
 
+# Brand Discover location pills → city substrings that should match.
+# Keys are lowercased labels from the mobile filter sheet (and design aliases).
+CITY_REGION_ALIASES: dict[str, tuple[str, ...]] = {
+    "delhi ncr": (
+        "Delhi",
+        "New Delhi",
+        "South Delhi",
+        "Noida",
+        "Gurugram",
+        "Gurgaon",
+        "Faridabad",
+        "Ghaziabad",
+    ),
+    "all delhi ncr": (
+        "Delhi",
+        "New Delhi",
+        "South Delhi",
+        "Noida",
+        "Gurugram",
+        "Gurgaon",
+        "Faridabad",
+        "Ghaziabad",
+    ),
+    "south delhi": ("South Delhi", "Delhi", "New Delhi"),
+    "mumbai": ("Mumbai", "Bombay", "Navi Mumbai", "Thane"),
+    "bengaluru": ("Bengaluru", "Bangalore"),
+}
+
 
 def _sanitize_search_term(term: str) -> str:
     """Strip PostgREST `or_()` grammar breakers and LIKE wildcards from user input."""
@@ -8,6 +36,18 @@ def _sanitize_search_term(term: str) -> str:
     for ch in (",", "(", ")", ".", "%", "_", "*", '"', "'", "&"):
         cleaned = cleaned.replace(ch, " ")
     return " ".join(cleaned.split())
+
+
+def _city_match_terms(city: str) -> list[str]:
+    """Expand a location pill/label into one or more city substrings for ilike."""
+    key = " ".join(city.strip().lower().split())
+    if not key:
+        return []
+    aliases = CITY_REGION_ALIASES.get(key)
+    if aliases:
+        return list(aliases)
+    cleaned = _sanitize_search_term(city)
+    return [cleaned] if cleaned else []
 
 
 class CreatorRepository(BaseRepository):
@@ -79,13 +119,24 @@ class CreatorRepository(BaseRepository):
         if niche:
             query = query.ilike("niche", f"%{niche}%")
         if city:
-            query = query.ilike("city", f"%{city}%")
+            terms = _city_match_terms(city)
+            if len(terms) == 1:
+                query = query.ilike("city", f"%{terms[0]}%")
+            elif len(terms) > 1:
+                # Region pills (e.g. Delhi NCR) must OR across common city spellings.
+                query = query.or_(
+                    ",".join(f"city.ilike.%{_sanitize_search_term(t)}%" for t in terms)
+                )
         if follower_min is not None:
             query = query.gte("follower_count", follower_min)
         if follower_max is not None:
             query = query.lte("follower_count", follower_max)
         if engagement_min is not None:
-            query = query.gte("engagement_rate", engagement_min)
+            # Sparse Instagram sync data: keep unknown rates visible rather than
+            # silently dropping most creators when brands pick an engagement floor.
+            query = query.or_(
+                f"engagement_rate.is.null,engagement_rate.gte.{engagement_min}"
+            )
         if verified_only:
             # "Instagram insights confirmed" — connected accounts have a user id.
             query = query.not_.is_("instagram_user_id", "null")
