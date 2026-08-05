@@ -35,7 +35,12 @@ async def _resolve_participant_summary(
     if profile.role.value == "creator":
         creator = await creator_repo.get_by_profile_id(profile_id)
         if creator:
-            return {"id": profile_id, "name": creator.name, "avatar_url": creator.profile_photo_url}
+            return {
+                "id": profile_id,
+                "name": creator.name,
+                "avatar_url": creator.profile_photo_url,
+                "creator_id": creator.id,
+            }
     elif profile.role.value == "business":
         business = await business_repo.get_by_profile_id(profile_id)
         if business:

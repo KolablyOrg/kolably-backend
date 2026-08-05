@@ -14,6 +14,9 @@ class ParticipantSummary(BaseModel):
     # Only set when the other participant is a business — lets the client
     # link straight to GET /businesses/{business_id} for a profile view.
     business_id: str | None = None
+    # Only set when the other participant is a creator — lets the client
+    # link straight to GET /creators/{creator_id} for a profile view.
+    creator_id: str | None = None
     # Only meaningful for a business participant — drives the verified badge
     # in the chat thread header.
     is_verified: bool = False
