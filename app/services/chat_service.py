@@ -39,9 +39,13 @@ async def _resolve_participant_summary(
     elif profile.role.value == "business":
         business = await business_repo.get_by_profile_id(profile_id)
         if business:
+            # business_name is only set once onboarding-details is
+            # completed (signup only captures owner_name) — fall back so a
+            # not-yet-onboarded business doesn't break chat for whoever
+            # they're talking to.
             return {
                 "id": profile_id,
-                "name": business.business_name,
+                "name": business.business_name or business.owner_name or profile.email,
                 "avatar_url": business.logo_url,
                 "business_id": business.id,
                 "is_verified": business.is_verified,
