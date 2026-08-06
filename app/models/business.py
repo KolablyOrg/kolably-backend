@@ -15,7 +15,7 @@ class Business:
     description: str | None = None
     address: str | None = None
     logo_url: str | None = None
-    instagram_page: str | None = None
+    instagram_handle: str | None = None
     website: str | None = None
     owner_name: str = ""
     created_at: datetime = field(default_factory=datetime.utcnow)
@@ -31,6 +31,14 @@ class Business:
     kyb_status: str = "unverified"
     kyb_submitted_at: datetime | None = None
     kyb_verified_at: datetime | None = None
+    notification_preferences: dict[str, Any] = field(
+        default_factory=lambda: {
+            "new_applications": True,
+            "creator_messages": True,
+            "payment_alerts": True,
+        }
+    )
+    is_discoverable: bool = True
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Business":
@@ -43,7 +51,7 @@ class Business:
             description=row.get("description"),
             address=row.get("address"),
             logo_url=row.get("logo_url"),
-            instagram_page=row.get("instagram_page"),
+            instagram_handle=row.get("instagram_handle"),
             website=row.get("website"),
             owner_name=row.get("owner_name", ""),
             created_at=row["created_at"],
@@ -56,6 +64,13 @@ class Business:
             kyb_status=row.get("kyb_status", "unverified"),
             kyb_submitted_at=row.get("kyb_submitted_at"),
             kyb_verified_at=row.get("kyb_verified_at"),
+            notification_preferences=row.get("notification_preferences")
+            or {
+                "new_applications": True,
+                "creator_messages": True,
+                "payment_alerts": True,
+            },
+            is_discoverable=row.get("is_discoverable", True),
         )
 
     def to_row(self) -> dict[str, Any]:
@@ -69,7 +84,7 @@ class Business:
             "description": self.description,
             "address": self.address,
             "logo_url": self.logo_url,
-            "instagram_page": self.instagram_page,
+            "instagram_handle": self.instagram_handle,
             "website": self.website,
             "owner_name": self.owner_name,
             "created_at": self.created_at,
@@ -82,4 +97,6 @@ class Business:
             "kyb_status": self.kyb_status,
             "kyb_submitted_at": self.kyb_submitted_at,
             "kyb_verified_at": self.kyb_verified_at,
+            "notification_preferences": self.notification_preferences,
+            "is_discoverable": self.is_discoverable,
         }

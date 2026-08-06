@@ -70,6 +70,23 @@ class BusinessRepository(BaseRepository):
         rows = await self.update("businesses", data, {"profile_id": profile_id})
         return Business.from_row(rows[0]) if rows else None
 
+    async def update_business(self, business_id: str, data: dict) -> Business | None:
+        rows = await self.update("businesses", data, {"id": business_id})
+        return Business.from_row(rows[0]) if rows else None
+
+    async def count_distinct_creators(self, business_id: str) -> int:
+        """Distinct creators this business has actually collaborated with —
+        excludes cancelled collaborations (a called-off invite was never worked)."""
+        rows = await self.select(
+            "collaborations",
+            columns="creator_id",
+            filters={
+                "business_id": business_id,
+                "status": ["active", "content_submitted", "completed"],
+            },
+        )
+        return len({row["creator_id"] for row in rows})
+
     async def list_campaigns(
         self,
         business_id: str,

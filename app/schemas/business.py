@@ -3,9 +3,15 @@ Business-related Pydantic schemas.
 """
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
+
+DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES: dict[str, bool] = {
+    "new_applications": True,
+    "creator_messages": True,
+    "payment_alerts": True,
+}
 
 
 class BusinessBase(BaseModel):
@@ -15,7 +21,7 @@ class BusinessBase(BaseModel):
     description: str | None = None
     address: str | None = None
     logo_url: str | None = None
-    instagram_page: str | None = None
+    instagram_handle: str | None = None
     website: str | None = None
 
 
@@ -26,6 +32,8 @@ class BusinessResponse(BusinessBase):
     created_at: datetime
     is_verified: bool = False
     kyb_status: Literal["unverified", "pending", "verified", "rejected"] = "unverified"
+    is_discoverable: bool = True
+    notification_preferences: dict[str, Any] = DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES
 
 
 class BusinessUpdateRequest(BaseModel):
@@ -35,8 +43,10 @@ class BusinessUpdateRequest(BaseModel):
     description: str | None = None
     address: str | None = None
     logo_url: str | None = None
-    instagram_page: str | None = None
+    instagram_handle: str | None = None
     website: str | None = None
+    notification_preferences: dict[str, Any] | None = None
+    is_discoverable: bool | None = None
 
 
 class BusinessSummary(BaseModel):
@@ -50,6 +60,8 @@ class BusinessStatsResponse(BaseModel):
     reach_change_pct: float
     avg_engagement_rate: float
     engagement_series: list[float]
+    campaigns_posted_count: int
+    creators_worked_with_count: int
 
 
 # ── KYB (Know-Your-Business) Verification ──────────────────────────────

@@ -5,9 +5,10 @@ Unit tests for business_service — repositories injected as fakes, no Supabase.
 import pytest
 from fastapi import HTTPException
 
+from app.core.enums import UserRole
 from app.models.business import Business
 from app.models.campaign import Campaign
-from app.schemas.business import BusinessResponse, KybSubmitRequest
+from app.schemas.business import BusinessResponse, BusinessUpdateRequest, KybSubmitRequest
 from app.services import business_service
 
 BUSINESS_ROW = {
@@ -20,7 +21,7 @@ BUSINESS_ROW = {
     "description": None,
     "address": None,
     "logo_url": None,
-    "instagram_page": None,
+    "instagram_handle": None,
     "website": None,
     "created_at": "2024-01-01T00:00:00+00:00",
     "is_verified": False,
@@ -55,17 +56,51 @@ def _make_campaign(row: dict) -> Campaign:
 class FakeBusinessRepo:
     """Duck-typed stand-in for BusinessRepository."""
 
-    def __init__(self, row=None, rows=(), total=0, business_id="b1", campaigns=()):
+    def __init__(
+        self,
+        row=None,
+        rows=(),
+        total=0,
+        business_id="b1",
+        campaigns=(),
+        campaign_ids=(),
+        collab_ids=(),
+        submissions=(),
+        distinct_creators_count=0,
+    ):
         self._row = row
         self._rows = list(rows)
         self._total = total
         self._business_id = business_id
         self._campaigns = list(campaigns)
+        self._campaign_ids = list(campaign_ids)
+        self._collab_ids = list(collab_ids)
+        self._submissions = list(submissions)
+        self._distinct_creators_count = distinct_creators_count
         self.seen_business_id: str | None = None
         self.update_calls: list[tuple[str, dict]] = []
 
     async def get_by_id(self, business_id: str):
         return _make_business(self._row) if self._row else None
+
+    async def get_campaign_ids(self, business_id: str):
+        return self._campaign_ids
+
+    async def get_collab_ids_for_campaigns(self, campaign_ids):
+        return self._collab_ids
+
+    async def get_submissions_for_collabs(self, collab_ids):
+        return self._submissions
+
+    async def count_distinct_creators(self, business_id: str):
+        return self._distinct_creators_count
+
+    async def update_business(self, business_id: str, data: dict):
+        self.update_calls.append((business_id, data))
+        if self._row is None:
+            return None
+        self._row = {**self._row, **data}
+        return _make_business(self._row)
 
     async def list_filtered(self, **kwargs):
         return [_make_business(r) for r in self._rows], self._total
@@ -150,6 +185,128 @@ async def test_list_my_campaigns_includes_draft_with_null_compensation_type():
     assert result["total"] == 1
     assert result["items"][0].status.value == "draft"
     assert result["items"][0].compensation_type is None
+
+
+# ── Profile update & settings ───────────────────────────────────────────
+async def test_update_business_applies_only_provided_fields():
+    repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
+
+    result = await business_service.update_business(
+        business_id="b1",
+        profile_id="p1",
+        role=UserRole.BUSINESS,
+        data=BusinessUpdateRequest(instagram_handle="@cafekolab", website="cafekolab.in"),
+        repo=repo,
+    )
+
+    assert isinstance(result, BusinessResponse)
+    assert result.instagram_handle == "@cafekolab"
+    assert result.website == "cafekolab.in"
+    business_id, update_data = repo.update_calls[0]
+    assert business_id == "b1"
+    assert update_data == {"instagram_handle": "@cafekolab", "website": "cafekolab.in"}
+
+
+async def test_update_business_404_when_business_missing():
+    repo = FakeBusinessRepo(row=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await business_service.update_business(
+            business_id="missing",
+            profile_id="p1",
+            role=UserRole.BUSINESS,
+            data=BusinessUpdateRequest(business_name="New name"),
+            repo=repo,
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+async def test_update_business_403_for_non_owner():
+    repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await business_service.update_business(
+            business_id="b1",
+            profile_id="someone-else",
+            role=UserRole.BUSINESS,
+            data=BusinessUpdateRequest(business_name="New name"),
+            repo=repo,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert repo.update_calls == []
+
+
+async def test_update_business_allowed_for_superadmin():
+    repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
+
+    result = await business_service.update_business(
+        business_id="b1",
+        profile_id="someone-else",
+        role=UserRole.SUPERADMIN,
+        data=BusinessUpdateRequest(business_name="New name"),
+        repo=repo,
+    )
+
+    assert result.business_name == "New name"
+
+
+async def test_update_business_merges_notification_preferences_partial_patch():
+    row = {
+        **BUSINESS_ROW,
+        "notification_preferences": {
+            "new_applications": True,
+            "creator_messages": True,
+            "payment_alerts": True,
+        },
+    }
+    repo = FakeBusinessRepo(row=row)
+
+    result = await business_service.update_business(
+        business_id="b1",
+        profile_id="p1",
+        role=UserRole.BUSINESS,
+        data=BusinessUpdateRequest(notification_preferences={"creator_messages": False}),
+        repo=repo,
+    )
+
+    assert result.notification_preferences == {
+        "new_applications": True,
+        "creator_messages": False,
+        "payment_alerts": True,
+    }
+
+
+async def test_update_business_empty_payload_returns_current_without_write():
+    repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
+
+    result = await business_service.update_business(
+        business_id="b1",
+        profile_id="p1",
+        role=UserRole.BUSINESS,
+        data=BusinessUpdateRequest(),
+        repo=repo,
+    )
+
+    assert result.business_name == BUSINESS_ROW["business_name"]
+    assert repo.update_calls == []
+
+
+async def test_get_business_stats_includes_campaigns_posted_and_creators_worked_with_counts():
+    repo = FakeBusinessRepo(
+        business_id="b1",
+        campaign_ids=["camp1", "camp2"],
+        collab_ids=["collab1"],
+        submissions=[{"views": 100, "likes": 5, "comments": 1}],
+        distinct_creators_count=3,
+    )
+
+    result = await business_service.get_business_stats(profile_id="p1", repo=repo)
+
+    assert result.total_reach == 100
+    assert result.campaigns_posted_count == 2
+    assert result.creators_worked_with_count == 3
 
 
 # ── KYB (Know-Your-Business) Verification ───────────────────────────────

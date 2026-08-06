@@ -4,12 +4,13 @@ Business routes — profile, discovery, dashboard.
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.dependencies import get_current_user
-from app.core.enums import CampaignStatus
+from app.core.dependencies import get_current_user, require_role
+from app.core.enums import CampaignStatus, UserRole
 from app.schemas.application import ApplicationWithCreator
 from app.schemas.business import (
     BusinessResponse,
     BusinessStatsResponse,
+    BusinessUpdateRequest,
     KybStatusResponse,
     KybSubmitRequest,
 )
@@ -104,6 +105,25 @@ async def get_business(business_id: str) -> BusinessResponse:
         from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
     return business
+
+
+@router.patch(
+    "/{business_id}",
+    response_model=BusinessResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
+async def update_business(
+    business_id: str,
+    data: BusinessUpdateRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Update a business's profile/settings (owner or superadmin only)."""
+    return await business_service.update_business(
+        business_id=business_id,
+        profile_id=user.id,
+        role=user.role,
+        data=data,
+    )
 
 
 @router.get("/{business_id}/campaigns", response_model=PaginatedResponse[CampaignSummary])

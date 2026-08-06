@@ -3,9 +3,15 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+from app.core.enums import UserRole
 from app.models.business import Business
 from app.repositories.business_repo import BusinessRepository
-from app.schemas.business import BusinessResponse, BusinessStatsResponse
+from app.schemas.business import (
+    DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
+    BusinessResponse,
+    BusinessStatsResponse,
+    BusinessUpdateRequest,
+)
 from app.schemas.campaign import CampaignSummary
 
 
@@ -24,12 +30,30 @@ def _business_to_response(business: Business) -> BusinessResponse:
         description=business.description,
         address=business.address,
         logo_url=business.logo_url,
-        instagram_page=business.instagram_page,
+        instagram_handle=business.instagram_handle,
         website=business.website,
         created_at=business.created_at,
         is_verified=business.is_verified,
         kyb_status=business.kyb_status,
+        is_discoverable=business.is_discoverable,
+        notification_preferences=business.notification_preferences
+        or DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
     )
+
+
+def _ensure_business_access(
+    business: Business | None, profile_id: str, role: UserRole
+) -> Business:
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Business not found"
+        )
+    if role != UserRole.SUPERADMIN and business.profile_id != profile_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not own this business profile",
+        )
+    return business
 
 
 def _campaign_to_summary(campaign) -> CampaignSummary:
@@ -131,6 +155,36 @@ async def list_business_campaigns(
     }
 
 
+async def update_business(
+    business_id: str,
+    profile_id: str,
+    role: UserRole,
+    data: BusinessUpdateRequest,
+    *,
+    repo: BusinessRepository | None = None,
+) -> BusinessResponse:
+    repo = repo or BusinessRepository()
+    business = await repo.get_by_id(business_id)
+    _ensure_business_access(business, profile_id, role)
+
+    update_data = data.model_dump(exclude_none=True)
+
+    if "notification_preferences" in update_data and business.notification_preferences:
+        merged = dict(business.notification_preferences)
+        merged.update(update_data["notification_preferences"])
+        update_data["notification_preferences"] = merged
+
+    if not update_data:
+        return _business_to_response(business)
+
+    updated = await repo.update_business(business.id, update_data)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Business not found"
+        )
+    return _business_to_response(updated)
+
+
 async def list_my_campaigns(
     profile_id: str,
     status: str | None = None,
@@ -166,6 +220,7 @@ async def get_business_stats(
         )
 
     campaign_ids = await repo.get_campaign_ids(business_id)
+    creators_worked_with_count = await repo.count_distinct_creators(business_id)
 
     total_reach = 0
     if campaign_ids:
@@ -180,6 +235,8 @@ async def get_business_stats(
         reach_change_pct=0.0,
         avg_engagement_rate=0.0,
         engagement_series=[0.0] * 7,
+        campaigns_posted_count=len(campaign_ids),
+        creators_worked_with_count=creators_worked_with_count,
     )
 
 
