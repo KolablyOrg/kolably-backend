@@ -394,17 +394,38 @@ async def get_creator_stats(
             detail="Creator profile not found",
         )
 
+    creator = await repo.get_by_id(creator_id)
     active_count = await repo.count_active_collaborations(creator_id)
 
-    # Dummy calculation logic that uses the 'days' parameter
-    # In a real scenario, this would query the DB for the historical data diff
+    # 1. Fetch historical stats
+    history = await repo.get_historical_stats(creator_id, days_ago=days)
+    
+    def calculate_growth(current: int | float | None, past: int | float | None) -> str:
+        if current is None or past is None or past == 0:
+            return f"0% vs last {days} days"
+        
+        diff = current - past
+        pct = (diff / past) * 100
+        sign = "↗" if diff > 0 else "↘" if diff < 0 else ""
+        return f"{sign} {abs(round(pct, 1))}% vs last {days} days".strip()
+
+    if history and creator:
+        engagement_growth = calculate_growth(creator.engagement_rate, history.get("engagement_rate"))
+        followers_growth = calculate_growth(creator.follower_count, history.get("follower_count"))
+        views_growth = calculate_growth(getattr(creator, "views_count", 0), history.get("views_count"))
+    else:
+        # Fallback if no history is recorded yet
+        engagement_growth = f"0% vs last {days} days"
+        followers_growth = f"0% vs last {days} days"
+        views_growth = f"0% vs last {days} days"
+
     return CreatorStatsResponse(
         active_collaborations_count=active_count,
-        engagement_growth=f"vs last {days} days",
-        followers_growth=f"vs last {days} days",
-        views_growth=f"vs last {days} days",
-        engagement_rate=7.47,
-        total_views=15200,
+        engagement_growth=engagement_growth,
+        followers_growth=followers_growth,
+        views_growth=views_growth,
+        engagement_rate=creator.engagement_rate if creator else 0,
+        total_views=getattr(creator, "views_count", 0) if creator else 0,
     )
 
 

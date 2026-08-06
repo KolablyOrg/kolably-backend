@@ -17,6 +17,7 @@ from app.api.routes import (
     notifications,
     users,
     upload,
+    cron,
 )
 
 api_router = APIRouter()
@@ -33,3 +34,4 @@ api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(meta.router, prefix="/meta", tags=["meta"])
 api_router.include_router(upload.router)
+api_router.include_router(cron.router, prefix="/cron", tags=["cron"])

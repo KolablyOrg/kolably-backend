@@ -267,6 +267,51 @@ class CreatorRepository(BaseRepository):
             filters={"creator_id": creator_id, "status": "active"},
         )
 
+    async def get_historical_stats(self, creator_id: str, days_ago: int) -> dict | None:
+        """
+        Fetch the snapshot for exactly `days_ago`. If not found, fetch the oldest snapshot
+        available within the last `days_ago` window to use as a fallback base.
+        """
+        import datetime
+        target_date = (datetime.datetime.utcnow() - datetime.timedelta(days=days_ago)).date()
+        
+        query = (await self._table("creator_stats_history")).select("*")\
+            .eq("creator_id", creator_id)\
+            .gte("snapshot_date", target_date.isoformat())\
+            .order("snapshot_date", desc=False)\
+            .limit(1)
+            
+        result = await self._execute(query)
+        return result.data[0] if result and result.data else None
+
+    async def snapshot_all_creators(self) -> None:
+        """
+        Takes a daily snapshot of all creators' current follower count, engagement rate, and total views.
+        This ignores creators without an Instagram connection to save space.
+        """
+        # Fetch all active creators
+        creators = await self.select(
+            "creators",
+            columns="id, follower_count, engagement_rate, views_count",
+            filters={"instagram_connected": True}
+        )
+        if not creators:
+            return
+
+        # Prepare bulk insert payload
+        payload = [
+            {
+                "creator_id": c["id"],
+                "follower_count": c.get("follower_count") or 0,
+                "engagement_rate": c.get("engagement_rate") or 0.0,
+                "views_count": c.get("views_count") or 0,
+            }
+            for c in creators
+        ]
+        
+        # Upsert based on (creator_id, snapshot_date) constraint
+        await self.upsert("creator_stats_history", payload)
+
     async def save_campaign(self, creator_id: str, campaign_id: str) -> None:
         """Idempotent — re-saving an already-saved campaign is a no-op."""
         await self.upsert(

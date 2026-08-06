@@ -79,3 +79,15 @@ def verify_supabase_token(token: str) -> dict:
             detail=f"Invalid or expired token: {e}",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+from fastapi.security import APIKeyHeader
+
+cron_header = APIKeyHeader(name="X-Cron-Secret", auto_error=False)
+
+def verify_cron_secret(cron_secret: str = Depends(cron_header)) -> bool:
+    """Verify the cron secret header against the environment variable."""
+    import os
+    expected_secret = os.getenv("CRON_SECRET")
+    if not expected_secret or cron_secret != expected_secret:
+        return False
+    return True
