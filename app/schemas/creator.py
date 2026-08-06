@@ -105,7 +105,11 @@ class PortfolioItemResponse(BaseModel):
 
 class CreatorStatsResponse(BaseModel):
     active_collaborations_count: int
-    engagement_growth_pct: float | None = None
+    engagement_growth: str | None = None
+    followers_growth: str | None = None
+    views_growth: str | None = None
+    engagement_rate: float | None = None
+    total_views: int | None = None
 
 
 # ── Instagram connection ──────────────────────────────

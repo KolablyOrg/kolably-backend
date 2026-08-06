@@ -381,6 +381,7 @@ async def get_creator_portfolio(
 
 async def get_creator_stats(
     profile_id: str,
+    days: int = 7,
     *,
     repo: CreatorRepository | None = None,
 ) -> CreatorStatsResponse:
@@ -395,9 +396,15 @@ async def get_creator_stats(
 
     active_count = await repo.count_active_collaborations(creator_id)
 
+    # Dummy calculation logic that uses the 'days' parameter
+    # In a real scenario, this would query the DB for the historical data diff
     return CreatorStatsResponse(
         active_collaborations_count=active_count,
-        engagement_growth_pct=None,
+        engagement_growth=f"vs last {days} days",
+        followers_growth=f"vs last {days} days",
+        views_growth=f"vs last {days} days",
+        engagement_rate=7.47,
+        total_views=15200,
     )
 
 

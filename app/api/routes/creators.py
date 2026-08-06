@@ -36,10 +36,11 @@ router = APIRouter()
 
 @router.get("/me/stats", response_model=CreatorStatsResponse)
 async def get_creator_stats(
+    days: int = Query(7, ge=1),
     user: UserInToken = Depends(get_current_user),
 ):
     """Get stats for the current creator."""
-    return await creator_service.get_creator_stats(profile_id=user.id)
+    return await creator_service.get_creator_stats(profile_id=user.id, days=days)
 
 
 @router.get("/me/saved-campaigns", response_model=PaginatedResponse[CampaignResponse])
