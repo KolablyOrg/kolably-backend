@@ -76,3 +76,9 @@ class NotificationType(StrEnum):
     CAMPAIGN_INVITE_RECEIVED = "campaign_invite_received"
     NEW_MESSAGE = "new_message"
     COLLABORATION_COMPLETED = "collaboration_completed"
+    INVOICE_RECEIVED = "invoice_received"
+
+
+class InvoiceStatus(StrEnum):
+    SENT = "sent"
+    PAID = "paid"
