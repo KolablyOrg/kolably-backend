@@ -80,6 +80,7 @@ def verify_supabase_token(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+from fastapi import Depends
 from fastapi.security import APIKeyHeader
 
 cron_header = APIKeyHeader(name="X-Cron-Secret", auto_error=False)

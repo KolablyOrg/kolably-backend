@@ -203,7 +203,11 @@ async def update_campaign_deliverables(
     update_data: dict[str, Any] = {
         "deliverables": [d.model_dump(mode="json") for d in data.deliverables],
         "compensation_type": data.compensation_type.value,
-        **data.model_dump(exclude={"deliverables", "compensation_type"}, exclude_none=True),
+        # Always write cash/perk fields (including null) so switching to
+        # product-only clears stale cash_amount_min/max from a prior cash offer.
+        "cash_amount_min": data.cash_amount_min,
+        "cash_amount_max": data.cash_amount_max,
+        "free_product_description": data.free_product_description,
     }
 
     campaign = await campaign_repo.update_campaign(campaign_id, update_data)
@@ -228,7 +232,8 @@ async def update_campaign_targeting(
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
-    update_data: dict[str, Any] = data.model_dump(exclude_none=True)
+    # mode="json" so enums/datetimes are JSON-safe for PostgREST.
+    update_data: dict[str, Any] = data.model_dump(mode="json", exclude_none=True)
 
     campaign = await campaign_repo.update_campaign(campaign_id, update_data)
     if not campaign:
@@ -252,16 +257,11 @@ async def update_campaign_general(
     campaign_repo = campaign_repo or CampaignRepository()
     campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
-    update_data: dict[str, Any] = data.model_dump(exclude_none=True)
+    # mode="json" is required: bare datetime objects in the payload make the
+    # Supabase/httpx client raise (unserializable) → opaque 500 on deadline PATCH.
+    update_data: dict[str, Any] = data.model_dump(mode="json", exclude_none=True)
     if not update_data:
         return _campaign_to_response(campaign)
-
-    if update_data.get("deliverables"):
-        update_data["deliverables"] = [d.model_dump(mode="json") for d in data.deliverables]
-    if update_data.get("objective"):
-        update_data["objective"] = data.objective.value
-    if update_data.get("compensation_type"):
-        update_data["compensation_type"] = data.compensation_type.value
 
     updated = await campaign_repo.update_campaign(campaign_id, update_data)
     if not updated:

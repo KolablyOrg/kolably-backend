@@ -11,6 +11,7 @@ from app.models.creator import Creator
 from app.schemas.campaign import (
     CampaignCreateRequest,
     CampaignDeliverablesRequest,
+    CampaignUpdateRequest,
     DeliverableItem,
 )
 from app.schemas.user import UserInToken
@@ -359,6 +360,56 @@ async def test_update_campaign_deliverables_serializes_enums_as_strings():
     assert deliverable["content_type"] == "reel"
     assert isinstance(deliverable["platform"], str)
     assert isinstance(deliverable["content_type"], str)
+
+
+async def test_update_campaign_deliverables_product_clears_cash_amounts():
+    repo = FakeCampaignRepo(
+        row={
+            **CAMPAIGN_ROW,
+            "status": "draft",
+            "compensation_type": "cash",
+            "cash_amount_min": 1000.0,
+            "cash_amount_max": 2000.0,
+        }
+    )
+    business_repo = FakeBusinessRepo(business_id="b1")
+    data = CampaignDeliverablesRequest(
+        deliverables=[
+            DeliverableItem(
+                platform=Platform.INSTAGRAM,
+                content_type=ContentType.REEL,
+                quantity=1,
+            )
+        ],
+        compensation_type=CompensationType.PRODUCT,
+        free_product_description="Free merch kit",
+    )
+
+    await campaign_service.update_campaign_deliverables(
+        "camp1", "p-business", data, campaign_repo=repo, business_repo=business_repo
+    )
+
+    assert repo.updated["compensation_type"] == "product"
+    assert repo.updated["cash_amount_min"] is None
+    assert repo.updated["cash_amount_max"] is None
+    assert repo.updated["free_product_description"] == "Free merch kit"
+
+
+async def test_update_campaign_general_serializes_deadline_as_iso_string():
+    """Regression: bare datetime in update payload caused opaque 500 on PATCH."""
+    from datetime import datetime, timezone
+
+    repo = FakeCampaignRepo(row={**CAMPAIGN_ROW, "status": "draft", "deadline": None})
+    business_repo = FakeBusinessRepo(business_id="b1")
+    deadline = datetime(2026, 9, 15, 23, 59, 59, tzinfo=timezone.utc)
+    data = CampaignUpdateRequest(deadline=deadline)
+
+    await campaign_service.update_campaign_general(
+        "camp1", "p-business", data, campaign_repo=repo, business_repo=business_repo
+    )
+
+    assert isinstance(repo.updated["deadline"], str)
+    assert "2026-09-15" in repo.updated["deadline"]
 
 
 # ── recommended niche mapping ─────────────────────────
