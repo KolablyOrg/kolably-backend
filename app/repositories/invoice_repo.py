@@ -51,6 +51,16 @@ class InvoiceRepository(BaseRepository):
         rows = result.data or []
         return [Invoice.from_row(row) for row in rows], result.count or 0
 
+    async def list_by_collaboration_ids(self, collaboration_ids: list[str]) -> list[Invoice]:
+        if not collaboration_ids:
+            return []
+        rows = await self.select(
+            "invoices",
+            columns="*",
+            filters={"collaboration_id": collaboration_ids},
+        )
+        return [Invoice.from_row(row) for row in rows]
+
     async def insert_invoice(self, data: dict) -> Invoice | None:
         rows = await self.insert("invoices", data)
         return Invoice.from_row(rows[0]) if rows else None

@@ -6,6 +6,7 @@ from app.core.enums import (
     ApplicationDirection,
     ApplicationStatus,
     CampaignStatus,
+    InvoiceStatus,
     NotificationType,
     UserRole,
 )
@@ -13,9 +14,12 @@ from app.models.campaign import Campaign
 from app.repositories.application_repo import ApplicationRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
+from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
+from app.repositories.invoice_repo import InvoiceRepository
 from app.schemas.application import ApplicationResponse, ApplicationWithCreator
 from app.schemas.campaign import (
+    CampaignAnalyticsResponse,
     CampaignCategoryResponse,
     CampaignCreateRequest,
     CampaignDeliverablesRequest,
@@ -585,6 +589,66 @@ async def complete_campaign(
             detail="Campaign not found",
         )
     return _campaign_to_response(updated)
+
+
+async def get_campaign_analytics(
+    campaign_id: str,
+    profile_id: str,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+    application_repo: ApplicationRepository | None = None,
+    collaboration_repo: CollaborationRepository | None = None,
+    invoice_repo: InvoiceRepository | None = None,
+) -> CampaignAnalyticsResponse:
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
+    await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+
+    application_repo = application_repo or ApplicationRepository()
+    collaboration_repo = collaboration_repo or CollaborationRepository()
+    invoice_repo = invoice_repo or InvoiceRepository()
+
+    # page_size covers realistic applicant volumes today; total (from the
+    # paginated tuple) stays accurate even past that cap, only the status
+    # breakdown below would under-count in an unrealistically large campaign.
+    applications, applied_count = await application_repo.list_by_campaign(
+        campaign_id, page=1, page_size=500
+    )
+    accepted_count = sum(1 for a in applications if a.status == ApplicationStatus.ACCEPTED)
+    rejected_count = sum(1 for a in applications if a.status == ApplicationStatus.REJECTED)
+    decided = accepted_count + rejected_count
+    response_rate = round(decided / applied_count * 100, 1) if applied_count else None
+    acceptance_rate = round(accepted_count / decided * 100, 1) if decided else None
+
+    # page_size covers realistic per-campaign collaboration volumes today.
+    collaborations, _ = await collaboration_repo.list_by_campaign(campaign_id, page=1, page_size=500)
+    creators_engaged = len({c.creator_id for c in collaborations})
+
+    collab_ids = [c.id for c in collaborations]
+    invoices = await invoice_repo.list_by_collaboration_ids(collab_ids)
+    invoiced_amount = sum(i.total_amount for i in invoices)
+    paid_amount = sum(i.total_amount for i in invoices if i.status == InvoiceStatus.PAID)
+    cost_per_creator = round(invoiced_amount / creators_engaged, 2) if creators_engaged else None
+
+    content_metrics_available = False
+    for collab_id in collab_ids:
+        if await collaboration_repo.list_submissions(collab_id):
+            content_metrics_available = True
+            break
+
+    return CampaignAnalyticsResponse(
+        applied_count=applied_count,
+        accepted_count=accepted_count,
+        rejected_count=rejected_count,
+        response_rate=response_rate,
+        acceptance_rate=acceptance_rate,
+        creators_engaged=creators_engaged,
+        invoiced_amount=invoiced_amount,
+        paid_amount=paid_amount,
+        cost_per_creator=cost_per_creator,
+        content_metrics_available=content_metrics_available,
+    )
 
 
 async def invite_creator(

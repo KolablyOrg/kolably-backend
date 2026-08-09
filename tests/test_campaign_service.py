@@ -160,6 +160,26 @@ class FakeApplicationRepo:
         return self._applications, self._total
 
 
+class FakeCollaborationRepo:
+    def __init__(self, collaborations=None, submissions_by_collab=None):
+        self._collaborations = collaborations or []
+        self._submissions_by_collab = submissions_by_collab or {}
+
+    async def list_by_campaign(self, campaign_id, page=1, page_size=20):
+        return self._collaborations, len(self._collaborations)
+
+    async def list_submissions(self, collaboration_id):
+        return self._submissions_by_collab.get(collaboration_id, [])
+
+
+class FakeInvoiceRepo:
+    def __init__(self, invoices=None):
+        self._invoices = invoices or []
+
+    async def list_by_collaboration_ids(self, collaboration_ids):
+        return [i for i in self._invoices if i.collaboration_id in collaboration_ids]
+
+
 def _business_user(profile_id: str = "p-business") -> UserInToken:
     return UserInToken(
         id=profile_id,
@@ -748,3 +768,127 @@ async def test_get_campaign_includes_posted_count():
     assert result.accepted_count == 8
     assert result.posted_count == 3
 
+
+# ── campaign analytics ──────────────────────────────────
+from app.core.enums import ApplicationStatus, InvoiceStatus  # noqa: E402
+from app.models.application import CampaignApplication  # noqa: E402
+from app.models.collaboration import Collaboration  # noqa: E402
+from app.models.invoice import Invoice  # noqa: E402
+
+
+def _application(status: ApplicationStatus) -> CampaignApplication:
+    return CampaignApplication(id=f"app-{status.value}", campaign_id="camp1", creator_id="c1", status=status)
+
+
+def _collaboration(collab_id: str, creator_id: str) -> Collaboration:
+    return Collaboration(id=collab_id, campaign_id="camp1", creator_id=creator_id, business_id="b1")
+
+
+def _invoice(collaboration_id: str, amount: float, status: InvoiceStatus) -> Invoice:
+    return Invoice(
+        id=f"inv-{collaboration_id}",
+        collaboration_id=collaboration_id,
+        creator_id="c1",
+        business_id="b1",
+        total_amount=amount,
+        status=status,
+    )
+
+
+async def test_campaign_analytics_rejects_non_owner():
+    repo = FakeCampaignRepo(row=dict(CAMPAIGN_ROW))
+    business_repo = FakeBusinessRepo(business_id="someone-else")
+
+    with pytest.raises(HTTPException) as exc:
+        await campaign_service.get_campaign_analytics(
+            "camp1",
+            "p-business",
+            campaign_repo=repo,
+            business_repo=business_repo,
+            application_repo=FakeApplicationRepo(),
+            collaboration_repo=FakeCollaborationRepo(),
+            invoice_repo=FakeInvoiceRepo(),
+        )
+
+    assert exc.value.status_code == 403
+
+
+async def test_campaign_analytics_computes_rates_and_spend():
+    repo = FakeCampaignRepo(row=dict(CAMPAIGN_ROW))
+    business_repo = FakeBusinessRepo(business_id="b1")
+    applications = [
+        _application(ApplicationStatus.ACCEPTED),
+        _application(ApplicationStatus.ACCEPTED),
+        _application(ApplicationStatus.REJECTED),
+        _application(ApplicationStatus.PENDING),
+    ]
+    collaborations = [
+        _collaboration("collab1", "c1"),
+        _collaboration("collab2", "c2"),
+    ]
+    invoices = [
+        _invoice("collab1", 10000.0, InvoiceStatus.PAID),
+        _invoice("collab2", 5000.0, InvoiceStatus.SENT),
+    ]
+
+    result = await campaign_service.get_campaign_analytics(
+        "camp1",
+        "p-business",
+        campaign_repo=repo,
+        business_repo=business_repo,
+        application_repo=FakeApplicationRepo(applications=applications, total=len(applications)),
+        collaboration_repo=FakeCollaborationRepo(collaborations=collaborations),
+        invoice_repo=FakeInvoiceRepo(invoices=invoices),
+    )
+
+    assert result.applied_count == 4
+    assert result.accepted_count == 2
+    assert result.rejected_count == 1
+    assert result.response_rate == 75.0  # 3 decided / 4 applied
+    assert result.acceptance_rate == pytest.approx(66.7, rel=1e-2)  # 2 accepted / 3 decided
+    assert result.creators_engaged == 2
+    assert result.invoiced_amount == 15000.0
+    assert result.paid_amount == 10000.0
+    assert result.cost_per_creator == 7500.0
+    assert result.content_metrics_available is False
+
+
+async def test_campaign_analytics_content_metrics_available_when_submissions_exist():
+    repo = FakeCampaignRepo(row=dict(CAMPAIGN_ROW))
+    business_repo = FakeBusinessRepo(business_id="b1")
+    collaborations = [_collaboration("collab1", "c1")]
+
+    result = await campaign_service.get_campaign_analytics(
+        "camp1",
+        "p-business",
+        campaign_repo=repo,
+        business_repo=business_repo,
+        application_repo=FakeApplicationRepo(),
+        collaboration_repo=FakeCollaborationRepo(
+            collaborations=collaborations,
+            submissions_by_collab={"collab1": [{"id": "sub1"}]},
+        ),
+        invoice_repo=FakeInvoiceRepo(),
+    )
+
+    assert result.content_metrics_available is True
+
+
+async def test_campaign_analytics_handles_zero_applications_and_creators():
+    repo = FakeCampaignRepo(row=dict(CAMPAIGN_ROW))
+    business_repo = FakeBusinessRepo(business_id="b1")
+
+    result = await campaign_service.get_campaign_analytics(
+        "camp1",
+        "p-business",
+        campaign_repo=repo,
+        business_repo=business_repo,
+        application_repo=FakeApplicationRepo(),
+        collaboration_repo=FakeCollaborationRepo(),
+        invoice_repo=FakeInvoiceRepo(),
+    )
+
+    assert result.applied_count == 0
+    assert result.response_rate is None
+    assert result.acceptance_rate is None
+    assert result.cost_per_creator is None

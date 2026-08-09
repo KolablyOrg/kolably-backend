@@ -170,6 +170,25 @@ class CampaignCategoryResponse(BaseModel):
     label: str
 
 
+class CampaignAnalyticsResponse(BaseModel):
+    """Per-campaign analytics — only fields backed by real, currently-recorded data.
+
+    content_metrics_available is False until creators can actually submit
+    content (no write path exists yet), so a client should show an honest
+    "not available yet" state rather than reading absent metrics as zero.
+    """
+    applied_count: int
+    accepted_count: int
+    rejected_count: int
+    response_rate: float | None = None
+    acceptance_rate: float | None = None
+    creators_engaged: int
+    invoiced_amount: float
+    paid_amount: float
+    cost_per_creator: float | None = None
+    content_metrics_available: bool = False
+
+
 class InviteRequest(BaseModel):
     """Request body for inviting a creator to a campaign."""
     creator_id: str
