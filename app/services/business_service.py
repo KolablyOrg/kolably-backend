@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -7,11 +7,13 @@ from app.core.enums import UserRole
 from app.models.business import Business
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
+from app.repositories.creator_repo import CreatorRepository
 from app.schemas.business import (
     DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
     BusinessResponse,
     BusinessStatsResponse,
     BusinessUpdateRequest,
+    CreatorActivityBannerResponse,
 )
 from app.schemas.campaign import CampaignSummary
 
@@ -249,6 +251,46 @@ async def get_business_stats(
         engagement_series=[0.0] * 7,
         campaigns_posted_count=len(campaign_ids),
         creators_worked_with_count=creators_worked_with_count,
+    )
+
+
+async def get_creator_activity_banner(
+    profile_id: str,
+    *,
+    repo: BusinessRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+) -> CreatorActivityBannerResponse:
+    """'N creators near you posted recently' home-dashboard banner.
+
+    Deliberately city-only, not category-filtered: business.category holds
+    free-text industry labels (e.g. "Automotive Dealership", "Fashion Retail")
+    that don't share a vocabulary with creator.niche (e.g. "Fashion", "food"),
+    so a naive match would almost always return zero for reasons unrelated to
+    actual creator activity.
+    """
+    repo = repo or BusinessRepository()
+    creator_repo = creator_repo or CreatorRepository()
+    business = await repo.get_by_profile_id(profile_id)
+
+    if not business or not business.city:
+        return CreatorActivityBannerResponse(count=0)
+
+    since_iso = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    active_creators = await creator_repo.list_recently_active_by_city(
+        city=business.city, since_iso=since_iso
+    )
+    count = len(active_creators)
+    if count == 0:
+        return CreatorActivityBannerResponse(count=0, city=business.city)
+
+    avg_followers = round(sum(c.get("follower_count") or 0 for c in active_creators) / count)
+    avg_engagement = round(sum(c.get("engagement_rate") or 0 for c in active_creators) / count, 1)
+
+    return CreatorActivityBannerResponse(
+        count=count,
+        city=business.city,
+        avg_followers=avg_followers,
+        avg_engagement_rate=avg_engagement,
     )
 
 

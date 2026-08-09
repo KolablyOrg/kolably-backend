@@ -106,6 +106,37 @@ class CreatorRepository(BaseRepository):
         rows = result.data or []
         return [Creator.from_row(row) for row in rows], result.count or 0
 
+    async def list_recently_active_by_city(
+        self, city: str, since_iso: str
+    ) -> list[dict]:
+        """Discoverable creators in `city` who added a portfolio item since `since_iso`.
+
+        Two-step (no cross-table join in postgrest): narrow to the city first,
+        then check which of those creator ids have a recent portfolio_items row.
+        Returns bare dicts (id/follower_count/engagement_rate only) since callers
+        just need these three fields to build a count + averages.
+        """
+        candidates_result = await self._execute(
+            (await self._table("creators"))
+            .select("id,follower_count,engagement_rate")
+            .eq("is_discoverable", True)
+            .eq("city", city)
+        )
+        candidates = candidates_result.data or []
+        if not candidates:
+            return []
+
+        candidate_ids = [c["id"] for c in candidates]
+        active_result = await self._execute(
+            (await self._table("portfolio_items"))
+            .select("creator_id")
+            .in_("creator_id", candidate_ids)
+            .gte("created_at", since_iso)
+        )
+        active_ids = {row["creator_id"] for row in (active_result.data or [])}
+
+        return [c for c in candidates if c["id"] in active_ids]
+
     async def get_locations(self) -> list[str]:
         """Distinct cities from discoverable creators — drives brand Discover pills."""
         result = await self._execute(

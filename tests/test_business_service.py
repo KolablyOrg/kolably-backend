@@ -131,6 +131,20 @@ class FakeCampaignRepo:
         return {}
 
 
+class FakeCreatorRepo:
+    """Duck-typed stand-in for CreatorRepository — only list_recently_active_by_city is used here."""
+
+    def __init__(self, creators=()):
+        self._creators = list(creators)
+        self.seen_city = None
+        self.seen_since = None
+
+    async def list_recently_active_by_city(self, city, since_iso):
+        self.seen_city = city
+        self.seen_since = since_iso
+        return self._creators
+
+
 async def test_get_business_by_id_maps_user_id_from_profile_id():
     """Regression: same joined-profile-id bug as the creator side."""
     repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
@@ -193,6 +207,49 @@ async def test_list_my_campaigns_includes_draft_with_null_compensation_type():
     assert result["total"] == 1
     assert result["items"][0].status.value == "draft"
     assert result["items"][0].compensation_type is None
+
+
+# ── Creator-activity banner ─────────────────────────────────────────────
+async def test_creator_activity_banner_zero_when_business_has_no_city():
+    row = dict(BUSINESS_ROW)
+    row["city"] = None
+    repo = FakeBusinessRepo(row=row)
+
+    result = await business_service.get_creator_activity_banner(
+        profile_id="p1", repo=repo, creator_repo=FakeCreatorRepo(),
+    )
+
+    assert result.count == 0
+    assert result.city is None
+
+
+async def test_creator_activity_banner_zero_when_no_one_posted_recently():
+    repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
+    creator_repo = FakeCreatorRepo(creators=[])
+
+    result = await business_service.get_creator_activity_banner(
+        profile_id="p1", repo=repo, creator_repo=creator_repo,
+    )
+
+    assert result.count == 0
+    assert result.city == "Springfield"
+    assert creator_repo.seen_city == "Springfield"
+
+
+async def test_creator_activity_banner_averages_matching_creators():
+    repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
+    creator_repo = FakeCreatorRepo(creators=[
+        {"id": "c1", "follower_count": 10000, "engagement_rate": 4.0},
+        {"id": "c2", "follower_count": 20000, "engagement_rate": 6.0},
+    ])
+
+    result = await business_service.get_creator_activity_banner(
+        profile_id="p1", repo=repo, creator_repo=creator_repo,
+    )
+
+    assert result.count == 2
+    assert result.avg_followers == 15000
+    assert result.avg_engagement_rate == 5.0
 
 
 # ── Profile update & settings ───────────────────────────────────────────

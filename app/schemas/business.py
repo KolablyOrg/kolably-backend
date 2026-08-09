@@ -64,6 +64,14 @@ class BusinessStatsResponse(BaseModel):
     creators_worked_with_count: int
 
 
+class CreatorActivityBannerResponse(BaseModel):
+    """Backs the home-dashboard 'N creators near you posted recently' banner."""
+    count: int
+    city: str | None = None
+    avg_followers: int = 0
+    avg_engagement_rate: float = 0.0
+
+
 # ── KYB (Know-Your-Business) Verification ──────────────────────────────
 class KybSubmitRequest(BaseModel):
     business_type: Literal["company", "individual"]

@@ -11,6 +11,7 @@ from app.schemas.business import (
     BusinessResponse,
     BusinessStatsResponse,
     BusinessUpdateRequest,
+    CreatorActivityBannerResponse,
     KybStatusResponse,
     KybSubmitRequest,
 )
@@ -46,6 +47,14 @@ async def get_business_stats(
 ):
     """Get stats for the current business."""
     return await business_service.get_business_stats(profile_id=user.id)
+
+
+@router.get("/me/creator-activity", response_model=CreatorActivityBannerResponse)
+async def get_creator_activity(
+    user: UserInToken = Depends(get_current_user),
+):
+    """'N creators near you posted recently' home-dashboard banner."""
+    return await business_service.get_creator_activity_banner(profile_id=user.id)
 
 
 @router.get("/me/campaigns", response_model=PaginatedResponse[CampaignSummary])
