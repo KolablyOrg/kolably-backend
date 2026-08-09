@@ -52,10 +52,11 @@ CAMPAIGN_ROW = {
 
 
 class FakeCampaignRepo:
-    def __init__(self, row=None, list_rows=None, total=None):
+    def __init__(self, row=None, list_rows=None, total=None, counts=None):
         self._row = row if row is not None else dict(CAMPAIGN_ROW)
         self._list_rows = list_rows
         self._total = total
+        self._counts = counts or {}
         self.updated = None
         self.inserted = None
         self.deleted = None
@@ -65,7 +66,17 @@ class FakeCampaignRepo:
         return Campaign.from_row(self._row) if self._row else None
 
     async def fetch_application_counts(self, campaign_ids: list[str]):
-        return {}
+        return {
+            cid: {
+                "applicant_count": self._counts.get("applicant_count", 0),
+                "accepted_count": self._counts.get("accepted_count", 0),
+                "posted_count": self._counts.get("posted_count", 0),
+            }
+            for cid in campaign_ids
+        }
+
+    async def fetch_posted_counts(self, campaign_ids: list[str]):
+        return {cid: self._counts.get("posted_count", 0) for cid in campaign_ids}
 
     async def update_campaign(self, campaign_id: str, data: dict):
         self.updated = data
@@ -89,13 +100,14 @@ class FakeCampaignRepo:
     async def delete_campaign(self, campaign_id: str):
         self.deleted = campaign_id
 
-    async def list_active(self, search=None, category=None, page=1, page_size=20, *, extra_category_values=None):
+    async def list_active(self, search=None, category=None, page=1, page_size=20, *, extra_category_values=None, **kwargs):
         self.list_kwargs = {
             "search": search,
             "category": category,
             "page": page,
             "page_size": page_size,
             "extra_category_values": extra_category_values,
+            **kwargs,
         }
         rows = self._list_rows if self._list_rows is not None else [self._row]
         return [Campaign.from_row(r) for r in rows], self._total if self._total is not None else len(rows)
@@ -691,3 +703,48 @@ async def test_create_campaign_step1_creates_draft():
     assert result.status == CampaignStatus.DRAFT
     assert repo.inserted["status"] == "draft"
     assert repo.inserted["business_id"] == "b1"
+
+
+async def test_update_campaign_general_persists_brief_fields():
+    repo = FakeCampaignRepo()
+    business_repo = FakeBusinessRepo(business_id="b1")
+
+    result = await campaign_service.update_campaign_general(
+        "camp1",
+        "p-business",
+        CampaignUpdateRequest(
+            objective=CampaignObjective.ENGAGEMENT,
+            platforms=["instagram", "youtube"],
+            product_promoted="New weekend brunch menu",
+            audience_age_range="22–35",
+            audience_gender="All genders",
+            audience_location="South Delhi",
+            audience_interests="Brunch, food photography",
+            key_messaging="Highlight the new menu",
+            dos="Tag @brand, natural light",
+            donts="No competitor mentions",
+            reference_image_urls=["https://cdn.example/ref.jpg"],
+            max_creators=20,
+        ),
+        campaign_repo=repo,
+        business_repo=business_repo,
+    )
+
+    assert repo.updated["objective"] == "engagement"
+    assert repo.updated["platforms"] == ["instagram", "youtube"]
+    assert repo.updated["product_promoted"] == "New weekend brunch menu"
+    assert repo.updated["max_creators"] == 20
+    assert result.product_promoted == "New weekend brunch menu"
+    assert result.platforms == ["instagram", "youtube"]
+    assert result.key_messaging == "Highlight the new menu"
+
+
+async def test_get_campaign_includes_posted_count():
+    repo = FakeCampaignRepo(counts={"applicant_count": 14, "accepted_count": 8, "posted_count": 3})
+
+    result = await campaign_service.get_campaign("camp1", user=None, campaign_repo=repo)
+
+    assert result.applicant_count == 14
+    assert result.accepted_count == 8
+    assert result.posted_count == 3
+

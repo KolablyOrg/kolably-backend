@@ -18,6 +18,7 @@ router = APIRouter()
 async def list_collaborations(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    campaign_id: str | None = Query(None),
     user: UserInToken = Depends(get_current_user),
 ):
     """List collaborations for the current user (filtered by role)."""
@@ -26,6 +27,7 @@ async def list_collaborations(
         role=user.role.value,
         page=page,
         page_size=page_size,
+        campaign_id=campaign_id,
     )
 
 

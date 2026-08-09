@@ -76,6 +76,8 @@ def _campaign_to_summary(campaign) -> CampaignSummary:
         status=campaign.status,
         created_at=campaign.created_at,
         applicant_count=campaign.applicant_count,
+        accepted_count=campaign.accepted_count,
+        max_creators=campaign.max_creators,
     )
 
 
@@ -152,12 +154,14 @@ async def list_business_campaigns(
         page_size=page_size,
     )
 
-    counts = await campaign_repo.fetch_application_counts([c.id for c in campaigns])
-    for campaign in campaigns:
-        count_data = counts.get(campaign.id)
-        if count_data:
-            campaign.applicant_count = count_data.get("applicant_count")
-            campaign.accepted_count = count_data.get("accepted_count")
+    if campaigns:
+        counts = await campaign_repo.fetch_application_counts([c.id for c in campaigns])
+        for campaign in campaigns:
+            count_data = counts.get(campaign.id)
+            if count_data:
+                campaign.applicant_count = count_data.get("applicant_count")
+                campaign.accepted_count = count_data.get("accepted_count")
+                campaign.posted_count = count_data.get("posted_count")
 
     return {
         "items": [_campaign_to_summary(c) for c in campaigns],

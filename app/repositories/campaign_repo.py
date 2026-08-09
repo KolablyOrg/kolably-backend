@@ -133,12 +133,55 @@ class CampaignRepository(BaseRepository):
         counts: dict[str, dict] = {}
         for row in rows:
             cid = row["campaign_id"]
-            entry = counts.setdefault(cid, {"applicant_count": 0, "accepted_count": 0})
+            entry = counts.setdefault(
+                cid, {"applicant_count": 0, "accepted_count": 0, "posted_count": 0}
+            )
             entry["applicant_count"] += 1
             if row["status"] == "accepted":
                 entry["accepted_count"] += 1
 
+        posted = await self.fetch_posted_counts(campaign_ids)
+        for cid, posted_count in posted.items():
+            entry = counts.setdefault(
+                cid, {"applicant_count": 0, "accepted_count": 0, "posted_count": 0}
+            )
+            entry["posted_count"] = posted_count
+
         return counts
+
+    async def fetch_posted_counts(self, campaign_ids: list[str]) -> dict[str, int]:
+        """Count collaborations with ≥1 content submission per campaign."""
+        if not campaign_ids:
+            return {}
+
+        collab_rows = await self.select(
+            "collaborations",
+            columns="id,campaign_id",
+            filters={"campaign_id": campaign_ids},
+        )
+        if not collab_rows:
+            return {}
+
+        collab_to_campaign = {r["id"]: r["campaign_id"] for r in collab_rows}
+        collab_ids = list(collab_to_campaign.keys())
+        sub_rows = await self.select(
+            "content_submissions",
+            columns="collaboration_id",
+            filters={"collaboration_id": collab_ids},
+        )
+
+        posted_collabs: set[str] = set()
+        for row in sub_rows:
+            cid = row.get("collaboration_id")
+            if cid:
+                posted_collabs.add(cid)
+
+        posted_counts: dict[str, int] = {cid: 0 for cid in campaign_ids}
+        for collab_id in posted_collabs:
+            campaign_id = collab_to_campaign.get(collab_id)
+            if campaign_id:
+                posted_counts[campaign_id] = posted_counts.get(campaign_id, 0) + 1
+        return posted_counts
 
     async def get_locations(self) -> list[str]:
         # Fetch all active locations and deduplicate in Python

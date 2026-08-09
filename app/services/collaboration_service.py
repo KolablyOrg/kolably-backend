@@ -60,6 +60,7 @@ async def list_collaborations(
     role: str,
     page: int = 1,
     page_size: int = 20,
+    campaign_id: str | None = None,
     *,
     repo: CollaborationRepository | None = None,
     creator_repo: CreatorRepository | None = None,
@@ -73,6 +74,7 @@ async def list_collaborations(
             creator_id=creator_id,
             page=page,
             page_size=page_size,
+            campaign_id=campaign_id,
         )
     elif role == "business":
         business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
@@ -80,6 +82,7 @@ async def list_collaborations(
             business_id=business_id,
             page=page,
             page_size=page_size,
+            campaign_id=campaign_id,
         )
     else:
         return {"items": [], "total": 0, "page": page, "page_size": page_size}

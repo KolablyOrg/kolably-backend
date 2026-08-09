@@ -84,6 +84,18 @@ class CampaignUpdateRequest(BaseModel):
     max_creators: int | None = Field(None, ge=1)
     additional_requirements: str | None = None
     deadline: datetime | None = None
+    # Brief / objective & audience
+    platforms: list[str] | None = None
+    product_promoted: str | None = None
+    audience_age_range: str | None = None
+    audience_gender: str | None = None
+    audience_location: str | None = None
+    audience_interests: str | None = None
+    key_messaging: str | None = None
+    dos: str | None = None
+    donts: str | None = None
+    reference_image_urls: list[str] | None = None
+    content_due_at: datetime | None = None
 
 
 # ── Responses ───────────────────────────────────────────
@@ -113,6 +125,19 @@ class CampaignResponse(BaseModel):
     created_at: datetime
     applicant_count: int | None = None
     accepted_count: int | None = None
+    posted_count: int | None = None
+    # Brief
+    platforms: list[str] = []
+    product_promoted: str | None = None
+    audience_age_range: str | None = None
+    audience_gender: str | None = None
+    audience_location: str | None = None
+    audience_interests: str | None = None
+    key_messaging: str | None = None
+    dos: str | None = None
+    donts: str | None = None
+    reference_image_urls: list[str] = []
+    content_due_at: datetime | None = None
 
 
 class CampaignSummary(BaseModel):

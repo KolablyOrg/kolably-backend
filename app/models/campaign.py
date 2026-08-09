@@ -15,6 +15,18 @@ from app.core.enums import (
 )
 
 
+def _parse_json_list(value: Any) -> list:
+    import json
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return json.loads(value) if value else []
+    if isinstance(value, list):
+        return value
+    return []
+
+
 @dataclass
 class CampaignDeliverable:
     """A single deliverable item within a campaign."""
@@ -68,45 +80,73 @@ class Campaign:
     deadline: datetime | None = None
     status: CampaignStatus = CampaignStatus.DRAFT
     created_at: datetime = field(default_factory=datetime.utcnow)
+    # Brief / objective & audience
+    platforms: list[str] = field(default_factory=list)
+    product_promoted: str | None = None
+    audience_age_range: str | None = None
+    audience_gender: str | None = None
+    audience_location: str | None = None
+    audience_interests: str | None = None
+    key_messaging: str | None = None
+    dos: str | None = None
+    donts: str | None = None
+    reference_image_urls: list[str] = field(default_factory=list)
+    content_due_at: datetime | None = None
+    # Computed
     applicant_count: int | None = None
     accepted_count: int | None = None
+    posted_count: int | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any], counts: dict[str, Any] | None = None) -> "Campaign":
-        import json
-        deliverables_data = row.get("deliverables") or []
-        if isinstance(deliverables_data, str):
-            deliverables_data = json.loads(deliverables_data) if deliverables_data else []
-
+        deliverables_data = _parse_json_list(row.get("deliverables"))
         deliverables = [CampaignDeliverable.from_dict(d) for d in deliverables_data]
+
+        platforms_raw = _parse_json_list(row.get("platforms"))
+        platforms = [str(p) for p in platforms_raw]
+
+        refs_raw = _parse_json_list(row.get("reference_image_urls"))
+        reference_image_urls = [str(u) for u in refs_raw]
 
         campaign = cls(
             id=row["id"],
             business_id=row["business_id"],
             title=row["title"],
             objective=CampaignObjective(row["objective"]),
-            description=row["description"],
+            description=row["description"] or "",
             cover_image_url=row.get("cover_image_url"),
             deliverables=deliverables,
             compensation_type=CompensationType(row["compensation_type"]) if row.get("compensation_type") else None,
             cash_amount_min=row.get("cash_amount_min"),
             cash_amount_max=row.get("cash_amount_max"),
             free_product_description=row.get("free_product_description"),
-            creator_category=row.get("creator_category", ""),
+            creator_category=row.get("creator_category", "") or "",
             follower_range_min=row.get("follower_range_min"),
             follower_range_max=row.get("follower_range_max"),
             min_engagement_rate=row.get("min_engagement_rate"),
-            location=row.get("location", ""),
-            max_creators=row.get("max_creators", 1),
+            location=row.get("location", "") or "",
+            max_creators=row.get("max_creators") or 1,
             additional_requirements=row.get("additional_requirements"),
             deadline=row.get("deadline"),
             status=CampaignStatus(row["status"]),
             created_at=row["created_at"],
+            platforms=platforms,
+            product_promoted=row.get("product_promoted"),
+            audience_age_range=row.get("audience_age_range"),
+            audience_gender=row.get("audience_gender"),
+            audience_location=row.get("audience_location"),
+            audience_interests=row.get("audience_interests"),
+            key_messaging=row.get("key_messaging"),
+            dos=row.get("dos"),
+            donts=row.get("donts"),
+            reference_image_urls=reference_image_urls,
+            content_due_at=row.get("content_due_at"),
         )
 
         if counts:
             campaign.applicant_count = counts.get("applicant_count")
             campaign.accepted_count = counts.get("accepted_count")
+            campaign.posted_count = counts.get("posted_count")
 
         return campaign
 
@@ -134,4 +174,15 @@ class Campaign:
             "deadline": self.deadline,
             "status": self.status.value,
             "created_at": self.created_at,
+            "platforms": self.platforms,
+            "product_promoted": self.product_promoted,
+            "audience_age_range": self.audience_age_range,
+            "audience_gender": self.audience_gender,
+            "audience_location": self.audience_location,
+            "audience_interests": self.audience_interests,
+            "key_messaging": self.key_messaging,
+            "dos": self.dos,
+            "donts": self.donts,
+            "reference_image_urls": self.reference_image_urls,
+            "content_due_at": self.content_due_at,
         }

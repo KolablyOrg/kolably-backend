@@ -55,6 +55,18 @@ def _campaign_to_response(campaign: Campaign) -> CampaignResponse:
         created_at=campaign.created_at,
         applicant_count=campaign.applicant_count,
         accepted_count=campaign.accepted_count,
+        posted_count=campaign.posted_count,
+        platforms=list(campaign.platforms or []),
+        product_promoted=campaign.product_promoted,
+        audience_age_range=campaign.audience_age_range,
+        audience_gender=campaign.audience_gender,
+        audience_location=campaign.audience_location,
+        audience_interests=campaign.audience_interests,
+        key_messaging=campaign.key_messaging,
+        dos=campaign.dos,
+        donts=campaign.donts,
+        reference_image_urls=list(campaign.reference_image_urls or []),
+        content_due_at=campaign.content_due_at,
     )
 
 
@@ -369,6 +381,7 @@ async def list_campaigns(
         if count_data:
             campaign.applicant_count = count_data.get("applicant_count")
             campaign.accepted_count = count_data.get("accepted_count")
+            campaign.posted_count = count_data.get("posted_count")
 
     business_ids = list({c.business_id for c in campaigns if c.business_id})
     businesses = await business_repo.get_by_ids(business_ids)
@@ -423,6 +436,7 @@ async def get_campaign(
     if count_data:
         campaign.applicant_count = count_data.get("applicant_count")
         campaign.accepted_count = count_data.get("accepted_count")
+        campaign.posted_count = count_data.get("posted_count")
 
     return _campaign_to_response(campaign)
 

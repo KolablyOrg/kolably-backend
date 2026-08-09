@@ -186,6 +186,10 @@ async def test_list_my_campaigns_resolves_business_id_from_profile():
 async def test_list_business_campaigns_passes_status_filter():
     repo = FakeBusinessRepo(business_id="b1", campaigns=[dict(CAMPAIGN_ROW)])
 
+    class FakeCampaignRepo:
+        async def fetch_application_counts(self, campaign_ids):
+            return {}
+
     await business_service.list_business_campaigns(
         business_id="b1",
         status="active",
