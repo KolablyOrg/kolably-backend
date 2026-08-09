@@ -81,6 +81,8 @@ def _campaign_to_summary(
         status=campaign.status,
         created_at=campaign.created_at,
         applicant_count=campaign.applicant_count,
+        accepted_count=campaign.accepted_count,
+        max_creators=campaign.max_creators,
         business_name=business_name,
         business_logo_url=business_logo_url,
         is_verified=is_verified,

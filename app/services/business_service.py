@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from app.core.enums import UserRole
 from app.models.business import Business
 from app.repositories.business_repo import BusinessRepository
+from app.repositories.campaign_repo import CampaignRepository
 from app.schemas.business import (
     DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
     BusinessResponse,
@@ -138,14 +139,23 @@ async def list_business_campaigns(
     page_size: int = 20,
     *,
     repo: BusinessRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
 ) -> dict:
     repo = repo or BusinessRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
     campaigns, total = await repo.list_campaigns(
         business_id=business_id,
         status=status,
         page=page,
         page_size=page_size,
     )
+
+    counts = await campaign_repo.fetch_application_counts([c.id for c in campaigns])
+    for campaign in campaigns:
+        count_data = counts.get(campaign.id)
+        if count_data:
+            campaign.applicant_count = count_data.get("applicant_count")
+            campaign.accepted_count = count_data.get("accepted_count")
 
     return {
         "items": [_campaign_to_summary(c) for c in campaigns],
@@ -192,6 +202,7 @@ async def list_my_campaigns(
     page_size: int = 20,
     *,
     repo: BusinessRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
 ) -> dict:
     """Campaigns belonging to the caller's own business."""
     repo = repo or BusinessRepository()
@@ -202,6 +213,7 @@ async def list_my_campaigns(
         page=page,
         page_size=page_size,
         repo=repo,
+        campaign_repo=campaign_repo,
     )
 
 

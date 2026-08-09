@@ -124,6 +124,13 @@ class FakeBusinessRepo:
         return [_make_campaign(c) for c in self._campaigns], len(self._campaigns)
 
 
+class FakeCampaignRepo:
+    """Duck-typed stand-in for CampaignRepository — only fetch_application_counts is used here."""
+
+    async def fetch_application_counts(self, campaign_ids):
+        return {}
+
+
 async def test_get_business_by_id_maps_user_id_from_profile_id():
     """Regression: same joined-profile-id bug as the creator side."""
     repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
@@ -154,7 +161,7 @@ async def test_list_my_campaigns_resolves_business_id_from_profile():
     imported a non-existent helper and called it unawaited)."""
     repo = FakeBusinessRepo(business_id="b1", campaigns=[dict(CAMPAIGN_ROW)])
 
-    result = await business_service.list_my_campaigns(profile_id="p1", repo=repo)
+    result = await business_service.list_my_campaigns(profile_id="p1", repo=repo, campaign_repo=FakeCampaignRepo())
 
     assert repo.seen_business_id == "b1"
     assert result["total"] == 1
@@ -169,6 +176,7 @@ async def test_list_business_campaigns_passes_status_filter():
         business_id="b1",
         status="active",
         repo=repo,
+        campaign_repo=FakeCampaignRepo(),
     )
 
     assert repo.seen_status == "active"
@@ -180,7 +188,7 @@ async def test_list_my_campaigns_includes_draft_with_null_compensation_type():
     draft_row["compensation_type"] = None
     repo = FakeBusinessRepo(business_id="b1", campaigns=[draft_row])
 
-    result = await business_service.list_my_campaigns(profile_id="p1", repo=repo)
+    result = await business_service.list_my_campaigns(profile_id="p1", repo=repo, campaign_repo=FakeCampaignRepo())
 
     assert result["total"] == 1
     assert result["items"][0].status.value == "draft"
