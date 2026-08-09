@@ -12,6 +12,7 @@ from app.schemas.business import (
     BusinessStatsResponse,
     BusinessUpdateRequest,
     CreatorActivityBannerResponse,
+    KybReviewRequest,
     KybStatusResponse,
     KybSubmitRequest,
 )
@@ -104,6 +105,23 @@ async def submit_verification(
 ):
     """Submit business type, legal entity, PAN/GST, and proof document for KYB verification."""
     return await business_service.submit_kyb_verification(profile_id=user.id, data=data)
+
+
+@router.patch(
+    "/{business_id}/verification/review",
+    response_model=KybStatusResponse,
+    dependencies=[Depends(require_role(UserRole.SUPERADMIN))],
+)
+async def review_verification(
+    business_id: str,
+    data: KybReviewRequest,
+):
+    """Admin approve/reject a pending KYB submission — the only API path off 'pending'."""
+    return await business_service.review_kyb_verification(
+        business_id=business_id,
+        decision=data.decision,
+        rejection_reason=data.rejection_reason,
+    )
 
 
 @router.get("/{business_id}", response_model=BusinessResponse)

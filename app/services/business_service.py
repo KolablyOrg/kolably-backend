@@ -322,6 +322,7 @@ async def submit_kyb_verification(
         "business_proof_document_url": data.document_url,
         "kyb_status": "pending",
         "kyb_submitted_at": now.isoformat(),
+        "kyb_rejection_reason": None,
     }
 
     updated = await repo.update_by_profile_id(profile_id, update_data)
@@ -335,7 +336,7 @@ async def submit_kyb_verification(
         "status": updated.kyb_status,
         "submitted_at": updated.kyb_submitted_at,
         "verified_at": updated.kyb_verified_at,
-        "rejection_reason": None,
+        "rejection_reason": updated.kyb_rejection_reason,
     }
 
 
@@ -356,5 +357,44 @@ async def get_kyb_status(
         "status": business.kyb_status or "unverified",
         "submitted_at": business.kyb_submitted_at,
         "verified_at": business.kyb_verified_at,
-        "rejection_reason": None,
+        "rejection_reason": business.kyb_rejection_reason,
+    }
+
+
+async def review_kyb_verification(
+    business_id: str,
+    decision: str,
+    rejection_reason: str | None = None,
+    *,
+    repo: BusinessRepository | None = None,
+) -> dict:
+    """Admin approve/reject action — the only way kyb_status can leave 'pending'
+    today, aside from a direct DB edit."""
+    repo = repo or BusinessRepository()
+    business = await repo.get_by_id(business_id)
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business not found",
+        )
+
+    update_data: dict[str, Any] = {"kyb_status": decision}
+    if decision == "verified":
+        update_data["kyb_verified_at"] = datetime.now(UTC).isoformat()
+        update_data["kyb_rejection_reason"] = None
+    else:
+        update_data["kyb_rejection_reason"] = rejection_reason
+
+    updated = await repo.update_business(business_id, update_data)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update KYB status",
+        )
+
+    return {
+        "status": updated.kyb_status,
+        "submitted_at": updated.kyb_submitted_at,
+        "verified_at": updated.kyb_verified_at,
+        "rejection_reason": updated.kyb_rejection_reason,
     }

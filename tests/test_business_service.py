@@ -240,6 +240,45 @@ async def test_creator_activity_banner_zero_when_no_one_posted_recently():
     assert creator_repo.seen_city == "Springfield"
 
 
+async def test_review_kyb_verification_approves():
+    row = {**BUSINESS_ROW, "kyb_status": "pending"}
+    repo = FakeBusinessRepo(row=dict(row))
+
+    result = await business_service.review_kyb_verification(
+        "b1", "verified", repo=repo,
+    )
+
+    assert result["status"] == "verified"
+    assert result["verified_at"] is not None
+    assert result["rejection_reason"] is None
+    assert repo.update_calls[0] == ("b1", {
+        "kyb_status": "verified",
+        "kyb_verified_at": result["verified_at"],
+        "kyb_rejection_reason": None,
+    })
+
+
+async def test_review_kyb_verification_rejects_with_reason():
+    row = {**BUSINESS_ROW, "kyb_status": "pending"}
+    repo = FakeBusinessRepo(row=dict(row))
+
+    result = await business_service.review_kyb_verification(
+        "b1", "rejected", rejection_reason="GST certificate unclear", repo=repo,
+    )
+
+    assert result["status"] == "rejected"
+    assert result["rejection_reason"] == "GST certificate unclear"
+
+
+async def test_review_kyb_verification_404_when_business_missing():
+    repo = FakeBusinessRepo(row=None)
+
+    with pytest.raises(HTTPException) as exc:
+        await business_service.review_kyb_verification("missing", "verified", repo=repo)
+
+    assert exc.value.status_code == 404
+
+
 async def test_creator_activity_banner_averages_matching_creators():
     repo = FakeBusinessRepo(row=dict(BUSINESS_ROW))
     creator_repo = FakeCreatorRepo(creators=[

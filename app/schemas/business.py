@@ -81,6 +81,12 @@ class KybSubmitRequest(BaseModel):
     document_url: str
 
 
+class KybReviewRequest(BaseModel):
+    """Admin action on a pending KYB submission."""
+    decision: Literal["verified", "rejected"]
+    rejection_reason: str | None = None
+
+
 class KybStatusResponse(BaseModel):
     status: Literal["unverified", "pending", "verified", "rejected"]
     submitted_at: datetime | None = None
