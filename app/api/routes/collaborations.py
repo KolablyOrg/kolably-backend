@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user, require_role
 from app.core.enums import UserRole
-from app.schemas.collaboration import CollaborationResponse
+from app.schemas.collaboration import CollaborationResponse, ContentSubmitRequest
 from app.schemas.common import PaginatedResponse
 from app.schemas.user import UserInToken
 from app.services import collaboration_service
@@ -69,4 +69,22 @@ async def cancel_collaboration(
     return await collaboration_service.cancel_collaboration(
         collaboration_id=collaboration_id,
         profile_id=user.id,
+    )
+
+
+@router.post(
+    "/{collaboration_id}/submit",
+    response_model=CollaborationResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
+async def submit_content(
+    collaboration_id: str,
+    data: ContentSubmitRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Creator submits a post/reel link for brand review."""
+    return await collaboration_service.submit_content(
+        collaboration_id=collaboration_id,
+        profile_id=user.id,
+        data=data,
     )

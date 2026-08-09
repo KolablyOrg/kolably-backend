@@ -81,6 +81,10 @@ class CollaborationRepository(BaseRepository):
             filters={"collaboration_id": collaboration_id},
         )
 
+    async def insert_submission(self, data: dict) -> dict | None:
+        rows = await self.insert("content_submissions", data)
+        return rows[0] if rows else None
+
     async def insert_collaboration(self, data: dict) -> Collaboration | None:
         rows = await self.insert("collaborations", data)
         return Collaboration.from_row(rows[0]) if rows else None

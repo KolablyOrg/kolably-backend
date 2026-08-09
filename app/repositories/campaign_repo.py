@@ -19,6 +19,12 @@ class CampaignRepository(BaseRepository):
         )
         return Campaign.from_row(row) if row else None
 
+    async def get_by_ids(self, campaign_ids: list[str]) -> list[Campaign]:
+        if not campaign_ids:
+            return []
+        rows = await self.select("campaigns", columns="*", filters={"id": campaign_ids})
+        return [Campaign.from_row(row) for row in rows]
+
     async def _business_ids_matching_name(self, term: str) -> list[str]:
         result = await self._execute(
             (await self._table("businesses"))
