@@ -170,6 +170,13 @@ class CampaignCategoryResponse(BaseModel):
     label: str
 
 
+class BudgetBoundsResponse(BaseModel):
+    """Real min/max cash budget across active campaigns — sizes the
+    filter-sheet slider to actual data instead of a guessed range."""
+    min_budget: float
+    max_budget: float
+
+
 class CampaignAnalyticsResponse(BaseModel):
     """Per-campaign analytics — only fields backed by real, currently-recorded data.
 

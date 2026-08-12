@@ -52,15 +52,19 @@ CAMPAIGN_ROW = {
 
 
 class FakeCampaignRepo:
-    def __init__(self, row=None, list_rows=None, total=None, counts=None):
+    def __init__(self, row=None, list_rows=None, total=None, counts=None, budget_bounds=None):
         self._row = row if row is not None else dict(CAMPAIGN_ROW)
         self._list_rows = list_rows
         self._total = total
         self._counts = counts or {}
+        self._budget_bounds = budget_bounds if budget_bounds is not None else {"min": None, "max": None}
         self.updated = None
         self.inserted = None
         self.deleted = None
         self.list_kwargs = None
+
+    async def get_budget_bounds(self):
+        return self._budget_bounds
 
     async def get_by_id(self, campaign_id: str):
         return Campaign.from_row(self._row) if self._row else None
@@ -601,6 +605,62 @@ async def test_list_campaigns_skips_creator_lookup_without_only_qualified():
     )
 
     assert repo.list_kwargs["creator_follower_count"] is None
+
+
+# ── budget_min / budget_max (filter-sheet slider) ─────
+
+
+async def test_list_campaigns_passes_budget_bounds_to_repo():
+    repo = FakeCampaignRepo()
+    business_repo = FakeBusinessRepo()
+    await campaign_service.list_campaigns(
+        search=None,
+        category=None,
+        recommended=None,
+        page=1,
+        page_size=20,
+        budget_min=10000,
+        budget_max=25000,
+        user=_creator_user(),
+        campaign_repo=repo,
+        business_repo=business_repo,
+    )
+    assert repo.list_kwargs["budget_min"] == 10000
+    assert repo.list_kwargs["budget_max"] == 25000
+
+
+async def test_list_campaigns_defaults_budget_bounds_to_none():
+    """Slider left at its full span → filter is skipped, not clamped to 0."""
+    repo = FakeCampaignRepo()
+    business_repo = FakeBusinessRepo()
+    await campaign_service.list_campaigns(
+        search=None,
+        category=None,
+        recommended=None,
+        page=1,
+        page_size=20,
+        user=_creator_user(),
+        campaign_repo=repo,
+        business_repo=business_repo,
+    )
+    assert repo.list_kwargs["budget_min"] is None
+    assert repo.list_kwargs["budget_max"] is None
+
+
+async def test_get_budget_bounds_returns_real_repo_values():
+    repo = FakeCampaignRepo(budget_bounds={"min": 5000.0, "max": 75000.0})
+    result = await campaign_service.get_budget_bounds(campaign_repo=repo)
+    assert result.min_budget == 5000.0
+    assert result.max_budget == 75000.0
+
+
+async def test_get_budget_bounds_falls_back_when_no_cash_campaigns():
+    """No cash campaigns yet (or a brand-new environment) → sane default span,
+    not a crash or a degenerate 0–0 slider."""
+    repo = FakeCampaignRepo(budget_bounds={"min": None, "max": None})
+    result = await campaign_service.get_budget_bounds(campaign_repo=repo)
+    assert result.min_budget == 0.0
+    assert result.max_budget == 100_000.0
 
 
 # ── invite_creator active guard ───────────────────────

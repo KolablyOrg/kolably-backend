@@ -8,6 +8,7 @@ from app.core.dependencies import get_current_user, get_optional_user, require_r
 from app.core.enums import UserRole
 from app.schemas.application import ApplicationResponse, ApplicationWithCreator
 from app.schemas.campaign import (
+    BudgetBoundsResponse,
     CampaignAnalyticsResponse,
     CampaignCategoryResponse,
     CampaignCreateRequest,
@@ -152,6 +153,8 @@ async def list_campaigns(
     location: list[str] | None = Query(None),
     compensation_type: list[str] | None = Query(None),
     budget_ranges: list[str] | None = Query(None),
+    budget_min: float | None = Query(None, ge=0),
+    budget_max: float | None = Query(None, ge=0),
     deliverables: list[str] | None = Query(None),
     only_qualified: bool | None = Query(None),
     user: UserInToken = Depends(get_current_user),
@@ -166,6 +169,8 @@ async def list_campaigns(
         location=location,
         compensation_type=compensation_type,
         budget_ranges=budget_ranges,
+        budget_min=budget_min,
+        budget_max=budget_max,
         deliverables=deliverables,
         only_qualified=only_qualified,
         user=user,
@@ -182,6 +187,13 @@ async def get_campaign_categories():
 async def get_locations():
     """Static list of available campaign locations."""
     return await campaign_service.get_locations()
+
+
+@router.get("/budget-bounds", response_model=BudgetBoundsResponse)
+async def get_budget_bounds():
+    """Real min/max cash budget across active campaigns, so the client can
+    size the budget-range slider to actual data instead of a guessed range."""
+    return await campaign_service.get_budget_bounds()
 
 
 # ── Detail & General CRUD ─────────────────────────────

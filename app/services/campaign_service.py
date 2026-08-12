@@ -19,6 +19,7 @@ from app.repositories.creator_repo import CreatorRepository
 from app.repositories.invoice_repo import InvoiceRepository
 from app.schemas.application import ApplicationResponse, ApplicationWithCreator
 from app.schemas.campaign import (
+    BudgetBoundsResponse,
     CampaignAnalyticsResponse,
     CampaignCategoryResponse,
     CampaignCreateRequest,
@@ -343,6 +344,8 @@ async def list_campaigns(
     location: list[str] | None = None,
     compensation_type: list[str] | None = None,
     budget_ranges: list[str] | None = None,
+    budget_min: float | None = None,
+    budget_max: float | None = None,
     deliverables: list[str] | None = None,
     only_qualified: bool | None = None,
     campaign_repo: CampaignRepository | None = None,
@@ -383,6 +386,8 @@ async def list_campaigns(
         location=location,
         compensation_type=compensation_type,
         budget_ranges=budget_ranges,
+        budget_min=budget_min,
+        budget_max=budget_max,
         deliverables=deliverables,
         only_qualified=only_qualified,
         creator_follower_count=creator_follower_count,
@@ -750,3 +755,27 @@ async def get_locations(
         "page": 1,
         "page_size": len(locations),
     }
+
+
+# Fallback span shown only when there isn't a single active cash campaign to
+# measure yet (e.g. a brand-new environment) — the slider still needs *some*
+# range to render.
+_DEFAULT_BUDGET_MIN = 0.0
+_DEFAULT_BUDGET_MAX = 100_000.0
+
+
+async def get_budget_bounds(
+    *,
+    campaign_repo: CampaignRepository | None = None,
+) -> BudgetBoundsResponse:
+    """Real min/max cash budget across active campaigns, for sizing the
+    filter-sheet slider to actual data instead of a guessed range."""
+    campaign_repo = campaign_repo or CampaignRepository()
+    bounds = await campaign_repo.get_budget_bounds()
+    min_budget = bounds.get("min")
+    max_budget = bounds.get("max")
+    if min_budget is None or max_budget is None:
+        return BudgetBoundsResponse(min_budget=_DEFAULT_BUDGET_MIN, max_budget=_DEFAULT_BUDGET_MAX)
+    if min_budget > max_budget:
+        min_budget, max_budget = max_budget, min_budget
+    return BudgetBoundsResponse(min_budget=min_budget, max_budget=max_budget)
