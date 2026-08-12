@@ -88,13 +88,13 @@ class FakeCampaignRepo:
     async def delete_campaign(self, campaign_id: str):
         self.deleted = campaign_id
 
-    async def list_active(self, search=None, category=None, page=1, page_size=20, *, extra_category_values=None):
+    async def list_active(self, search=None, category=None, page=1, page_size=20, **kwargs):
         self.list_kwargs = {
             "search": search,
             "category": category,
             "page": page,
             "page_size": page_size,
-            "extra_category_values": extra_category_values,
+            **kwargs,
         }
         rows = self._list_rows if self._list_rows is not None else [self._row]
         return [Campaign.from_row(r) for r in rows], self._total if self._total is not None else len(rows)
@@ -121,6 +121,9 @@ class FakeCreatorRepo:
         return self._niche
 
     async def get_by_id(self, creator_id: str):
+        return self._creator
+
+    async def get_by_profile_id(self, profile_id: str):
         return self._creator
 
 
@@ -440,6 +443,81 @@ async def test_list_campaigns_search_maps_category_labels():
     )
 
     assert "food" in (repo.list_kwargs["extra_category_values"] or [])
+
+
+# ── only_qualified ────────────────────────────────────
+
+
+async def test_list_campaigns_only_qualified_passes_creator_numbers():
+    """The repo can't reach the creator's profile — the service has to hand it
+    the follower count and engagement rate to filter on."""
+    repo = FakeCampaignRepo()
+    creator = Creator.from_row(
+        {
+            "id": "c1",
+            "profile_id": "p-creator",
+            "name": "Alice",
+            "follower_count": 24000,
+            "engagement_rate": 6.2,
+            "created_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+
+    await campaign_service.list_campaigns(
+        search=None,
+        category=None,
+        recommended=None,
+        page=1,
+        page_size=20,
+        only_qualified=True,
+        user=_creator_user(),
+        campaign_repo=repo,
+        creator_repo=FakeCreatorRepo(creator=creator),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert repo.list_kwargs["only_qualified"] is True
+    assert repo.list_kwargs["creator_follower_count"] == 24000
+    assert repo.list_kwargs["creator_engagement_rate"] == 6.2
+
+
+async def test_list_campaigns_only_qualified_without_creator_profile():
+    """No creator row (or no synced numbers) → no bogus filters get applied."""
+    repo = FakeCampaignRepo()
+
+    await campaign_service.list_campaigns(
+        search=None,
+        category=None,
+        recommended=None,
+        page=1,
+        page_size=20,
+        only_qualified=True,
+        user=_creator_user(),
+        campaign_repo=repo,
+        creator_repo=FakeCreatorRepo(creator=None),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert repo.list_kwargs["creator_follower_count"] is None
+    assert repo.list_kwargs["creator_engagement_rate"] is None
+
+
+async def test_list_campaigns_skips_creator_lookup_without_only_qualified():
+    repo = FakeCampaignRepo()
+
+    await campaign_service.list_campaigns(
+        search=None,
+        category=None,
+        recommended=None,
+        page=1,
+        page_size=20,
+        user=_creator_user(),
+        campaign_repo=repo,
+        creator_repo=FakeCreatorRepo(creator=None),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert repo.list_kwargs["creator_follower_count"] is None
 
 
 # ── invite_creator active guard ───────────────────────

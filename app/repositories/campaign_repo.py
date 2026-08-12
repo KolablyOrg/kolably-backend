@@ -28,6 +28,33 @@ class CampaignRepository(BaseRepository):
         )
         return [row["id"] for row in (result.data or []) if row.get("id")]
 
+    async def _campaign_ids_with_deliverables(self, content_types: list[str]) -> list[str]:
+        """Active campaign ids whose deliverables include any of `content_types`.
+
+        `deliverables` is a JSONB array of objects
+        (`[{"platform": "instagram", "content_type": "reel", ...}]`), so
+        containment has to be checked against an object shape — matching it
+        against a list of bare strings never returns anything. PostgREST also
+        can't OR JSON containment clauses inside a single `or_()` (the braces
+        and commas break its grammar), so each content type is resolved on its
+        own and the ids are unioned here.
+        """
+        ids: list[str] = []
+        seen: set[str] = set()
+        for content_type in content_types:
+            result = await self._execute(
+                (await self._table("campaigns"))
+                .select("id")
+                .eq("status", "active")
+                .contains("deliverables", [{"content_type": content_type}])
+            )
+            for row in result.data or []:
+                campaign_id = row.get("id")
+                if campaign_id and campaign_id not in seen:
+                    seen.add(campaign_id)
+                    ids.append(campaign_id)
+        return ids
+
     async def list_active(
         self,
         search: str | None = None,
@@ -41,6 +68,8 @@ class CampaignRepository(BaseRepository):
         budget_ranges: list[str] | None = None,
         deliverables: list[str] | None = None,
         only_qualified: bool | None = None,
+        creator_follower_count: int | None = None,
+        creator_engagement_rate: float | None = None,
     ) -> tuple[list[Campaign], int]:
         query = (
             (await self._table("campaigns"))
@@ -96,11 +125,24 @@ class CampaignRepository(BaseRepository):
                 query = query.or_(",".join(budget_clauses))
 
         if deliverables:
-            query = query.contains("deliverables", deliverables)
+            matching_ids = await self._campaign_ids_with_deliverables(deliverables)
+            if not matching_ids:
+                return [], 0
+            query = query.in_("id", matching_ids)
 
-        # only_qualified is harder to filter strictly in SQL without user profile data,
-        # but if implemented, it could check min_engagement_rate etc. We'll skip for now
-        # or implement it via the service layer if needed.
+        if only_qualified:
+            # The creator's own numbers come from the service layer. Campaigns
+            # that set no bar stay visible, and a creator whose follower count
+            # or engagement rate hasn't synced yet isn't filtered out on a
+            # number we don't have — same treatment as creator discovery.
+            if creator_follower_count is not None:
+                query = query.or_(
+                    f"follower_range_min.is.null,follower_range_min.lte.{int(creator_follower_count)}"
+                )
+            if creator_engagement_rate is not None:
+                query = query.or_(
+                    f"min_engagement_rate.is.null,min_engagement_rate.lte.{float(creator_engagement_rate)}"
+                )
 
         start = (page - 1) * page_size
         end = start + page_size - 1

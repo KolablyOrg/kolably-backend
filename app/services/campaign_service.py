@@ -345,6 +345,17 @@ async def list_campaigns(
 
     extra_cats = _category_values_matching_search(search) if search else []
 
+    # "Only campaigns I qualify for" needs the creator's own numbers — the repo
+    # can't reach them, so they're resolved here and passed down as filters.
+    creator_follower_count = None
+    creator_engagement_rate = None
+    if only_qualified and user and user.role.value == "creator":
+        creator_repo = creator_repo or CreatorRepository()
+        creator = await creator_repo.get_by_profile_id(user.id)
+        if creator:
+            creator_follower_count = creator.follower_count
+            creator_engagement_rate = creator.engagement_rate
+
     campaigns, total = await campaign_repo.list_active(
         search=search,
         category=category,
@@ -356,6 +367,8 @@ async def list_campaigns(
         budget_ranges=budget_ranges,
         deliverables=deliverables,
         only_qualified=only_qualified,
+        creator_follower_count=creator_follower_count,
+        creator_engagement_rate=creator_engagement_rate,
     )
 
     campaign_ids = [c.id for c in campaigns]
