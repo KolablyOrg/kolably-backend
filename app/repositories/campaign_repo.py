@@ -72,6 +72,8 @@ class CampaignRepository(BaseRepository):
         location: list[str] | None = None,
         compensation_type: list[str] | None = None,
         budget_ranges: list[str] | None = None,
+        budget_min: float | None = None,
+        budget_max: float | None = None,
         deliverables: list[str] | None = None,
         only_qualified: bool | None = None,
         creator_follower_count: int | None = None,
@@ -129,6 +131,16 @@ class CampaignRepository(BaseRepository):
             
             if budget_clauses:
                 query = query.or_(",".join(budget_clauses))
+
+        # Continuous range from the filter-sheet slider — unlike budget_ranges
+        # above (multi-select bands, OR'd together), this is a single range so
+        # both ends simply AND with everything else via normal gte/lte chaining.
+        # Overlap semantics: campaign matches if its own range overlaps
+        # [budget_min, budget_max] at all, not just if it sits fully inside it.
+        if budget_min is not None:
+            query = query.gte("cash_amount_max", budget_min)
+        if budget_max is not None:
+            query = query.lte("cash_amount_min", budget_max)
 
         if deliverables:
             matching_ids = await self._campaign_ids_with_deliverables(deliverables)
@@ -248,3 +260,22 @@ class CampaignRepository(BaseRepository):
                 seen.add(loc.lower())
                 locations.append(loc)
         return sorted(locations)
+
+    async def get_budget_bounds(self) -> dict:
+        """Cheapest and priciest cash budgets among active campaigns, so the
+        filter-sheet slider can span real data instead of a guessed range.
+        Product-only campaigns (no cash_amount_min/max) are naturally excluded
+        since both columns are null for them.
+        """
+        result = await self._execute(
+            (await self._table("campaigns"))
+            .select("cash_amount_min,cash_amount_max")
+            .eq("status", "active")
+        )
+        rows = result.data or []
+        mins = [float(r["cash_amount_min"]) for r in rows if r.get("cash_amount_min") is not None]
+        maxes = [float(r["cash_amount_max"]) for r in rows if r.get("cash_amount_max") is not None]
+        return {
+            "min": min(mins) if mins else None,
+            "max": max(maxes) if maxes else None,
+        }
