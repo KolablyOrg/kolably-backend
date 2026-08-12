@@ -45,6 +45,7 @@ class CampaignObjective(StrEnum):
     USER_GENERATED_CONTENT = "user_generated_content"
     SALES_CONVERSION = "sales_conversion"
     EVENT_PROMOTION = "event_promotion"
+    ENGAGEMENT = "engagement"
     OTHER = "other"
 
 

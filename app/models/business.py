@@ -31,6 +31,7 @@ class Business:
     kyb_status: str = "unverified"
     kyb_submitted_at: datetime | None = None
     kyb_verified_at: datetime | None = None
+    kyb_rejection_reason: str | None = None
     notification_preferences: dict[str, Any] = field(
         default_factory=lambda: {
             "new_applications": True,
@@ -64,6 +65,7 @@ class Business:
             kyb_status=row.get("kyb_status", "unverified"),
             kyb_submitted_at=row.get("kyb_submitted_at"),
             kyb_verified_at=row.get("kyb_verified_at"),
+            kyb_rejection_reason=row.get("kyb_rejection_reason"),
             notification_preferences=row.get("notification_preferences")
             or {
                 "new_applications": True,
@@ -97,6 +99,7 @@ class Business:
             "kyb_status": self.kyb_status,
             "kyb_submitted_at": self.kyb_submitted_at,
             "kyb_verified_at": self.kyb_verified_at,
+            "kyb_rejection_reason": self.kyb_rejection_reason,
             "notification_preferences": self.notification_preferences,
             "is_discoverable": self.is_discoverable,
         }

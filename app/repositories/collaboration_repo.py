@@ -16,12 +16,15 @@ class CollaborationRepository(BaseRepository):
         creator_id: str,
         page: int = 1,
         page_size: int = 20,
+        campaign_id: str | None = None,
     ) -> tuple[list[Collaboration], int]:
         query = (
             (await self._table("collaborations"))
             .select("*", count="exact")
             .eq("creator_id", creator_id)
         )
+        if campaign_id:
+            query = query.eq("campaign_id", campaign_id)
 
         start = (page - 1) * page_size
         end = start + page_size - 1
@@ -35,11 +38,33 @@ class CollaborationRepository(BaseRepository):
         business_id: str,
         page: int = 1,
         page_size: int = 20,
+        campaign_id: str | None = None,
     ) -> tuple[list[Collaboration], int]:
         query = (
             (await self._table("collaborations"))
             .select("*", count="exact")
             .eq("business_id", business_id)
+        )
+        if campaign_id:
+            query = query.eq("campaign_id", campaign_id)
+
+        start = (page - 1) * page_size
+        end = start + page_size - 1
+        result = await self._execute(query.range(start, end))
+
+        rows = result.data or []
+        return [Collaboration.from_row(row) for row in rows], result.count or 0
+
+    async def list_by_campaign(
+        self,
+        campaign_id: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Collaboration], int]:
+        query = (
+            (await self._table("collaborations"))
+            .select("*", count="exact")
+            .eq("campaign_id", campaign_id)
         )
 
         start = (page - 1) * page_size
@@ -55,6 +80,10 @@ class CollaborationRepository(BaseRepository):
             columns="*",
             filters={"collaboration_id": collaboration_id},
         )
+
+    async def insert_submission(self, data: dict) -> dict | None:
+        rows = await self.insert("content_submissions", data)
+        return rows[0] if rows else None
 
     async def insert_collaboration(self, data: dict) -> Collaboration | None:
         rows = await self.insert("collaborations", data)

@@ -30,6 +30,26 @@ class ContentSubmitRequest(BaseModel):
     notes: str | None = None
 
 
+class CollaborationCampaignInfo(BaseModel):
+    """Joined campaign fields the mobile collab screens render — deliverables,
+    payout, and deadlines all live on the campaign, not the collaboration."""
+    title: str
+    deliverables: list[dict] = []
+    deadline: datetime | None = None
+    content_due_at: datetime | None = None
+    compensation_type: str | None = None
+    cash_amount_min: float | None = None
+    cash_amount_max: float | None = None
+    free_product_description: str | None = None
+
+
+class CollaborationBusinessInfo(BaseModel):
+    id: str
+    business_name: str
+    logo_url: str | None = None
+    gst_number: str | None = None
+
+
 class CollaborationResponse(BaseModel):
     id: str
     campaign_id: str
@@ -40,6 +60,14 @@ class CollaborationResponse(BaseModel):
     affiliate_url: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
+    # Joined so mobile can render brand/campaign context without a second
+    # round trip — previously absent entirely, which left collab-detail.tsx
+    # and collab-submit.tsx rendering blank brand name/logo/payout/deadline.
+    campaign_title: str | None = None
+    business_name: str | None = None
+    brand_logo: str | None = None
+    campaign: CollaborationCampaignInfo | None = None
+    business: CollaborationBusinessInfo | None = None
 
 
 class CollaborationSummary(BaseModel):

@@ -64,6 +64,14 @@ class BusinessStatsResponse(BaseModel):
     creators_worked_with_count: int
 
 
+class CreatorActivityBannerResponse(BaseModel):
+    """Backs the home-dashboard 'N creators near you posted recently' banner."""
+    count: int
+    city: str | None = None
+    avg_followers: int = 0
+    avg_engagement_rate: float = 0.0
+
+
 # ── KYB (Know-Your-Business) Verification ──────────────────────────────
 class KybSubmitRequest(BaseModel):
     business_type: Literal["company", "individual"]
@@ -71,6 +79,12 @@ class KybSubmitRequest(BaseModel):
     pan_number: str
     gst_number: str | None = None
     document_url: str
+
+
+class KybReviewRequest(BaseModel):
+    """Admin action on a pending KYB submission."""
+    decision: Literal["verified", "rejected"]
+    rejection_reason: str | None = None
 
 
 class KybStatusResponse(BaseModel):

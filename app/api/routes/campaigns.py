@@ -8,6 +8,7 @@ from app.core.dependencies import get_current_user, get_optional_user, require_r
 from app.core.enums import UserRole
 from app.schemas.application import ApplicationResponse, ApplicationWithCreator
 from app.schemas.campaign import (
+    CampaignAnalyticsResponse,
     CampaignCategoryResponse,
     CampaignCreateRequest,
     CampaignDeliverablesRequest,
@@ -124,6 +125,19 @@ async def complete_campaign(
 ):
     """Mark a campaign as completed (from active or closed)."""
     return await campaign_service.complete_campaign(campaign_id, user.id)
+
+
+@router.get(
+    "/{campaign_id}/analytics",
+    response_model=CampaignAnalyticsResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
+async def get_campaign_analytics(
+    campaign_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Per-campaign analytics for the owning business — real data only."""
+    return await campaign_service.get_campaign_analytics(campaign_id, user.id)
 
 
 # ── Feed & Discovery ──────────────────────────────────

@@ -6,6 +6,7 @@ from app.core.enums import (
     ApplicationDirection,
     ApplicationStatus,
     CampaignStatus,
+    InvoiceStatus,
     NotificationType,
     UserRole,
 )
@@ -13,9 +14,12 @@ from app.models.campaign import Campaign
 from app.repositories.application_repo import ApplicationRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
+from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
+from app.repositories.invoice_repo import InvoiceRepository
 from app.schemas.application import ApplicationResponse, ApplicationWithCreator
 from app.schemas.campaign import (
+    CampaignAnalyticsResponse,
     CampaignCategoryResponse,
     CampaignCreateRequest,
     CampaignDeliverablesRequest,
@@ -55,6 +59,18 @@ def _campaign_to_response(campaign: Campaign) -> CampaignResponse:
         created_at=campaign.created_at,
         applicant_count=campaign.applicant_count,
         accepted_count=campaign.accepted_count,
+        posted_count=campaign.posted_count,
+        platforms=list(campaign.platforms or []),
+        product_promoted=campaign.product_promoted,
+        audience_age_range=campaign.audience_age_range,
+        audience_gender=campaign.audience_gender,
+        audience_location=campaign.audience_location,
+        audience_interests=campaign.audience_interests,
+        key_messaging=campaign.key_messaging,
+        dos=campaign.dos,
+        donts=campaign.donts,
+        reference_image_urls=list(campaign.reference_image_urls or []),
+        content_due_at=campaign.content_due_at,
     )
 
 
@@ -81,6 +97,8 @@ def _campaign_to_summary(
         status=campaign.status,
         created_at=campaign.created_at,
         applicant_count=campaign.applicant_count,
+        accepted_count=campaign.accepted_count,
+        max_creators=campaign.max_creators,
         business_name=business_name,
         business_logo_url=business_logo_url,
         is_verified=is_verified,
@@ -203,7 +221,11 @@ async def update_campaign_deliverables(
     update_data: dict[str, Any] = {
         "deliverables": [d.model_dump(mode="json") for d in data.deliverables],
         "compensation_type": data.compensation_type.value,
-        **data.model_dump(exclude={"deliverables", "compensation_type"}, exclude_none=True),
+        # Always write cash/perk fields (including null) so switching to
+        # product-only clears stale cash_amount_min/max from a prior cash offer.
+        "cash_amount_min": data.cash_amount_min,
+        "cash_amount_max": data.cash_amount_max,
+        "free_product_description": data.free_product_description,
     }
 
     campaign = await campaign_repo.update_campaign(campaign_id, update_data)
@@ -228,7 +250,8 @@ async def update_campaign_targeting(
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
-    update_data: dict[str, Any] = data.model_dump(exclude_none=True)
+    # mode="json" so enums/datetimes are JSON-safe for PostgREST.
+    update_data: dict[str, Any] = data.model_dump(mode="json", exclude_none=True)
 
     campaign = await campaign_repo.update_campaign(campaign_id, update_data)
     if not campaign:
@@ -252,16 +275,11 @@ async def update_campaign_general(
     campaign_repo = campaign_repo or CampaignRepository()
     campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
 
-    update_data: dict[str, Any] = data.model_dump(exclude_none=True)
+    # mode="json" is required: bare datetime objects in the payload make the
+    # Supabase/httpx client raise (unserializable) → opaque 500 on deadline PATCH.
+    update_data: dict[str, Any] = data.model_dump(mode="json", exclude_none=True)
     if not update_data:
         return _campaign_to_response(campaign)
-
-    if update_data.get("deliverables"):
-        update_data["deliverables"] = [d.model_dump(mode="json") for d in data.deliverables]
-    if update_data.get("objective"):
-        update_data["objective"] = data.objective.value
-    if update_data.get("compensation_type"):
-        update_data["compensation_type"] = data.compensation_type.value
 
     updated = await campaign_repo.update_campaign(campaign_id, update_data)
     if not updated:
@@ -380,6 +398,7 @@ async def list_campaigns(
         if count_data:
             campaign.applicant_count = count_data.get("applicant_count")
             campaign.accepted_count = count_data.get("accepted_count")
+            campaign.posted_count = count_data.get("posted_count")
 
     business_ids = list({c.business_id for c in campaigns if c.business_id})
     businesses = await business_repo.get_by_ids(business_ids)
@@ -434,6 +453,7 @@ async def get_campaign(
     if count_data:
         campaign.applicant_count = count_data.get("applicant_count")
         campaign.accepted_count = count_data.get("accepted_count")
+        campaign.posted_count = count_data.get("posted_count")
 
     return _campaign_to_response(campaign)
 
@@ -582,6 +602,66 @@ async def complete_campaign(
             detail="Campaign not found",
         )
     return _campaign_to_response(updated)
+
+
+async def get_campaign_analytics(
+    campaign_id: str,
+    profile_id: str,
+    *,
+    campaign_repo: CampaignRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+    application_repo: ApplicationRepository | None = None,
+    collaboration_repo: CollaborationRepository | None = None,
+    invoice_repo: InvoiceRepository | None = None,
+) -> CampaignAnalyticsResponse:
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    campaign_repo = campaign_repo or CampaignRepository()
+    await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+
+    application_repo = application_repo or ApplicationRepository()
+    collaboration_repo = collaboration_repo or CollaborationRepository()
+    invoice_repo = invoice_repo or InvoiceRepository()
+
+    # page_size covers realistic applicant volumes today; total (from the
+    # paginated tuple) stays accurate even past that cap, only the status
+    # breakdown below would under-count in an unrealistically large campaign.
+    applications, applied_count = await application_repo.list_by_campaign(
+        campaign_id, page=1, page_size=500
+    )
+    accepted_count = sum(1 for a in applications if a.status == ApplicationStatus.ACCEPTED)
+    rejected_count = sum(1 for a in applications if a.status == ApplicationStatus.REJECTED)
+    decided = accepted_count + rejected_count
+    response_rate = round(decided / applied_count * 100, 1) if applied_count else None
+    acceptance_rate = round(accepted_count / decided * 100, 1) if decided else None
+
+    # page_size covers realistic per-campaign collaboration volumes today.
+    collaborations, _ = await collaboration_repo.list_by_campaign(campaign_id, page=1, page_size=500)
+    creators_engaged = len({c.creator_id for c in collaborations})
+
+    collab_ids = [c.id for c in collaborations]
+    invoices = await invoice_repo.list_by_collaboration_ids(collab_ids)
+    invoiced_amount = sum(i.total_amount for i in invoices)
+    paid_amount = sum(i.total_amount for i in invoices if i.status == InvoiceStatus.PAID)
+    cost_per_creator = round(invoiced_amount / creators_engaged, 2) if creators_engaged else None
+
+    content_metrics_available = False
+    for collab_id in collab_ids:
+        if await collaboration_repo.list_submissions(collab_id):
+            content_metrics_available = True
+            break
+
+    return CampaignAnalyticsResponse(
+        applied_count=applied_count,
+        accepted_count=accepted_count,
+        rejected_count=rejected_count,
+        response_rate=response_rate,
+        acceptance_rate=acceptance_rate,
+        creators_engaged=creators_engaged,
+        invoiced_amount=invoiced_amount,
+        paid_amount=paid_amount,
+        cost_per_creator=cost_per_creator,
+        content_metrics_available=content_metrics_available,
+    )
 
 
 async def invite_creator(

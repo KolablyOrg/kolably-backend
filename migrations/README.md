@@ -92,6 +92,7 @@ When making schema changes:
 | 018 | Create data_deletion_requests table (Meta Data Deletion Callback log) |
 | 019 | Alter portfolio_items: add title column |
 | 020 | Alter businesses: business_name nullable, add legal_entity_name/business_type/pan_number/gst_number/business_proof_document_url + kyb_status lifecycle (business signup + KYB verification) |
+| 021 | Alter businesses: add kyb_rejection_reason (admin approve/reject KYB) |
 
 ## Notes
 

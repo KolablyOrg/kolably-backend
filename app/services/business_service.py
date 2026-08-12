@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -6,11 +6,14 @@ from fastapi import HTTPException, status
 from app.core.enums import UserRole
 from app.models.business import Business
 from app.repositories.business_repo import BusinessRepository
+from app.repositories.campaign_repo import CampaignRepository
+from app.repositories.creator_repo import CreatorRepository
 from app.schemas.business import (
     DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
     BusinessResponse,
     BusinessStatsResponse,
     BusinessUpdateRequest,
+    CreatorActivityBannerResponse,
 )
 from app.schemas.campaign import CampaignSummary
 
@@ -73,6 +76,8 @@ def _campaign_to_summary(campaign) -> CampaignSummary:
         status=campaign.status,
         created_at=campaign.created_at,
         applicant_count=campaign.applicant_count,
+        accepted_count=campaign.accepted_count,
+        max_creators=campaign.max_creators,
     )
 
 
@@ -138,14 +143,25 @@ async def list_business_campaigns(
     page_size: int = 20,
     *,
     repo: BusinessRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
 ) -> dict:
     repo = repo or BusinessRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
     campaigns, total = await repo.list_campaigns(
         business_id=business_id,
         status=status,
         page=page,
         page_size=page_size,
     )
+
+    if campaigns:
+        counts = await campaign_repo.fetch_application_counts([c.id for c in campaigns])
+        for campaign in campaigns:
+            count_data = counts.get(campaign.id)
+            if count_data:
+                campaign.applicant_count = count_data.get("applicant_count")
+                campaign.accepted_count = count_data.get("accepted_count")
+                campaign.posted_count = count_data.get("posted_count")
 
     return {
         "items": [_campaign_to_summary(c) for c in campaigns],
@@ -192,6 +208,7 @@ async def list_my_campaigns(
     page_size: int = 20,
     *,
     repo: BusinessRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
 ) -> dict:
     """Campaigns belonging to the caller's own business."""
     repo = repo or BusinessRepository()
@@ -202,6 +219,7 @@ async def list_my_campaigns(
         page=page,
         page_size=page_size,
         repo=repo,
+        campaign_repo=campaign_repo,
     )
 
 
@@ -240,6 +258,46 @@ async def get_business_stats(
     )
 
 
+async def get_creator_activity_banner(
+    profile_id: str,
+    *,
+    repo: BusinessRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+) -> CreatorActivityBannerResponse:
+    """'N creators near you posted recently' home-dashboard banner.
+
+    Deliberately city-only, not category-filtered: business.category holds
+    free-text industry labels (e.g. "Automotive Dealership", "Fashion Retail")
+    that don't share a vocabulary with creator.niche (e.g. "Fashion", "food"),
+    so a naive match would almost always return zero for reasons unrelated to
+    actual creator activity.
+    """
+    repo = repo or BusinessRepository()
+    creator_repo = creator_repo or CreatorRepository()
+    business = await repo.get_by_profile_id(profile_id)
+
+    if not business or not business.city:
+        return CreatorActivityBannerResponse(count=0)
+
+    since_iso = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    active_creators = await creator_repo.list_recently_active_by_city(
+        city=business.city, since_iso=since_iso
+    )
+    count = len(active_creators)
+    if count == 0:
+        return CreatorActivityBannerResponse(count=0, city=business.city)
+
+    avg_followers = round(sum(c.get("follower_count") or 0 for c in active_creators) / count)
+    avg_engagement = round(sum(c.get("engagement_rate") or 0 for c in active_creators) / count, 1)
+
+    return CreatorActivityBannerResponse(
+        count=count,
+        city=business.city,
+        avg_followers=avg_followers,
+        avg_engagement_rate=avg_engagement,
+    )
+
+
 # ── KYB (Know-Your-Business) Verification Service Methods ──────────────
 async def submit_kyb_verification(
     profile_id: str,
@@ -264,6 +322,7 @@ async def submit_kyb_verification(
         "business_proof_document_url": data.document_url,
         "kyb_status": "pending",
         "kyb_submitted_at": now.isoformat(),
+        "kyb_rejection_reason": None,
     }
 
     updated = await repo.update_by_profile_id(profile_id, update_data)
@@ -277,7 +336,7 @@ async def submit_kyb_verification(
         "status": updated.kyb_status,
         "submitted_at": updated.kyb_submitted_at,
         "verified_at": updated.kyb_verified_at,
-        "rejection_reason": None,
+        "rejection_reason": updated.kyb_rejection_reason,
     }
 
 
@@ -298,5 +357,44 @@ async def get_kyb_status(
         "status": business.kyb_status or "unverified",
         "submitted_at": business.kyb_submitted_at,
         "verified_at": business.kyb_verified_at,
-        "rejection_reason": None,
+        "rejection_reason": business.kyb_rejection_reason,
+    }
+
+
+async def review_kyb_verification(
+    business_id: str,
+    decision: str,
+    rejection_reason: str | None = None,
+    *,
+    repo: BusinessRepository | None = None,
+) -> dict:
+    """Admin approve/reject action — the only way kyb_status can leave 'pending'
+    today, aside from a direct DB edit."""
+    repo = repo or BusinessRepository()
+    business = await repo.get_by_id(business_id)
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business not found",
+        )
+
+    update_data: dict[str, Any] = {"kyb_status": decision}
+    if decision == "verified":
+        update_data["kyb_verified_at"] = datetime.now(UTC).isoformat()
+        update_data["kyb_rejection_reason"] = None
+    else:
+        update_data["kyb_rejection_reason"] = rejection_reason
+
+    updated = await repo.update_business(business_id, update_data)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update KYB status",
+        )
+
+    return {
+        "status": updated.kyb_status,
+        "submitted_at": updated.kyb_submitted_at,
+        "verified_at": updated.kyb_verified_at,
+        "rejection_reason": updated.kyb_rejection_reason,
     }

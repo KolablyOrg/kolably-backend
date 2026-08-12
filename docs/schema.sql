@@ -161,9 +161,22 @@ create table if not exists campaigns (
   objective                   text not null check (objective in (
                                 'brand_awareness', 'product_launch', 'foot_traffic',
                                 'user_generated_content', 'sales_conversion',
-                                'event_promotion', 'other'
+                                'event_promotion', 'engagement', 'other'
                               )),
   description                 text,
+
+  -- Brief / objective & audience (4-step wizard)
+  platforms                   jsonb not null default '[]',
+  product_promoted            text,
+  audience_age_range          text,
+  audience_gender             text,
+  audience_location           text,
+  audience_interests          text,
+  key_messaging               text,
+  dos                         text,
+  donts                       text,
+  reference_image_urls        jsonb not null default '[]',
+  content_due_at              timestamptz,
 
   -- Step 2: deliverables & offer
   deliverables                jsonb not null default '[]',   -- [{platform, content_type, quantity, description, required}]
