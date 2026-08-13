@@ -92,6 +92,9 @@ class FakeCreatorRepo:
         total=0,
         creator_id="c1",
         active_count=0,
+        due_this_week_count=0,
+        pending_invoices_amount=0.0,
+        history=None,
         portfolio_item=None,
         saved_rows=(),
         saved_total=0,
@@ -101,6 +104,9 @@ class FakeCreatorRepo:
         self._total = total
         self._creator_id = creator_id
         self._active_count = active_count
+        self._due_this_week_count = due_this_week_count
+        self._pending_invoices_amount = pending_invoices_amount
+        self._history = history
         self._portfolio_item = portfolio_item
         self._saved_rows = list(saved_rows)
         self._saved_total = saved_total
@@ -124,6 +130,15 @@ class FakeCreatorRepo:
 
     async def count_active_collaborations(self, creator_id: str):
         return self._active_count
+
+    async def count_collaborations_due_this_week(self, creator_id: str):
+        return self._due_this_week_count
+
+    async def sum_pending_invoice_amount(self, creator_id: str):
+        return self._pending_invoices_amount
+
+    async def get_historical_stats(self, creator_id: str, days_ago: int):
+        return self._history
 
     async def update_creator(self, creator_id: str, data: dict):
         self.updated_with = data
@@ -249,6 +264,33 @@ async def test_get_creator_stats_counts_active_collaborations():
     stats = await creator_service.get_creator_stats(profile_id="p1", repo=repo)
 
     assert stats.active_collaborations_count == 3
+
+
+async def test_get_creator_stats_includes_due_this_week_count():
+    repo = FakeCreatorRepo(creator_id="c1", due_this_week_count=2)
+
+    stats = await creator_service.get_creator_stats(profile_id="p1", repo=repo)
+
+    assert stats.due_this_week_count == 2
+
+
+async def test_get_creator_stats_includes_pending_invoices_amount():
+    repo = FakeCreatorRepo(creator_id="c1", pending_invoices_amount=12000.0)
+
+    stats = await creator_service.get_creator_stats(profile_id="p1", repo=repo)
+
+    assert stats.pending_invoices_amount == 12000.0
+
+
+async def test_get_creator_stats_defaults_new_fields_to_zero():
+    """A creator with no collaborations/invoices at all should get real
+    zeros for the new home-screen stats, not None or a missing field."""
+    repo = FakeCreatorRepo(creator_id="c1")
+
+    stats = await creator_service.get_creator_stats(profile_id="p1", repo=repo)
+
+    assert stats.due_this_week_count == 0
+    assert stats.pending_invoices_amount == 0.0
 
 
 # ── Serialization ─────────────────────────────────────

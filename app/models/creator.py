@@ -77,6 +77,8 @@ class Creator:
     rate_per_reel: int | None = None
     rate_per_story: int | None = None
     show_rate_card: bool = False
+    # ── Compensation preference (added via migration 20260812) ───────
+    open_to: list[str] = field(default_factory=list)
     is_discoverable: bool = True
     notification_preferences: dict[str, Any] = field(
         default_factory=lambda: {
@@ -128,6 +130,7 @@ class Creator:
             rate_per_reel=row.get("rate_per_reel"),
             rate_per_story=row.get("rate_per_story"),
             show_rate_card=bool(row.get("show_rate_card", False)),
+            open_to=row.get("open_to") or [],
             is_discoverable=bool(row.get("is_discoverable", True)),
             notification_preferences=row.get(
                 "notification_preferences",
@@ -175,6 +178,7 @@ class Creator:
             "rate_per_reel": self.rate_per_reel,
             "rate_per_story": self.rate_per_story,
             "show_rate_card": self.show_rate_card,
+            "open_to": self.open_to,
             "is_discoverable": self.is_discoverable,
             "notification_preferences": self.notification_preferences,
             "payout_method_type": self.payout_method_type,

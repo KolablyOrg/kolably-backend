@@ -298,6 +298,37 @@ class CreatorRepository(BaseRepository):
             filters={"creator_id": creator_id, "status": "active"},
         )
 
+    async def count_collaborations_due_this_week(self, creator_id: str) -> int:
+        """Active collaborations whose `deadline` falls between now and 7
+        days from now — a literal "due this week" window. Already-overdue
+        collaborations aren't counted here (that's a distinct concern from
+        "coming up"); nothing currently surfaces an overdue stat separately."""
+        import datetime
+
+        now = datetime.datetime.utcnow()
+        week_out = now + datetime.timedelta(days=7)
+
+        query = (
+            (await self._table("collaborations"))
+            .select("id", count="exact")
+            .eq("creator_id", creator_id)
+            .eq("status", "active")
+            .gte("deadline", now.isoformat())
+            .lte("deadline", week_out.isoformat())
+        )
+        result = await self._execute(query)
+        return result.count or 0
+
+    async def sum_pending_invoice_amount(self, creator_id: str) -> float:
+        """Total `total_amount` across this creator's invoices still awaiting
+        payment (status='sent' — the only non-terminal InvoiceStatus)."""
+        rows = await self.select(
+            "invoices",
+            columns="total_amount",
+            filters={"creator_id": creator_id, "status": "sent"},
+        )
+        return round(sum(float(row.get("total_amount") or 0) for row in rows), 2)
+
     async def get_historical_stats(self, creator_id: str, days_ago: int) -> dict | None:
         """
         Fetch the snapshot for exactly `days_ago`. If not found, fetch the oldest snapshot

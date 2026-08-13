@@ -50,6 +50,7 @@ def _creator_to_response(creator: Creator) -> CreatorResponse:
         rate_per_reel=creator.rate_per_reel,
         rate_per_story=creator.rate_per_story,
         show_rate_card=creator.show_rate_card,
+        open_to=creator.open_to or [],
         is_discoverable=creator.is_discoverable,
         notification_preferences=creator.notification_preferences or {
             "campaign_alerts": True,
@@ -396,6 +397,8 @@ async def get_creator_stats(
 
     creator = await repo.get_by_id(creator_id)
     active_count = await repo.count_active_collaborations(creator_id)
+    due_this_week_count = await repo.count_collaborations_due_this_week(creator_id)
+    pending_invoices_amount = await repo.sum_pending_invoice_amount(creator_id)
 
     # 1. Fetch historical stats
     history = await repo.get_historical_stats(creator_id, days_ago=days)
@@ -421,6 +424,8 @@ async def get_creator_stats(
 
     return CreatorStatsResponse(
         active_collaborations_count=active_count,
+        due_this_week_count=due_this_week_count,
+        pending_invoices_amount=pending_invoices_amount,
         engagement_growth=engagement_growth,
         followers_growth=followers_growth,
         views_growth=views_growth,
