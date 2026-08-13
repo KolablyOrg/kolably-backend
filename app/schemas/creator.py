@@ -27,6 +27,7 @@ class CreatorResponse(CreatorBase):
     user_id: str
     created_at: datetime
     tiktok_handle: str | None = None
+    youtube_handle: str | None = None
     instagram_connected: bool = False
     instagram_synced_at: datetime | None = None
     website: str | None = None

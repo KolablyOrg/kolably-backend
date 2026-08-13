@@ -682,6 +682,8 @@ async def update_user_profile(
             "username",
             "city",
             "instagram_handle",
+            "tiktok_handle",
+            "youtube_handle",
             "niche",
             "follower_count",
             "profile_photo_url",

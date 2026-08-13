@@ -41,6 +41,7 @@ def _creator_to_response(creator: Creator) -> CreatorResponse:
         instagram_handle=creator.instagram_handle,
         created_at=creator.created_at,
         tiktok_handle=creator.tiktok_handle,
+        youtube_handle=creator.youtube_handle,
         instagram_connected=creator.instagram_connected,
         instagram_synced_at=creator.instagram_synced_at,
         website=creator.website,
