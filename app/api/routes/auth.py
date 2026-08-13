@@ -22,6 +22,7 @@ from app.schemas.auth import (
     LoginRequest,
     MessageResponse,
     RefreshTokenRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     UpdateProfileRequest,
 )
@@ -187,6 +188,13 @@ async def forgot_password(data: ForgotPasswordRequest):
 async def reset_password(data: ResetPasswordRequest):
     """Reset user password with valid reset token."""
     return await auth_service.reset_password(data.access_token, data.new_password)
+
+
+@router.post("/resend-verification", response_model=MessageResponse)
+async def resend_verification(data: ResendVerificationRequest):
+    """Re-send the signup confirmation email — for the 'check your email'
+    screen a creator/business lands on right after signup."""
+    return await auth_service.resend_verification_email(data.email)
 
 
 # ── Current User ──────────────────────────────────────

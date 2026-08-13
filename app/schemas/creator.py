@@ -36,6 +36,7 @@ class CreatorResponse(CreatorBase):
     rate_per_reel: int | None = None
     rate_per_story: int | None = None
     show_rate_card: bool = False
+    open_to: list[str] = []
     is_discoverable: bool = True
     notification_preferences: dict[str, Any] = {
         "campaign_alerts": True,
@@ -105,6 +106,8 @@ class PortfolioItemResponse(BaseModel):
 
 class CreatorStatsResponse(BaseModel):
     active_collaborations_count: int
+    due_this_week_count: int = 0
+    pending_invoices_amount: float = 0.0
     engagement_growth: str | None = None
     followers_growth: str | None = None
     views_growth: str | None = None

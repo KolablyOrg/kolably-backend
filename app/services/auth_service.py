@@ -586,6 +586,27 @@ async def forgot_password(email: str, redirect_to: str | None = None) -> dict:
     return {"message": "Password reset link sent to your email"}
 
 
+async def resend_verification_email(email: str) -> dict:
+    """Re-sends the signup confirmation email — for the account created but
+    never confirmed case (see signup_creator/signup_business: a `session` of
+    `None` means Supabase is waiting on this exact email to be confirmed
+    before login will work). Same non-leaking shape as forgot_password: a
+    generic success message either way, so this can't be used to probe
+    which emails have an account.
+    """
+    supabase = await get_supabase_client()
+
+    try:
+        await supabase.auth.resend({"type": "signup", "email": email})
+    except AuthApiError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    return {"message": "Confirmation email sent"}
+
+
 async def reset_password(access_token: str, new_password: str) -> dict:
     supabase = await get_supabase_client()
 
@@ -669,6 +690,7 @@ async def update_user_profile(
             "rate_per_reel",
             "rate_per_story",
             "show_rate_card",
+            "open_to",
         }
     elif role == "business":
         repo = business_repo or BusinessRepository()

@@ -91,6 +91,13 @@ class ForgotPasswordRequest(BaseModel):
     redirect_to: str | None = None
 
 
+class ResendVerificationRequest(BaseModel):
+    """POST /auth/resend-verification — re-sends the signup confirmation
+    email for an account stuck in the unconfirmed state."""
+
+    email: EmailStr
+
+
 class ResetPasswordRequest(BaseModel):
     access_token: str
     new_password: str = Field(..., min_length=8)
@@ -143,6 +150,7 @@ class UpdateProfileRequest(BaseModel):
     rate_per_reel: int | None = Field(None, ge=0)
     rate_per_story: int | None = Field(None, ge=0)
     show_rate_card: bool | None = None
+    open_to: list[str] | None = None
 
     # Business specific
     business_name: str | None = None
