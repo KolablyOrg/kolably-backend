@@ -10,14 +10,16 @@ from pydantic import BaseModel, EmailStr, Field
 
 # ── Signup Requests ───────────────────────────────────
 class CreatorSignupRequest(BaseModel):
+    """Instagram data (handle, follower_count, ...) is deliberately absent —
+    it is never self-reportable. It's only ever populated by a real
+    Instagram Login/connect flow (see InstagramAuthRequest / connect_instagram)."""
+
     name: str
     username: str
     email: EmailStr
     password: str = Field(..., min_length=8)
     city: str
-    instagram_handle: str
     niche: str
-    follower_count: int = Field(..., ge=0)
     profile_photo_url: str | None = None
 
 
@@ -166,7 +168,13 @@ class MessageResponse(BaseModel):
 
 # ── Profile Update ────────────────────────────────────
 class UpdateProfileRequest(BaseModel):
-    """Fields that can be updated for either Creator or Business."""
+    """Fields that can be updated for either Creator or Business.
+
+    instagram_handle/follower_count are deliberately absent — Instagram data
+    is never self-reportable, it only ever comes from a real Instagram
+    Login/connect flow (see InstagramAuthRequest / connect_instagram /
+    sync_instagram, which write it directly via the repo, bypassing this
+    schema entirely)."""
 
     # Common
     city: str | None = None
@@ -174,11 +182,9 @@ class UpdateProfileRequest(BaseModel):
     # Creator specific
     name: str | None = None
     username: str | None = None
-    instagram_handle: str | None = None
     tiktok_handle: str | None = None
     youtube_handle: str | None = None
     niche: str | None = None
-    follower_count: int | None = Field(None, ge=0)
     profile_photo_url: str | None = None
     bio: str | None = None
     categories: list[str] | None = None

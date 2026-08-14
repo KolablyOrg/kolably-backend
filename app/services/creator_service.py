@@ -190,23 +190,16 @@ async def update_creator(
     repo: CreatorRepository | None = None,
 ) -> CreatorResponse:
     """Update a creator's profile (owner or superadmin). Only provided
-    (non-None) fields are written; Instagram-owned fields (website,
-    following_count, engagement stats) are not updatable here — they come
-    from connect/sync. `follower_count` is self-reportable UNTIL Instagram
-    is connected, after which it's Instagram-verified and this rejects
-    attempts to override it — otherwise a connected creator could inflate
-    it and nothing would resync it until the next explicit `sync` call."""
+    (non-None) fields are written; Instagram-owned fields (instagram_handle,
+    follower_count, website, following_count, engagement stats) are not
+    updatable here at all — `CreatorUpdateRequest` doesn't even define them
+    as fields, so they can never be self-reported, connected or not. They
+    only ever come from connect_instagram/sync_instagram."""
     repo = repo or CreatorRepository()
     creator = await repo.get_by_id(creator_id)
     if not creator:
         creator = await repo.get_by_profile_id(creator_id)
     _ensure_creator_access(creator, profile_id, role)
-
-    if data.follower_count is not None and creator.instagram_access_token:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="follower_count is managed by your connected Instagram account — use sync instead",
-        )
 
     update_data = data.model_dump(exclude_none=True)
 

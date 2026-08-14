@@ -54,13 +54,16 @@ class CreatorResponse(CreatorBase):
 
 
 class CreatorUpdateRequest(BaseModel):
+    """instagram_handle/follower_count are deliberately absent — never
+    self-reportable. They only ever come from a real Instagram Login/connect
+    flow (connect_instagram/sync_instagram write them directly via the repo,
+    bypassing this schema entirely)."""
+
     name: str | None = None
     username: str | None = None
     city: str | None = None
     niche: str | None = None
-    follower_count: int | None = None
     bio: str | None = None
-    instagram_handle: str | None = None
     tiktok_handle: str | None = None
     youtube_handle: str | None = None
     profile_photo_url: str | None = None
