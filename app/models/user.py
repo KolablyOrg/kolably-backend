@@ -23,6 +23,8 @@ class UserProfile:
     email_confirmed_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime | None = None
+    totp_secret_encrypted: str | None = None
+    totp_enabled: bool = False
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "UserProfile":
@@ -38,6 +40,8 @@ class UserProfile:
             email_confirmed_at=row.get("email_confirmed_at"),
             created_at=row["created_at"],
             updated_at=row.get("updated_at"),
+            totp_secret_encrypted=row.get("totp_secret_encrypted"),
+            totp_enabled=row.get("totp_enabled", False),
         )
 
     def to_row(self) -> dict[str, Any]:

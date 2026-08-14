@@ -12,12 +12,13 @@ from app.api.routes import (
     chat,
     collaborations,
     creators,
+    cron,
     invoices,
     meta,
     notifications,
-    users,
     upload,
-    cron,
+    users,
+    waitlist,
 )
 
 api_router = APIRouter()
@@ -35,3 +36,4 @@ api_router.include_router(notifications.router, prefix="/notifications", tags=["
 api_router.include_router(meta.router, prefix="/meta", tags=["meta"])
 api_router.include_router(upload.router)
 api_router.include_router(cron.router, prefix="/cron", tags=["cron"])
+api_router.include_router(waitlist.router, prefix="/waitlist", tags=["waitlist"])

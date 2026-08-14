@@ -12,6 +12,7 @@ from app.core.enums import (
 )
 from app.models.campaign import Campaign
 from app.repositories.application_repo import ApplicationRepository
+from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.collaboration_repo import CollaborationRepository
@@ -31,7 +32,7 @@ from app.schemas.campaign import (
 )
 from app.schemas.creator import CreatorSummary
 from app.schemas.user import UserInToken
-from app.services import notification_service
+from app.services import business_access, notification_service
 
 
 def _campaign_to_response(campaign: Campaign) -> CampaignResponse:
@@ -131,9 +132,11 @@ async def _get_business_id_for_user(
     profile_id: str,
     *,
     repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> str:
-    repo = repo or BusinessRepository()
-    business_id = await repo.get_id_by_profile_id(profile_id)
+    business_id = await business_access.get_business_id_for_profile(
+        profile_id, business_repo=repo, member_repo=member_repo
+    )
     if not business_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -147,19 +150,29 @@ async def _can_view_draft_campaign(
     user: UserInToken | None,
     *,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> bool:
-    """Draft campaigns are visible only to the owning business or superadmin."""
+    """Draft campaigns are visible only to the owning business (incl. its
+    team members) or superadmin."""
     if not user:
         return False
     if user.role == UserRole.SUPERADMIN:
         return True
-    business_repo = business_repo or BusinessRepository()
-    business_id = await business_repo.get_id_by_profile_id(user.id)
+    business_id = await business_access.get_business_id_for_profile(
+        user.id, business_repo=business_repo, member_repo=member_repo
+    )
     return business_id is not None and campaign.business_id == business_id
 
 
 async def _ensure_campaign_owner(
-    campaign_repo: CampaignRepository, campaign_id: str, business_id: str
+    campaign_repo: CampaignRepository,
+    campaign_id: str,
+    business_id: str,
+    profile_id: str,
+    *,
+    require_write: bool = True,
+    business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> Campaign:
     campaign = await campaign_repo.get_by_id(campaign_id)
     if not campaign:
@@ -172,6 +185,10 @@ async def _ensure_campaign_owner(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not own this campaign",
         )
+    if require_write:
+        await business_access.require_write_access(
+            business_id, profile_id, business_repo=business_repo, member_repo=member_repo
+        )
     return campaign
 
 
@@ -181,8 +198,12 @@ async def create_campaign_step1(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> CampaignResponse:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
+    await business_access.require_write_access(
+        business_id, profile_id, business_repo=business_repo, member_repo=member_repo
+    )
     campaign_repo = campaign_repo or CampaignRepository()
 
     insert_data = {
@@ -214,10 +235,13 @@ async def update_campaign_deliverables(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> CampaignResponse:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+    )
 
     update_data: dict[str, Any] = {
         "deliverables": [d.model_dump(mode="json") for d in data.deliverables],
@@ -246,10 +270,13 @@ async def update_campaign_targeting(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> CampaignResponse:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+    )
 
     # mode="json" so enums/datetimes are JSON-safe for PostgREST.
     update_data: dict[str, Any] = data.model_dump(mode="json", exclude_none=True)
@@ -271,10 +298,13 @@ async def update_campaign_general(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> CampaignResponse:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    campaign = await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+    )
 
     # mode="json" is required: bare datetime objects in the payload make the
     # Supabase/httpx client raise (unserializable) → opaque 500 on deadline PATCH.
@@ -298,10 +328,13 @@ async def publish_campaign(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> CampaignResponse:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    campaign = await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+    )
 
     required = {
         "title": campaign.title,
@@ -351,6 +384,7 @@ async def list_campaigns(
     campaign_repo: CampaignRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     campaign_repo = campaign_repo or CampaignRepository()
     business_repo = business_repo or BusinessRepository()
@@ -435,6 +469,7 @@ async def get_campaign(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> CampaignResponse:
     campaign_repo = campaign_repo or CampaignRepository()
     business_repo = business_repo or BusinessRepository()
@@ -447,7 +482,7 @@ async def get_campaign(
         )
 
     if campaign.status == CampaignStatus.DRAFT:
-        if not await _can_view_draft_campaign(campaign, user, business_repo=business_repo):
+        if not await _can_view_draft_campaign(campaign, user, business_repo=business_repo, member_repo=member_repo):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Campaign not found",
@@ -469,10 +504,13 @@ async def delete_campaign(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+    )
 
     await campaign_repo.delete_campaign(campaign_id)
     return {"message": "Campaign deleted"}
@@ -506,11 +544,15 @@ async def list_campaign_applications(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
     app_repo: ApplicationRepository | None = None,
 ) -> dict:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id,
+        require_write=False, business_repo=business_repo, member_repo=member_repo,
+    )
 
     app_repo = app_repo or ApplicationRepository()
     applications, total = await app_repo.list_by_campaign(
@@ -557,11 +599,14 @@ async def close_campaign(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> CampaignResponse:
     """Transition an active campaign to closed — stops new applications/invites."""
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    campaign = await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+    )
 
     if campaign.status != CampaignStatus.ACTIVE:
         raise HTTPException(
@@ -586,11 +631,14 @@ async def complete_campaign(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> CampaignResponse:
     """Mark a campaign as completed (from active or closed)."""
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    campaign = await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+    )
 
     if campaign.status not in (CampaignStatus.ACTIVE, CampaignStatus.CLOSED):
         raise HTTPException(
@@ -615,13 +663,17 @@ async def get_campaign_analytics(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
     application_repo: ApplicationRepository | None = None,
     collaboration_repo: CollaborationRepository | None = None,
     invoice_repo: InvoiceRepository | None = None,
 ) -> CampaignAnalyticsResponse:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id,
+        require_write=False, business_repo=business_repo, member_repo=member_repo,
+    )
 
     application_repo = application_repo or ApplicationRepository()
     collaboration_repo = collaboration_repo or CollaborationRepository()
@@ -677,12 +729,15 @@ async def invite_creator(
     *,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     app_repo: ApplicationRepository | None = None,
 ) -> ApplicationResponse:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
-    campaign = await _ensure_campaign_owner(campaign_repo, campaign_id, business_id)
+    campaign = await _ensure_campaign_owner(
+        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+    )
 
     if campaign.status != CampaignStatus.ACTIVE:
         raise HTTPException(

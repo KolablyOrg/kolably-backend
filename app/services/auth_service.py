@@ -9,6 +9,7 @@ from app.core.supabase import get_supabase_admin_client, get_supabase_client
 from app.models.user import UserProfile
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.creator_repo import CreatorRepository
+from app.repositories.login_event_repo import LoginEventRepository
 from app.repositories.profile_repo import ProfileRepository
 from app.schemas.auth import (
     BusinessSignupRequest,
@@ -19,11 +20,19 @@ from app.schemas.auth import (
     LoginRequest,
     UpdateProfileRequest,
 )
-from app.services import google_oauth_service, instagram_service
+from app.services import business_access, google_oauth_service, instagram_service, twofa_service
 
 # GoTrue sets last_sign_in_at == created_at (to the second) only on the very
 # first sign-in for an auth.users row; a small tolerance absorbs clock/DB skew.
 _NEW_USER_SIGN_IN_TOLERANCE_SECONDS = 5
+
+
+async def _record_login_event(profile_id: str, ip_address: str | None, user_agent: str | None) -> None:
+    """Best-effort — a logging failure must never block a real login."""
+    try:
+        await LoginEventRepository().record(profile_id, ip_address, user_agent)
+    except Exception:
+        pass
 
 
 def _profile_to_dict(profile: UserProfile) -> dict:
@@ -40,6 +49,7 @@ def _profile_to_dict(profile: UserProfile) -> dict:
         "email_confirmed_at": profile.email_confirmed_at,
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
+        "totp_enabled": profile.totp_enabled,
     }
 
 
@@ -186,6 +196,8 @@ async def login(
     data: LoginRequest,
     *,
     profile_repo: ProfileRepository | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> dict:
     supabase = await get_supabase_client()
 
@@ -231,6 +243,19 @@ async def login(
         )
 
     session = auth_response.session
+    await _record_login_event(profile.id, ip_address, user_agent)
+
+    if profile.totp_enabled:
+        # Withhold real tokens until POST /auth/2fa/verify — see
+        # twofa_service module docstring for why this is custom rather than
+        # Supabase's built-in MFA.
+        mfa_token = twofa_service.mint_mfa_token(
+            profile_id=profile.id,
+            access_token=session.access_token,
+            refresh_token=session.refresh_token,
+        )
+        return {"mfa_required": True, "mfa_token": mfa_token}
+
     return {
         "access_token": session.access_token,
         "refresh_token": session.refresh_token,
@@ -250,6 +275,8 @@ async def google_auth(
     profile_repo: ProfileRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> dict:
     """Sign in (or sign up) with a Google ID token obtained by the frontend.
 
@@ -333,6 +360,7 @@ async def google_auth(
             })
 
     session = auth_response.session
+    await _record_login_event(profile.id, ip_address, user_agent)
     return {
         "access_token": session.access_token,
         "refresh_token": session.refresh_token,
@@ -347,14 +375,23 @@ async def google_auth(
     }
 
 
-async def google_code_auth(data: GoogleCodeAuthRequest) -> dict:
+async def google_code_auth(
+    data: GoogleCodeAuthRequest,
+    *,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> dict:
     """Code-exchange counterpart to `google_auth` — for clients using the
     backend's OAuth relay (GET /auth/google/login-url + /callback) instead
     of a native Google Sign-In dev-client build. Exchanges the authorization
     `code` for an id_token server-side, then defers to the exact same
     sign-in/sign-up logic as the direct id_token flow."""
     id_token = await google_oauth_service.exchange_code_for_id_token(data.code)
-    return await google_auth(GoogleAuthRequest(id_token=id_token, role=data.role))
+    return await google_auth(
+        GoogleAuthRequest(id_token=id_token, role=data.role),
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
 
 async def _mint_session_for_email(email: str):
@@ -382,6 +419,8 @@ async def instagram_auth(
     *,
     profile_repo: ProfileRepository | None = None,
     creator_repo: CreatorRepository | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> dict:
     """Sign in (or sign up) via Instagram API with Instagram Login.
 
@@ -438,6 +477,7 @@ async def instagram_auth(
         })
 
         session = await _mint_session_for_email(profile.email)
+        await _record_login_event(profile.id, ip_address, user_agent)
         return {
             "access_token": session.access_token,
             "refresh_token": session.refresh_token,
@@ -498,6 +538,7 @@ async def instagram_auth(
         )
 
     session = await _mint_session_for_email(placeholder_email)
+    await _record_login_event(profile.id, ip_address, user_agent)
     return {
         "access_token": session.access_token,
         "refresh_token": session.refresh_token,
@@ -653,10 +694,22 @@ async def get_user_profile(
 
     if profile.role.value in ("business", "superadmin"):
         business_repo = business_repo or BusinessRepository()
-        business = await business_repo.get_by_profile_id(profile.id)
+        # Team members (business_members, not businesses.profile_id) have no
+        # row of their own in `businesses` — resolve via business_access so
+        # their dashboard (sidebar business name, KYB status, etc.) isn't
+        # blank. `team_role` lets the frontend gate owner-only UI without an
+        # extra round trip.
+        business = await business_access.get_business_for_profile(profile.id, business_repo=business_repo)
         if business:
             response["business"] = business.to_row()
-            if not response["full_name"]:
+            response["team_role"] = await business_access.get_role_for_profile(
+                business.id, profile.id, business_repo=business_repo
+            )
+            # Only fall back to the business's own name fields when this
+            # profile IS that business (the literal owner) — for a team
+            # member, `business` belongs to someone else, and owner_name
+            # would otherwise show as *their* display name.
+            if not response["full_name"] and business.profile_id == profile.id:
                 response["full_name"] = business.owner_name or business.business_name
 
     return response
@@ -742,6 +795,23 @@ async def update_user_profile(
         )
 
     return await get_user_profile(auth_id)
+
+
+async def list_login_events(profile_id: str, *, repo: LoginEventRepository | None = None) -> list[dict]:
+    repo = repo or LoginEventRepository()
+    return await repo.list_recent(profile_id)
+
+
+async def revoke_other_sessions(access_token: str) -> dict:
+    """Sign the current device out of every OTHER session — Supabase's admin
+    API has no per-device revoke, only global/local/others scopes (see
+    `logout`'s docstring for why `admin.sign_out` needs the raw token)."""
+    supabase = await get_supabase_admin_client()
+    try:
+        await supabase.auth.admin.sign_out(access_token, "others")
+    except AuthApiError:
+        pass
+    return {"message": "Signed out of all other sessions"}
 
 
 async def delete_user_account(

@@ -5,7 +5,7 @@ Business-related Pydantic schemas.
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES: dict[str, bool] = {
     "new_applications": True,
@@ -92,3 +92,23 @@ class KybStatusResponse(BaseModel):
     submitted_at: datetime | None = None
     verified_at: datetime | None = None
     rejection_reason: str | None = None
+
+
+# ── Team members ─────────────────────────────────────────────────────
+class TeamMemberResponse(BaseModel):
+    id: str
+    role: Literal["owner", "editor", "viewer"]
+    status: Literal["pending", "active"]
+    invited_email: str
+    profile_id: str | None = None
+    created_at: datetime
+    accepted_at: datetime | None = None
+
+
+class TeamInviteRequest(BaseModel):
+    email: EmailStr
+    role: Literal["editor", "viewer"]
+
+
+class TeamRoleUpdateRequest(BaseModel):
+    role: Literal["editor", "viewer"]

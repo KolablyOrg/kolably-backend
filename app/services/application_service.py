@@ -4,6 +4,7 @@ from app.core.enums import ApplicationDirection, ApplicationStatus, Collaboratio
 from app.models.application import CampaignApplication
 from app.models.campaign import Campaign
 from app.repositories.application_repo import ApplicationRepository
+from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.collaboration_repo import CollaborationRepository
@@ -19,7 +20,7 @@ from app.schemas.application import (
 from app.schemas.business import BusinessSummary
 from app.schemas.campaign import CampaignSummary
 from app.schemas.creator import CreatorSummary
-from app.services import chat_service, notification_service
+from app.services import business_access, chat_service, notification_service
 
 
 async def _get_creator_id_for_user(
@@ -41,9 +42,11 @@ async def _get_business_id_for_user(
     profile_id: str,
     *,
     repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> str:
-    repo = repo or BusinessRepository()
-    business_id = await repo.get_id_by_profile_id(profile_id)
+    business_id = await business_access.get_business_id_for_profile(
+        profile_id, business_repo=repo, member_repo=member_repo
+    )
     if not business_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -159,9 +162,10 @@ async def list_business_applications(
     page_size: int = 20,
     *,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
     app_repo: ApplicationRepository | None = None,
 ) -> dict:
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
 
     app_repo = app_repo or ApplicationRepository()
     applications, total = await app_repo.list_by_business(
@@ -214,6 +218,7 @@ async def apply_to_campaign(
     creator_repo: CreatorRepository | None = None,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
     app_repo: ApplicationRepository | None = None,
 ) -> ApplicationResponse:
     creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
@@ -310,6 +315,7 @@ async def _authorize_decision(
     campaign: Campaign,
     creator_repo: CreatorRepository,
     business_repo: BusinessRepository,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> None:
     """Only the party who did NOT initiate the application may decide on it:
     a business decides on applications creators sent in; a creator decides
@@ -320,12 +326,17 @@ async def _authorize_decision(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only the business can decide on this application",
             )
-        business_id = await business_repo.get_id_by_profile_id(profile_id)
+        business_id = await business_access.get_business_id_for_profile(
+            profile_id, business_repo=business_repo, member_repo=member_repo
+        )
         if campaign.business_id != business_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not own this campaign",
             )
+        await business_access.require_write_access(
+            business_id, profile_id, business_repo=business_repo, member_repo=member_repo
+        )
     else:
         if role != "creator":
             raise HTTPException(
@@ -391,6 +402,7 @@ async def accept_application(
     campaign_repo: CampaignRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
     collab_repo: CollaborationRepository | None = None,
 ) -> ApplicationResponse:
     app_repo = app_repo or ApplicationRepository()
@@ -404,7 +416,7 @@ async def accept_application(
     )
     await _authorize_decision(
         application, profile_id, role,
-        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo,
+        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo, member_repo=member_repo,
     )
 
     counts = await campaign_repo.fetch_application_counts([campaign.id])
@@ -462,6 +474,7 @@ async def reject_application(
     campaign_repo: CampaignRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> ApplicationResponse:
     app_repo = app_repo or ApplicationRepository()
     campaign_repo = campaign_repo or CampaignRepository()
@@ -473,7 +486,7 @@ async def reject_application(
     )
     await _authorize_decision(
         application, profile_id, role,
-        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo,
+        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo, member_repo=member_repo,
     )
 
     updated = await app_repo.update_status(application_id, ApplicationStatus.REJECTED.value)
@@ -508,6 +521,7 @@ async def request_revision(
     campaign_repo: CampaignRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> ApplicationResponse:
     """Request revision — same direction-based auth as accept/reject."""
     app_repo = app_repo or ApplicationRepository()
@@ -520,7 +534,7 @@ async def request_revision(
     )
     await _authorize_decision(
         application, profile_id, role,
-        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo,
+        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo, member_repo=member_repo,
     )
 
     updated = await app_repo.update_application(
@@ -558,6 +572,7 @@ async def resubmit_application(
     *,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
     campaign_repo: CampaignRepository | None = None,
     app_repo: ApplicationRepository | None = None,
 ) -> ApplicationResponse:

@@ -2,6 +2,7 @@
 Auth-related Pydantic schemas — request/response models for all auth endpoints.
 """
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
@@ -103,6 +104,33 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+# ── Two-Factor Authentication ─────────────────────────
+class TwoFactorSetupResponse(BaseModel):
+    secret: str
+    otpauth_url: str
+
+
+class TwoFactorCodeRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+class TwoFactorStatusResponse(BaseModel):
+    enabled: bool
+
+
+class TwoFactorVerifyLoginRequest(BaseModel):
+    mfa_token: str
+    code: str = Field(..., min_length=6, max_length=6)
+
+
+# ── Login history / sessions ──────────────────────────
+class LoginEventResponse(BaseModel):
+    id: str
+    ip_address: str | None = None
+    user_agent: str | None = None
+    created_at: datetime
+
+
 # ── Responses ─────────────────────────────────────────
 class AuthTokenResponse(BaseModel):
     """Returned on signup, login, and token refresh."""
@@ -111,6 +139,11 @@ class AuthTokenResponse(BaseModel):
     refresh_token: str | None = None
     token_type: str = "bearer"
     user: dict | None = None  # profile + role info
+    # Set instead of the above when the account has 2FA enabled — the client
+    # must call POST /auth/2fa/verify with this token + a TOTP code to get
+    # real tokens back. See app/services/twofa_service.py.
+    mfa_required: bool = False
+    mfa_token: str | None = None
 
 
 class GoogleAuthResponse(AuthTokenResponse):

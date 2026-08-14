@@ -126,6 +126,14 @@ class FakeBusinessRepo:
         return None
 
 
+class FakeBusinessMemberRepo:
+    """No team memberships — a profile with no business row (e.g. a plain
+    creator) has no fallback path either."""
+
+    async def get_active_by_profile_id(self, profile_id):
+        return None
+
+
 LINE_ITEMS = [InvoiceLineItem(title="Instagram Reel", amount=6000)]
 
 
@@ -272,6 +280,7 @@ async def test_get_invoice_accessible_to_owning_creator():
         repo=FakeInvoiceRepo(row=dict(INVOICE_ROW)),
         creator_repo=FakeCreatorRepo(),
         business_repo=FakeBusinessRepo(row=None),
+        member_repo=FakeBusinessMemberRepo(),
     )
     assert result.id == "inv1"
 
@@ -297,6 +306,7 @@ async def test_get_invoice_403_for_unrelated_party():
             repo=FakeInvoiceRepo(row=dict(INVOICE_ROW)),
             creator_repo=FakeCreatorRepo(row=None),
             business_repo=FakeBusinessRepo(row=None),
+            member_repo=FakeBusinessMemberRepo(),
         )
     assert exc_info.value.status_code == 403
 

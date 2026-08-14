@@ -6,12 +6,13 @@ from app.core.enums import CollaborationStatus, InvoiceStatus, NotificationType,
 from app.models.business import Business
 from app.models.creator import Creator
 from app.models.invoice import Invoice
+from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.invoice_repo import InvoiceRepository
 from app.schemas.invoice import InvoiceCreateRequest, InvoiceResponse
-from app.services import notification_service
+from app.services import business_access, notification_service
 
 
 def _invoice_number(invoice: Invoice) -> str:
@@ -69,6 +70,7 @@ async def create_invoice(
     collab_repo: CollaborationRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> InvoiceResponse:
     repo = repo or InvoiceRepository()
     collab_repo = collab_repo or CollaborationRepository()
@@ -144,6 +146,7 @@ async def list_invoices(
     repo: InvoiceRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     repo = repo or InvoiceRepository()
 
@@ -155,7 +158,9 @@ async def list_invoices(
         invoices, total = await repo.list_by_creator(creator.id, status=status_filter, page=page, page_size=page_size)
     elif role == UserRole.BUSINESS:
         business_repo = business_repo or BusinessRepository()
-        business_id = await business_repo.get_id_by_profile_id(profile_id)
+        business_id = await business_access.get_business_id_for_profile(
+            profile_id, business_repo=business_repo, member_repo=member_repo
+        )
         if not business_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business profile not found")
         invoices, total = await repo.list_by_business(
@@ -180,6 +185,7 @@ async def get_invoice(
     repo: InvoiceRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> InvoiceResponse:
     repo = repo or InvoiceRepository()
     invoice = await repo.get_by_id(invoice_id)
@@ -190,7 +196,9 @@ async def get_invoice(
         creator_repo = creator_repo or CreatorRepository()
         business_repo = business_repo or BusinessRepository()
         creator = await creator_repo.get_by_profile_id(profile_id)
-        business_id = await business_repo.get_id_by_profile_id(profile_id)
+        business_id = await business_access.get_business_id_for_profile(
+            profile_id, business_repo=business_repo, member_repo=member_repo
+        )
         owns_as_creator = bool(creator) and invoice.creator_id == creator.id
         owns_as_business = bool(business_id) and invoice.business_id == business_id
         if not (owns_as_creator or owns_as_business):

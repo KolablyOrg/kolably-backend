@@ -1,6 +1,7 @@
 import uuid
 from typing import Literal
-from fastapi import APIRouter, File, Form, UploadFile, Depends, HTTPException, status
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.core.dependencies import get_current_user
 from app.core.supabase import get_supabase_admin_client
@@ -48,15 +49,15 @@ async def upload_image(
         # Upload to Supabase Storage
         supabase = await get_supabase_admin_client()
         # Ensure we pass the correct kwargs; Supabase python client for storage expects bytes and content-type
-        res = await supabase.storage.from_(BUCKET_NAME).upload(
+        await supabase.storage.from_(BUCKET_NAME).upload(
             path=file_path,
             file=contents,
             file_options={"content-type": file.content_type}
         )
-        
+
         # Get public URL
         public_url = await supabase.storage.from_(BUCKET_NAME).get_public_url(file_path)
-        
+
         return {"url": public_url}
     except Exception as e:
         error_msg = str(e)

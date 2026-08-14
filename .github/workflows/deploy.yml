@@ -23,15 +23,7 @@ jobs:
           pip install pytest pytest-asyncio ruff
 
       - name: Lint (ruff)
-        # Non-blocking for now: ruff was configured in pyproject.toml but
-        # never actually run in CI before, so it's unknown whether the
-        # existing codebase is currently clean. Reporting first avoids
-        # locking out every future deploy on day one over pre-existing,
-        # unrelated style debt. Once a first cleanup pass confirms `ruff
-        # check .` passes locally, drop `continue-on-error` here to make
-        # it blocking like pytest already is below.
         run: ruff check .
-        continue-on-error: true
 
       - name: Run tests
         run: pytest tests/ -v

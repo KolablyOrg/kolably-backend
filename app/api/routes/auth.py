@@ -4,7 +4,7 @@ Authentication routes — backend facade over Supabase Auth.
 Frontend calls these endpoints only. Supabase is a hidden implementation detail.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -19,15 +19,20 @@ from app.schemas.auth import (
     GoogleCodeAuthRequest,
     InstagramAuthRequest,
     InstagramAuthResponse,
+    LoginEventResponse,
     LoginRequest,
     MessageResponse,
     RefreshTokenRequest,
     ResendVerificationRequest,
     ResetPasswordRequest,
+    TwoFactorCodeRequest,
+    TwoFactorSetupResponse,
+    TwoFactorStatusResponse,
+    TwoFactorVerifyLoginRequest,
     UpdateProfileRequest,
 )
 from app.schemas.user import UserInToken
-from app.services import auth_service, google_oauth_service, instagram_service
+from app.services import auth_service, google_oauth_service, instagram_service, twofa_service
 
 router = APIRouter()
 security = HTTPBearer()
@@ -50,19 +55,26 @@ async def signup_business(data: BusinessSignupRequest):
 # ── Login / Logout ────────────────────────────────────
 
 @router.post("/login", response_model=AuthTokenResponse)
-async def login(data: LoginRequest):
-    """Authenticate user and return tokens + profile."""
-    return await auth_service.login(data)
+async def login(data: LoginRequest, request: Request):
+    """Authenticate user and return tokens + profile — or, if 2FA is
+    enabled, an `mfa_token` that POST /auth/2fa/verify exchanges for tokens."""
+    return await auth_service.login(
+        data, ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
 
 
 @router.post("/google", response_model=GoogleAuthResponse)
-async def google_auth(data: GoogleAuthRequest):
+async def google_auth(data: GoogleAuthRequest, request: Request):
     """Sign in or sign up with a Google ID token.
 
     `role` is required on first sign-in; the frontend should route
     `is_new_user` responses to a profile-completion step (`PATCH /me`).
     """
-    return await auth_service.google_auth(data)
+    return await auth_service.google_auth(
+        data, ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
 
 
 @router.get("/google/login-url")
@@ -103,23 +115,29 @@ async def google_oauth_callback(
 
 
 @router.post("/google/code", response_model=GoogleAuthResponse)
-async def google_code_auth(data: GoogleCodeAuthRequest):
+async def google_code_auth(data: GoogleCodeAuthRequest, request: Request):
     """Sign in or sign up with a Google authorization `code` obtained via the
     relay flow above — the code-exchange counterpart to `POST /auth/google`'s
     direct id_token flow, for clients without a native Google Sign-In
     dev-client build."""
-    return await auth_service.google_code_auth(data)
+    return await auth_service.google_code_auth(
+        data, ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
 
 
 @router.post("/instagram", response_model=InstagramAuthResponse)
-async def instagram_auth(data: InstagramAuthRequest):
+async def instagram_auth(data: InstagramAuthRequest, request: Request):
     """Sign in or sign up via Instagram API with Instagram Login (creators only).
 
     `role` ("creator") is required on first sign-in. A first-time sign-in
     pre-fills the full profile + portfolio from Instagram — no separate
     "connect Instagram" onboarding step needed, unlike Google/email signups.
     """
-    return await auth_service.instagram_auth(data)
+    return await auth_service.instagram_auth(
+        data, ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
 
 
 @router.get("/instagram/login-url")
@@ -168,6 +186,22 @@ async def logout(
     return await auth_service.logout(credentials.credentials)
 
 
+@router.get("/sessions", response_model=list[LoginEventResponse])
+async def list_sessions(user: UserInToken = Depends(get_current_user)):
+    """Recent login history — display-only, see auth_service.list_login_events."""
+    return await auth_service.list_login_events(profile_id=user.id)
+
+
+@router.post("/sessions/revoke-others", response_model=MessageResponse)
+async def revoke_other_sessions(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    user: UserInToken = Depends(get_current_user),
+):
+    """Sign out of every other session (not this one) — see
+    auth_service.revoke_other_sessions for why this can't be per-device."""
+    return await auth_service.revoke_other_sessions(credentials.credentials)
+
+
 # ── Token Refresh ─────────────────────────────────────
 
 @router.post("/refresh", response_model=AuthTokenResponse)
@@ -188,6 +222,40 @@ async def forgot_password(data: ForgotPasswordRequest):
 async def reset_password(data: ResetPasswordRequest):
     """Reset user password with valid reset token."""
     return await auth_service.reset_password(data.access_token, data.new_password)
+
+
+@router.post("/2fa/setup", response_model=TwoFactorSetupResponse)
+async def setup_2fa(user: UserInToken = Depends(get_current_user)):
+    """Generate a new TOTP secret (not yet enabled) — the client renders
+    `otpauth_url` as a QR code / shows `secret` for manual entry, then
+    confirms with POST /auth/2fa/enable."""
+    return await twofa_service.setup(profile_id=user.id, email=user.email)
+
+
+@router.post("/2fa/enable", response_model=TwoFactorStatusResponse)
+async def enable_2fa(
+    data: TwoFactorCodeRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Confirm the secret from /2fa/setup with a live code and turn 2FA on."""
+    return await twofa_service.enable(profile_id=user.id, code=data.code)
+
+
+@router.post("/2fa/disable", response_model=TwoFactorStatusResponse)
+async def disable_2fa(
+    data: TwoFactorCodeRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Turn 2FA off — requires a current code, not just being logged in."""
+    return await twofa_service.disable(profile_id=user.id, code=data.code)
+
+
+@router.post("/2fa/verify", response_model=AuthTokenResponse)
+async def verify_2fa_login(data: TwoFactorVerifyLoginRequest):
+    """Second half of a 2FA-gated login — exchanges the `mfa_token` from
+    POST /auth/login (when the account has 2FA enabled) plus a live code for
+    real tokens."""
+    return await twofa_service.verify_login_mfa(data.mfa_token, data.code)
 
 
 @router.post("/resend-verification", response_model=MessageResponse)

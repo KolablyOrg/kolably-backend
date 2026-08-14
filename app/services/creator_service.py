@@ -406,11 +406,11 @@ async def get_creator_stats(
 
     # 1. Fetch historical stats
     history = await repo.get_historical_stats(creator_id, days_ago=days)
-    
+
     def calculate_growth(current: int | float | None, past: int | float | None) -> str:
         if current is None or past is None or past == 0:
             return f"0% vs last {days} days"
-        
+
         diff = current - past
         pct = (diff / past) * 100
         sign = "↗" if diff > 0 else "↘" if diff < 0 else ""

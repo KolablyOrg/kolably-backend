@@ -5,10 +5,12 @@ Supports both legacy HS256 (symmetric JWT secret) and modern
 ES256/RS256 (asymmetric signing keys, verified via the project's JWKS endpoint).
 """
 
+import os
 import time
 
 import httpx
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import APIKeyHeader
 from jose import JWTError, jwt
 
 from app.core.config import settings
@@ -80,14 +82,10 @@ def verify_supabase_token(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-from fastapi import Depends
-from fastapi.security import APIKeyHeader
-
 cron_header = APIKeyHeader(name="X-Cron-Secret", auto_error=False)
 
 def verify_cron_secret(cron_secret: str = Depends(cron_header)) -> bool:
     """Verify the cron secret header against the environment variable."""
-    import os
     expected_secret = os.getenv("CRON_SECRET")
     if not expected_secret or cron_secret != expected_secret:
         return False

@@ -128,7 +128,7 @@ class CampaignRepository(BaseRepository):
                     budget_clauses.append("and(cash_amount_min.lte.50000,cash_amount_max.gte.25000)")
                 elif r == "50k_plus":
                     budget_clauses.append("cash_amount_min.gte.50000")
-            
+
             if budget_clauses:
                 query = query.or_(",".join(budget_clauses))
 

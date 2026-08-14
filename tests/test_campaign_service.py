@@ -2,10 +2,13 @@
 Unit tests for campaign_service — repositories injected as fakes, no Supabase.
 """
 
+from datetime import UTC
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 
-from app.core.enums import CampaignStatus, CompensationType, ContentType, Platform, UserRole
+from app.core.enums import CampaignObjective, CampaignStatus, CompensationType, ContentType, Platform, UserRole
 from app.models.campaign import Campaign
 from app.models.creator import Creator
 from app.schemas.campaign import (
@@ -16,7 +19,6 @@ from app.schemas.campaign import (
 )
 from app.schemas.user import UserInToken
 from app.services import campaign_service
-from app.core.enums import CampaignObjective
 
 CAMPAIGN_ROW = {
     "id": "camp1",
@@ -104,7 +106,9 @@ class FakeCampaignRepo:
     async def delete_campaign(self, campaign_id: str):
         self.deleted = campaign_id
 
-    async def list_active(self, search=None, category=None, page=1, page_size=20, *, extra_category_values=None, **kwargs):
+    async def list_active(
+        self, search=None, category=None, page=1, page_size=20, *, extra_category_values=None, **kwargs
+    ):
         self.list_kwargs = {
             "search": search,
             "category": category,
@@ -118,15 +122,27 @@ class FakeCampaignRepo:
 
 
 class FakeBusinessRepo:
-    def __init__(self, business_id: str | None = "b1", businesses=None):
+    """`owner_profile_id` defaults to the "p-business" convention used
+    throughout this file's write-path tests — it backs the owner-equality
+    fast path in business_access.get_role_for_profile (see
+    app/services/business_access.py), which every mutating campaign_service
+    call now goes through for team-account role gating."""
+
+    def __init__(self, business_id: str | None = "b1", businesses=None, owner_profile_id: str = "p-business"):
         self._business_id = business_id
         self._businesses = businesses or []
+        self._owner_profile_id = owner_profile_id
 
     async def get_id_by_profile_id(self, profile_id: str):
         return self._business_id
 
     async def get_by_ids(self, business_ids: list[str]):
         return [b for b in self._businesses if b.id in business_ids]
+
+    async def get_by_id(self, business_id: str):
+        if business_id != self._business_id:
+            return None
+        return SimpleNamespace(id=business_id, profile_id=self._owner_profile_id)
 
 
 class FakeCreatorRepo:
@@ -436,11 +452,11 @@ async def test_update_campaign_deliverables_product_clears_cash_amounts():
 
 async def test_update_campaign_general_serializes_deadline_as_iso_string():
     """Regression: bare datetime in update payload caused opaque 500 on PATCH."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     repo = FakeCampaignRepo(row={**CAMPAIGN_ROW, "status": "draft", "deadline": None})
     business_repo = FakeBusinessRepo(business_id="b1")
-    deadline = datetime(2026, 9, 15, 23, 59, 59, tzinfo=timezone.utc)
+    deadline = datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC)
     data = CampaignUpdateRequest(deadline=deadline)
 
     await campaign_service.update_campaign_general(

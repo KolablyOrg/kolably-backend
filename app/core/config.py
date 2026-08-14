@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Configuration) or GoTrue rejects them outright.
     WEB_PASSWORD_RESET_REDIRECT_URL: str = "https://kolably.com/auth/reset-password"
     MOBILE_PASSWORD_RESET_REDIRECT_URL: str = "mobile://reset-password"
+    # Team-invite emails (POST /businesses/me/team/invite) land here to set a
+    # password — must also be added to Supabase's Redirect URLs allow list,
+    # same requirement as the password-reset URLs above.
+    WEB_TEAM_INVITE_REDIRECT_URL: str = "https://kolably.com/auth/accept-invite"
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",

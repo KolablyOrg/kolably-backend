@@ -44,7 +44,7 @@ async def test_creator_without_instagram_is_blocked(monkeypatch):
         await dependencies.require_instagram_connected(user=_user(UserRole.CREATOR))
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "instagram_not_connected"
+    assert "Instagram" in exc_info.value.detail
 
 
 async def test_creator_with_no_creator_row_is_blocked(monkeypatch):

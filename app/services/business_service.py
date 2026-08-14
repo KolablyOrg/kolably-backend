@@ -2,9 +2,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
+from supabase_auth.errors import AuthApiError
 
+from app.core.config import settings
 from app.core.enums import UserRole
+from app.core.supabase import get_supabase_admin_client
 from app.models.business import Business
+from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.creator_repo import CreatorRepository
@@ -14,8 +18,12 @@ from app.schemas.business import (
     BusinessStatsResponse,
     BusinessUpdateRequest,
     CreatorActivityBannerResponse,
+    TeamInviteRequest,
+    TeamMemberResponse,
+    TeamRoleUpdateRequest,
 )
 from app.schemas.campaign import CampaignSummary
+from app.services import business_access
 
 
 def _business_to_response(business: Business) -> BusinessResponse:
@@ -44,17 +52,32 @@ def _business_to_response(business: Business) -> BusinessResponse:
     )
 
 
-def _ensure_business_access(
-    business: Business | None, profile_id: str, role: UserRole
+async def _ensure_business_access(
+    business: Business | None,
+    profile_id: str,
+    role: UserRole,
+    *,
+    require_write: bool = True,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> Business:
     if not business:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Business not found"
         )
-    if role != UserRole.SUPERADMIN and business.profile_id != profile_id:
+    if role == UserRole.SUPERADMIN or business.profile_id == profile_id:
+        return business
+
+    member_repo = member_repo or BusinessMemberRepository()
+    member = await member_repo.get_active_membership(business.id, profile_id)
+    if not member:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not own this business profile",
+            detail="You do not have access to this business profile",
+        )
+    if require_write and member.role not in business_access.WRITE_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Viewers can't make changes — ask an owner or editor on this account.",
         )
     return business
 
@@ -85,9 +108,11 @@ async def _get_business_id_for_user(
     profile_id: str,
     *,
     repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> str:
-    repo = repo or BusinessRepository()
-    business_id = await repo.get_id_by_profile_id(profile_id)
+    business_id = await business_access.get_business_id_for_profile(
+        profile_id, business_repo=repo, member_repo=member_repo
+    )
     if not business_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -178,10 +203,11 @@ async def update_business(
     data: BusinessUpdateRequest,
     *,
     repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> BusinessResponse:
     repo = repo or BusinessRepository()
     business = await repo.get_by_id(business_id)
-    _ensure_business_access(business, profile_id, role)
+    await _ensure_business_access(business, profile_id, role, member_repo=member_repo)
 
     update_data = data.model_dump(exclude_none=True)
 
@@ -209,10 +235,11 @@ async def list_my_campaigns(
     *,
     repo: BusinessRepository | None = None,
     campaign_repo: CampaignRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     """Campaigns belonging to the caller's own business."""
     repo = repo or BusinessRepository()
-    business_id = await _get_business_id_for_user(profile_id, repo=repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=repo, member_repo=member_repo)
     return await list_business_campaigns(
         business_id=business_id,
         status=status,
@@ -227,9 +254,12 @@ async def get_business_stats(
     profile_id: str,
     *,
     repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> BusinessStatsResponse:
     repo = repo or BusinessRepository()
-    business_id = await repo.get_id_by_profile_id(profile_id)
+    business_id = await business_access.get_business_id_for_profile(
+        profile_id, business_repo=repo, member_repo=member_repo
+    )
 
     if not business_id:
         raise HTTPException(
@@ -263,6 +293,7 @@ async def get_creator_activity_banner(
     *,
     repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> CreatorActivityBannerResponse:
     """'N creators near you posted recently' home-dashboard banner.
 
@@ -274,7 +305,9 @@ async def get_creator_activity_banner(
     """
     repo = repo or BusinessRepository()
     creator_repo = creator_repo or CreatorRepository()
-    business = await repo.get_by_profile_id(profile_id)
+    business = await business_access.get_business_for_profile(
+        profile_id, business_repo=repo, member_repo=member_repo
+    )
 
     if not business or not business.city:
         return CreatorActivityBannerResponse(count=0)
@@ -398,3 +431,185 @@ async def review_kyb_verification(
         "verified_at": updated.kyb_verified_at,
         "rejection_reason": updated.kyb_rejection_reason,
     }
+
+
+# ── Team members ─────────────────────────────────────────────────────
+# Invite/remove/role-change are deliberately owner-only (not editor) — team
+# composition is a step above day-to-day operational writes.
+
+def _member_to_response(member) -> TeamMemberResponse:
+    return TeamMemberResponse(
+        id=member.id,
+        role=member.role,
+        status=member.status,
+        invited_email=member.invited_email,
+        profile_id=member.profile_id,
+        created_at=member.created_at,
+        accepted_at=member.accepted_at,
+    )
+
+
+async def _require_owner(
+    business_id: str,
+    profile_id: str,
+    *,
+    business_repo: BusinessRepository,
+) -> None:
+    business = await business_repo.get_by_id(business_id)
+    if not business or business.profile_id != profile_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the account owner can manage team members",
+        )
+
+
+async def list_team_members(
+    profile_id: str,
+    *,
+    business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
+) -> list[TeamMemberResponse]:
+    business_repo = business_repo or BusinessRepository()
+    member_repo = member_repo or BusinessMemberRepository()
+
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
+    business = await business_repo.get_by_id(business_id)
+    members = await member_repo.list_by_business(business_id)
+
+    owner_entry = TeamMemberResponse(
+        id=f"owner-{business.id}",
+        role="owner",
+        status="active",
+        invited_email=business.owner_name or "",
+        profile_id=business.profile_id,
+        created_at=business.created_at,
+        accepted_at=business.created_at,
+    )
+    return [owner_entry] + [_member_to_response(m) for m in members]
+
+
+async def invite_team_member(
+    profile_id: str,
+    data: TeamInviteRequest,
+    *,
+    business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
+) -> TeamMemberResponse:
+    business_repo = business_repo or BusinessRepository()
+    member_repo = member_repo or BusinessMemberRepository()
+
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
+    await _require_owner(business_id, profile_id, business_repo=business_repo)
+
+    existing = await member_repo.get_pending_by_email(business_id, data.email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email already has a pending invite",
+        )
+
+    member = await member_repo.insert_member({
+        "business_id": business_id,
+        "invited_email": data.email,
+        "role": data.role,
+        "invited_by": profile_id,
+        "status": "pending",
+    })
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create invite",
+        )
+
+    supabase_admin = await get_supabase_admin_client()
+    try:
+        await supabase_admin.auth.admin.invite_user_by_email(
+            data.email,
+            {"data": {"role": "business"}, "redirect_to": settings.WEB_TEAM_INVITE_REDIRECT_URL},
+        )
+    except AuthApiError:
+        # Most likely: this email already has a Kolably account. The pending
+        # `business_members` row still lets them join — see `join_business` —
+        # they just won't get Supabase's invite email prompting them to.
+        pass
+
+    return _member_to_response(member)
+
+
+async def remove_team_member(
+    profile_id: str,
+    member_id: str,
+    *,
+    business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
+) -> dict:
+    business_repo = business_repo or BusinessRepository()
+    member_repo = member_repo or BusinessMemberRepository()
+
+    member = await member_repo.get_by_id(member_id)
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
+    await _require_owner(member.business_id, profile_id, business_repo=business_repo)
+
+    await member_repo.update_member(member_id, {"status": "revoked"})
+    return {"message": "Team member removed"}
+
+
+async def update_team_member_role(
+    profile_id: str,
+    member_id: str,
+    data: TeamRoleUpdateRequest,
+    *,
+    business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
+) -> TeamMemberResponse:
+    business_repo = business_repo or BusinessRepository()
+    member_repo = member_repo or BusinessMemberRepository()
+
+    member = await member_repo.get_by_id(member_id)
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
+    await _require_owner(member.business_id, profile_id, business_repo=business_repo)
+
+    updated = await member_repo.update_member(member_id, {"role": data.role})
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update role",
+        )
+    return _member_to_response(updated)
+
+
+async def join_business(
+    profile_id: str,
+    email: str,
+    *,
+    member_repo: BusinessMemberRepository | None = None,
+) -> TeamMemberResponse:
+    """Called once by an invited teammate right after they set their password
+    via Supabase's invite link (same POST /auth/reset-password flow used for
+    password recovery) — links their brand-new profile to the pending invite
+    matching their email."""
+    member_repo = member_repo or BusinessMemberRepository()
+
+    pending = await member_repo.get_any_pending_by_email(email)
+    if not pending:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No pending invite found for this email",
+        )
+
+    updated = await member_repo.update_member(
+        pending.id,
+        {
+            "profile_id": profile_id,
+            "status": "active",
+            "accepted_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to join business",
+        )
+    return _member_to_response(updated)

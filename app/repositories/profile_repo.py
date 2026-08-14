@@ -23,6 +23,14 @@ class ProfileRepository(BaseRepository):
         rows = await self.update("profiles", {"role": role}, {"id": profile_id})
         return UserProfile.from_row(rows[0]) if rows else None
 
+    async def update(self, profile_id: str, data: dict) -> UserProfile | None:  # type: ignore[override]
+        """2-arg convenience override — shadows BaseRepository.update's
+        generic (table, data, filters) signature, matching every call site
+        in this codebase (they all pass profile_id + a partial-update dict).
+        """
+        rows = await BaseRepository.update(self, "profiles", data, {"id": profile_id})
+        return UserProfile.from_row(rows[0]) if rows else None
+
     async def anonymize(self, profile_id: str, anonymized_email: str) -> UserProfile | None:
         """Scrub the account's contact info and deactivate it — used for
         Meta's Data Deletion Callback. Keeps the row (not a hard delete of

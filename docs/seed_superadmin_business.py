@@ -358,7 +358,9 @@ def seed_priya_cross_account_data(client: httpx.Client, business_id: str, supera
         [{"creator_id": PRIYA_CREATOR_ID, "campaign_id": CAMPAIGN_ACTIVE_ID}],
         on_conflict="creator_id,campaign_id",
     )
-    upsert(client, "conversations", [{"id": PRIYA_CONVERSATION_ID, "collaboration_id": PRIYA_COLLAB_ID}], on_conflict="id")
+    upsert(
+        client, "conversations", [{"id": PRIYA_CONVERSATION_ID, "collaboration_id": PRIYA_COLLAB_ID}], on_conflict="id"
+    )
     upsert(
         client,
         "conversation_participants",
@@ -507,7 +509,10 @@ def seed_creator_journey(client: httpx.Client, creator_id: str, creator_profile_
             "campaign_id": CAMPAIGN_ACTIVE_ID,
             "creator_id": creator_id,
             "direction": "creator_applied",
-            "message": "Hi! I cover tech/gadget content and think this campaign is a great fit — 32K followers, 3.9% engagement.",
+            "message": (
+                "Hi! I cover tech/gadget content and think this campaign is a great fit — "
+                "32K followers, 3.9% engagement."
+            ),
             "instagram_handle": "@arjun.codes",
             "example_content_url": "https://instagram.com/reel/arjun-example1",
             "status": "pending",
@@ -572,7 +577,9 @@ def seed_creator_journey(client: httpx.Client, creator_id: str, creator_profile_
     )
 
     # Conversation + messages tied to the completed collaboration.
-    upsert(client, "conversations", [{"id": TEST_CONVERSATION_ID, "collaboration_id": TEST_COLLAB_ID}], on_conflict="id")
+    upsert(
+        client, "conversations", [{"id": TEST_CONVERSATION_ID, "collaboration_id": TEST_COLLAB_ID}], on_conflict="id"
+    )
     upsert(
         client,
         "conversation_participants",
@@ -680,9 +687,15 @@ def main() -> int:
         print("  done")
 
     print("\n== summary ==")
-    print(f"  ADMIN login:    {args.admin_email} / {args.admin_password}  (role: superadmin, business_id: {business_id})")
+    print(
+        f"  ADMIN login:    {args.admin_email} / {args.admin_password}  "
+        f"(role: superadmin, business_id: {business_id})"
+    )
     if not args.skip_creator:
-        print(f"  CREATOR login:  {args.creator_email} / {args.creator_password}  (role: creator, creator_id: {creator_id})")
+        print(
+            f"  CREATOR login:  {args.creator_email} / {args.creator_password}  "
+            f"(role: creator, creator_id: {creator_id})"
+        )
     print(f"\n  campaigns:      {CAMPAIGN_DRAFT_ID} (draft)")
     print(f"                  {CAMPAIGN_ACTIVE_ID} (active — has a pending creator application + a save)")
     print(f"                  {CAMPAIGN_COMPLETED_ID} (completed — has a finished collaboration + content submission)")

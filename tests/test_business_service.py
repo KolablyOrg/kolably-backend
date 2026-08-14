@@ -131,6 +131,19 @@ class FakeCampaignRepo:
         return {}
 
 
+class FakeBusinessMemberRepo:
+    """Duck-typed stand-in for BusinessMemberRepository — no team members by default."""
+
+    def __init__(self, membership=None):
+        self._membership = membership
+
+    async def get_active_membership(self, business_id, profile_id):
+        return self._membership
+
+    async def get_active_by_profile_id(self, profile_id):
+        return self._membership
+
+
 class FakeCreatorRepo:
     """Duck-typed stand-in for CreatorRepository — only list_recently_active_by_city is used here."""
 
@@ -340,6 +353,7 @@ async def test_update_business_403_for_non_owner():
             role=UserRole.BUSINESS,
             data=BusinessUpdateRequest(business_name="New name"),
             repo=repo,
+            member_repo=FakeBusinessMemberRepo(),
         )
 
     assert exc_info.value.status_code == 403

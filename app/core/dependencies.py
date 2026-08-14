@@ -128,6 +128,9 @@ async def require_instagram_connected(
         if not creator or not creator.instagram_access_token:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Connect your Instagram to do this — brands need verified reach before you can apply, save campaigns, or message them.",
+                detail=(
+                    "Connect your Instagram to do this — brands need verified reach "
+                    "before you can apply, save campaigns, or message them."
+                ),
             )
     return user

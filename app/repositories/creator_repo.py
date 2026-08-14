@@ -265,10 +265,6 @@ class CreatorRepository(BaseRepository):
         result = await self._execute(query)
         return result.data or []
 
-    async def update_portfolio_item(self, item_id: str, data: dict) -> PortfolioItem | None:
-        rows = await self.update("portfolio_items", data, {"id": item_id})
-        return PortfolioItem.from_row(rows[0]) if rows else None
-
     async def list_portfolio(
         self,
         creator_id: str,
@@ -345,13 +341,13 @@ class CreatorRepository(BaseRepository):
         """
         import datetime
         target_date = (datetime.datetime.utcnow() - datetime.timedelta(days=days_ago)).date()
-        
+
         query = (await self._table("creator_stats_history")).select("*")\
             .eq("creator_id", creator_id)\
             .gte("snapshot_date", target_date.isoformat())\
             .order("snapshot_date", desc=False)\
             .limit(1)
-            
+
         result = await self._execute(query)
         return result.data[0] if result and result.data else None
 

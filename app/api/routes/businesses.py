@@ -15,9 +15,12 @@ from app.schemas.business import (
     KybReviewRequest,
     KybStatusResponse,
     KybSubmitRequest,
+    TeamInviteRequest,
+    TeamMemberResponse,
+    TeamRoleUpdateRequest,
 )
 from app.schemas.campaign import CampaignSummary
-from app.schemas.common import PaginatedResponse
+from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.user import UserInToken
 from app.services import application_service, business_service
 
@@ -105,6 +108,72 @@ async def submit_verification(
 ):
     """Submit business type, legal entity, PAN/GST, and proof document for KYB verification."""
     return await business_service.submit_kyb_verification(profile_id=user.id, data=data)
+
+
+@router.get(
+    "/me/team",
+    response_model=list[TeamMemberResponse],
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
+async def list_team_members(
+    user: UserInToken = Depends(get_current_user),
+):
+    """List the current business's team (owner + invited members)."""
+    return await business_service.list_team_members(profile_id=user.id)
+
+
+@router.post(
+    "/me/team/invite",
+    response_model=TeamMemberResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
+async def invite_team_member(
+    data: TeamInviteRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Invite a teammate by email (owner only) — sends a Supabase invite email."""
+    return await business_service.invite_team_member(profile_id=user.id, data=data)
+
+
+@router.delete(
+    "/me/team/{member_id}",
+    response_model=MessageResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
+async def remove_team_member(
+    member_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Remove a team member (owner only)."""
+    return await business_service.remove_team_member(profile_id=user.id, member_id=member_id)
+
+
+@router.patch(
+    "/me/team/{member_id}",
+    response_model=TeamMemberResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
+async def update_team_member_role(
+    member_id: str,
+    data: TeamRoleUpdateRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Change a team member's role (owner only)."""
+    return await business_service.update_team_member_role(profile_id=user.id, member_id=member_id, data=data)
+
+
+@router.post(
+    "/join",
+    response_model=TeamMemberResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
+async def join_business(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Link the caller's (newly-invited) profile to the pending team invite
+    matching their email — called once, right after they set a password via
+    Supabase's invite-email link (see POST /auth/reset-password)."""
+    return await business_service.join_business(profile_id=user.id, email=user.email)
 
 
 @router.patch(

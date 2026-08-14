@@ -13,10 +13,10 @@ from app.core.enums import UserRole
 from app.schemas.campaign import CampaignResponse
 from app.schemas.common import PaginatedResponse
 from app.schemas.creator import (
+    BulkDeletePortfolioRequest,
     CreatorResponse,
     CreatorStatsResponse,
     CreatorUpdateRequest,
-    BulkDeletePortfolioRequest,
     IdentityStatusResponse,
     IdentitySubmitRequest,
     InstagramAuthUrlResponse,
