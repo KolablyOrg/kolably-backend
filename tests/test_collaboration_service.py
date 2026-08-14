@@ -623,6 +623,7 @@ async def test_confirm_payment_completes_collaboration(_stub_notifications):
         repo=repo,
         business_repo=FakeBusinessRepo(),
         creator_repo=FakeCreatorRepo(),
+        invoice_repo=FakeInvoiceRepo(),
     )
 
     assert result["status"] == "completed"
