@@ -96,6 +96,7 @@ When making schema changes:
 | 022 | Add durable collaboration revision history and server-side revision-round counter |
 | 023 | Synchronize direct payment confirmation with invoice status and record audit actors |
 | 024 | Add collaboration lifecycle notification types for submission, approval, and verification |
+| 025 | Create business_shortlists for persisted creator tags, notes, and comparison |
 
 ## Notes
 

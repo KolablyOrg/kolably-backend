@@ -83,6 +83,8 @@ class CreatorSummary(BaseModel):
     profile_photo_url: str | None = None
     follower_count: int | None = None
     niche: str | None = None
+    city: str | None = None
+    engagement_rate: float | None = None
 
 
 class PortfolioItemCreateRequest(BaseModel):

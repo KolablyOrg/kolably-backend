@@ -12,12 +12,15 @@ from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.creator_repo import CreatorRepository
+from app.repositories.shortlist_repo import ShortlistRepository
 from app.schemas.business import (
     DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
     BusinessResponse,
     BusinessStatsResponse,
     BusinessUpdateRequest,
     CreatorActivityBannerResponse,
+    ShortlistItemResponse,
+    ShortlistUpdateRequest,
     TeamInviteRequest,
     TeamMemberResponse,
     TeamRoleUpdateRequest,
@@ -248,6 +251,69 @@ async def list_my_campaigns(
         repo=repo,
         campaign_repo=campaign_repo,
     )
+
+
+async def list_shortlist(
+    profile_id: str,
+    *,
+    repo: BusinessRepository | None = None,
+    shortlist_repo: ShortlistRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
+) -> list[ShortlistItemResponse]:
+    business_id = await _get_business_id_for_user(profile_id, repo=repo, member_repo=member_repo)
+    shortlist_repo = shortlist_repo or ShortlistRepository()
+    rows = await shortlist_repo.list_by_business(business_id)
+    return [ShortlistItemResponse.model_validate(row) for row in rows]
+
+
+async def update_shortlist(
+    profile_id: str,
+    creator_id: str,
+    data: ShortlistUpdateRequest,
+    *,
+    repo: BusinessRepository | None = None,
+    shortlist_repo: ShortlistRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
+) -> ShortlistItemResponse:
+    business_id = await _get_business_id_for_user(profile_id, repo=repo, member_repo=member_repo)
+    creator_repo = creator_repo or CreatorRepository()
+    if not await creator_repo.get_by_id(creator_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Creator not found")
+    shortlist_repo = shortlist_repo or ShortlistRepository()
+    row = await shortlist_repo.upsert({
+        "business_id": business_id,
+        "creator_id": creator_id,
+        "tags": [tag.strip() for tag in data.tags if tag.strip()][:10],
+        "note": data.note.strip() if data.note and data.note.strip() else None,
+        "updated_at": datetime.now(UTC).isoformat(),
+    })
+    if not row:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not save shortlist")
+    creator = await creator_repo.get_by_id(creator_id)
+    row["creator"] = {
+        "id": creator.id,
+        "name": creator.name,
+        "profile_photo_url": creator.profile_photo_url,
+        "follower_count": creator.follower_count,
+        "niche": creator.niche,
+        "city": creator.city,
+        "engagement_rate": creator.engagement_rate,
+    }
+    return ShortlistItemResponse.model_validate(row)
+
+
+async def remove_from_shortlist(
+    profile_id: str,
+    creator_id: str,
+    *,
+    repo: BusinessRepository | None = None,
+    shortlist_repo: ShortlistRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
+) -> None:
+    business_id = await _get_business_id_for_user(profile_id, repo=repo, member_repo=member_repo)
+    shortlist_repo = shortlist_repo or ShortlistRepository()
+    await shortlist_repo.delete_for_creator(business_id, creator_id)
 
 
 async def get_business_stats(

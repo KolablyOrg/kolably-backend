@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr
 
+from app.schemas.creator import CreatorSummary
+
 DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES: dict[str, bool] = {
     "new_applications": True,
     "creator_messages": True,
@@ -112,3 +114,19 @@ class TeamInviteRequest(BaseModel):
 
 class TeamRoleUpdateRequest(BaseModel):
     role: Literal["editor", "viewer"]
+
+
+class ShortlistUpdateRequest(BaseModel):
+    tags: list[str] = []
+    note: str | None = None
+
+
+class ShortlistItemResponse(BaseModel):
+    id: str
+    business_id: str
+    creator_id: str
+    tags: list[str] = []
+    note: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    creator: CreatorSummary | None = None

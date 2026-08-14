@@ -15,6 +15,8 @@ from app.schemas.business import (
     KybReviewRequest,
     KybStatusResponse,
     KybSubmitRequest,
+    ShortlistItemResponse,
+    ShortlistUpdateRequest,
     TeamInviteRequest,
     TeamMemberResponse,
     TeamRoleUpdateRequest,
@@ -99,6 +101,34 @@ async def get_verification_status(
 ):
     """Get KYB verification status for the current business."""
     return await business_service.get_kyb_status(profile_id=user.id)
+
+
+@router.get("/me/shortlist", response_model=list[ShortlistItemResponse])
+async def list_shortlist(user: UserInToken = Depends(get_current_user)):
+    """List creators saved by the current business for later comparison/invites."""
+    return await business_service.list_shortlist(profile_id=user.id)
+
+
+@router.put("/me/shortlist/{creator_id}", response_model=ShortlistItemResponse)
+async def update_shortlist(
+    creator_id: str,
+    data: ShortlistUpdateRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Save or update a creator in the current business's shortlist."""
+    return await business_service.update_shortlist(
+        profile_id=user.id, creator_id=creator_id, data=data
+    )
+
+
+@router.delete("/me/shortlist/{creator_id}", response_model=MessageResponse)
+async def remove_from_shortlist(
+    creator_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Remove a creator from the current business's shortlist."""
+    await business_service.remove_from_shortlist(profile_id=user.id, creator_id=creator_id)
+    return {"message": "Creator removed from shortlist"}
 
 
 @router.post("/me/verification", response_model=KybStatusResponse)
