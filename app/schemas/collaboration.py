@@ -3,10 +3,11 @@ Collaboration-related Pydantic schemas.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.core.enums import Platform
+from app.core.enums import Platform, SubmissionType
 
 
 class ContentSubmissionResponse(BaseModel):
@@ -14,20 +15,37 @@ class ContentSubmissionResponse(BaseModel):
     collaboration_id: str
     content_url: str
     platform: Platform
+    submission_type: SubmissionType = SubmissionType.DRAFT
     views: int | None = None
     likes: int | None = None
     comments: int | None = None
     synced_at: datetime | None = None
     submitted_at: datetime
+    verification_checks: dict[str, Any] | None = None
+    verified_at: datetime | None = None
 
 
 class ContentSubmitRequest(BaseModel):
     content_url: str
     platform: Platform
+    submission_type: SubmissionType = Field(
+        SubmissionType.DRAFT,
+        description="'draft' = pre-approval cut for review; 'live' = the published post, submitted after approval for verification + payout. Defaults to draft so existing callers are unaffected.",
+    )
     views: int | None = Field(None, description="Required for non-instagram platforms; ignored for instagram")
     likes: int | None = None
     comments: int | None = None
     notes: str | None = None
+
+
+class RevisionNoteItem(BaseModel):
+    timestamp: str | None = None
+    note: str = Field(..., min_length=1)
+
+
+class RequestRevisionRequest(BaseModel):
+    notes: list[RevisionNoteItem] = Field(default_factory=list)
+    overall_note: str | None = None
 
 
 class CollaborationCampaignInfo(BaseModel):
@@ -60,6 +78,9 @@ class CollaborationResponse(BaseModel):
     affiliate_url: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
+    revision_notes: list[RevisionNoteItem] = []
+    revision_overall_note: str | None = None
+    payment_confirmed_at: datetime | None = None
     # Joined so mobile can render brand/campaign context without a second
     # round trip — previously absent entirely, which left collab-detail.tsx
     # and collab-submit.tsx rendering blank brand name/logo/payout/deadline.

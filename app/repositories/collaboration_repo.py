@@ -81,8 +81,30 @@ class CollaborationRepository(BaseRepository):
             filters={"collaboration_id": collaboration_id},
         )
 
+    async def get_latest_submission(
+        self, collaboration_id: str, submission_type: str
+    ) -> dict | None:
+        """Most recent submission of a given type ('draft' or 'live') for a
+        collaboration — a collab can accumulate multiple draft rows across
+        revision rounds, so callers that care about "the current one" (e.g.
+        live-post verification) need the latest, not just any."""
+        query = (
+            (await self._table("content_submissions"))
+            .select("*")
+            .eq("collaboration_id", collaboration_id)
+            .eq("submission_type", submission_type)
+            .order("submitted_at", desc=True)
+            .limit(1)
+        )
+        result = await self._execute(query)
+        return result.data[0] if result and result.data else None
+
     async def insert_submission(self, data: dict) -> dict | None:
         rows = await self.insert("content_submissions", data)
+        return rows[0] if rows else None
+
+    async def update_submission(self, submission_id: str, data: dict) -> dict | None:
+        rows = await self.update("content_submissions", data, {"id": submission_id})
         return rows[0] if rows else None
 
     async def insert_collaboration(self, data: dict) -> Collaboration | None:
