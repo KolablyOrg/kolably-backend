@@ -19,7 +19,11 @@ COLLAB_ROW = {
     "creator_id": "creator1",
     "business_id": "biz1",
     "status": "completed",
+    "payment_confirmed_at": None,
+    "payment_confirmed_by": None,
     "created_at": "2026-01-01T00:00:00+00:00",
+    "paid_at": None,
+    "paid_by": None,
 }
 
 CREATOR_ROW = {
@@ -246,6 +250,29 @@ async def test_create_invoice_allowed_for_superadmin_regardless_of_ownership():
         business_repo=FakeBusinessRepo(),
     )
     assert result.creator_id == "creator1"
+
+
+async def test_create_invoice_is_paid_when_payment_was_already_confirmed():
+    collab = {
+        **COLLAB_ROW,
+        "payment_confirmed_at": "2026-01-02T12:00:00+00:00",
+        "payment_confirmed_by": "biz-profile-1",
+    }
+    invoice_repo = FakeInvoiceRepo()
+
+    result = await invoice_service.create_invoice(
+        profile_id="creator-profile-1",
+        role=UserRole.CREATOR,
+        data=InvoiceCreateRequest(collaboration_id="collab1", line_items=LINE_ITEMS),
+        repo=invoice_repo,
+        collab_repo=FakeCollabRepo(row=collab),
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result.status == "paid"
+    assert result.paid_at.isoformat() == "2026-01-02T12:00:00+00:00"
+    assert result.paid_by == "biz-profile-1"
 
 
 # ── list_invoices ────────────────────────────────────────────────────────

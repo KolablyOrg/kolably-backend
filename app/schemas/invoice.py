@@ -38,3 +38,4 @@ class InvoiceResponse(BaseModel):
     billed_to: InvoicePartySnapshot
     created_at: datetime
     paid_at: datetime | None = None
+    paid_by: str | None = None

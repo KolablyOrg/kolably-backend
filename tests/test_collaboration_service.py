@@ -136,6 +136,24 @@ class FakeCreatorRepo:
         return self._creator_id
 
 
+class FakeInvoiceRepo:
+    def __init__(self, row=None):
+        self._row = row
+        self.status_updates = []
+
+    async def get_by_collaboration_id(self, collaboration_id):
+        from app.models.invoice import Invoice
+
+        return Invoice.from_row(self._row) if self._row else None
+
+    async def update_status(self, invoice_id, data):
+        from app.models.invoice import Invoice
+
+        self.status_updates.append((invoice_id, data))
+        self._row = {**self._row, **data}
+        return Invoice.from_row(self._row)
+
+
 @pytest.fixture(autouse=True)
 def _stub_notifications(monkeypatch):
     sent = []
@@ -610,6 +628,34 @@ async def test_confirm_payment_completes_collaboration(_stub_notifications):
     assert result["status"] == "completed"
     assert result["payment_confirmed_at"] is not None
     assert len(_stub_notifications) == 1
+
+
+async def test_confirm_payment_marks_existing_invoice_paid(_stub_notifications):
+    repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "live_submitted"})
+    invoice_repo = FakeInvoiceRepo(
+        {
+            "id": "inv1",
+            "collaboration_id": "collab1",
+            "creator_id": "c1",
+            "business_id": "b1",
+            "status": "sent",
+            "created_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+
+    result = await collaboration_service.confirm_payment(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        repo=repo,
+        business_repo=FakeBusinessRepo(),
+        creator_repo=FakeCreatorRepo(),
+        invoice_repo=invoice_repo,
+    )
+
+    assert result["payment_confirmed_by"] == "p-business"
+    assert invoice_repo.status_updates[0][1]["status"] == "paid"
+    assert invoice_repo.status_updates[0][1]["paid_by"] == "p-business"
+    assert invoice_repo.status_updates[0][1]["paid_at"] == result["payment_confirmed_at"]
 
 
 async def test_confirm_payment_rejects_before_live_submission():

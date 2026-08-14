@@ -98,6 +98,7 @@ class CollaborationResponse(BaseModel):
     revision_limit: int = 1
     revision_history: list[RevisionHistoryResponse] = []
     payment_confirmed_at: datetime | None = None
+    payment_confirmed_by: str | None = None
     # Joined so mobile can render brand/campaign context without a second
     # round trip — previously absent entirely, which left collab-detail.tsx
     # and collab-submit.tsx rendering blank brand name/logo/payout/deadline.

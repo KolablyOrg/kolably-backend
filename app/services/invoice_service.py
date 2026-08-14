@@ -37,6 +37,7 @@ def _invoice_to_response(invoice: Invoice) -> InvoiceResponse:
         billed_to=invoice.billed_to,
         created_at=invoice.created_at,
         paid_at=invoice.paid_at,
+        paid_by=invoice.paid_by,
     )
 
 
@@ -109,17 +110,20 @@ async def create_invoice(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
 
     total_amount = sum(item.amount for item in data.line_items)
+    payment_confirmed = collab.payment_confirmed_at is not None
 
     row = await repo.insert_invoice(
         {
             "collaboration_id": collab.id,
             "creator_id": collab.creator_id,
             "business_id": collab.business_id,
-            "status": InvoiceStatus.SENT.value,
+            "status": InvoiceStatus.PAID.value if payment_confirmed else InvoiceStatus.SENT.value,
             "line_items": [item.model_dump() for item in data.line_items],
             "total_amount": total_amount,
             "billed_by": _billed_by_snapshot(creator),
             "billed_to": _billed_to_snapshot(business),
+            "paid_at": collab.payment_confirmed_at if payment_confirmed else None,
+            "paid_by": collab.payment_confirmed_by if payment_confirmed else None,
         }
     )
     if not row:
@@ -235,7 +239,8 @@ async def mark_invoice_paid(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice is already marked paid")
 
     updated = await repo.update_status(
-        invoice_id, {"status": InvoiceStatus.PAID.value, "paid_at": datetime.now(UTC).isoformat()}
+        invoice_id,
+        {"status": InvoiceStatus.PAID.value, "paid_at": datetime.now(UTC).isoformat(), "paid_by": profile_id},
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update invoice")

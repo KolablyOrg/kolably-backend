@@ -32,6 +32,7 @@ class Collaboration:
     revision_overall_note: str | None = None
     revision_rounds: int = 0
     payment_confirmed_at: datetime | None = None
+    payment_confirmed_by: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Collaboration":
@@ -64,6 +65,7 @@ class Collaboration:
             revision_overall_note=row.get("revision_overall_note"),
             revision_rounds=int(row.get("revision_rounds") or 0),
             payment_confirmed_at=row.get("payment_confirmed_at"),
+            payment_confirmed_by=row.get("payment_confirmed_by"),
         )
 
     def to_row(self) -> dict[str, Any]:
@@ -88,4 +90,5 @@ class Collaboration:
             "revision_overall_note": self.revision_overall_note,
             "revision_rounds": self.revision_rounds,
             "payment_confirmed_at": self.payment_confirmed_at,
+            "payment_confirmed_by": self.payment_confirmed_by,
         }

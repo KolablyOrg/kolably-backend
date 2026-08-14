@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, status
 
 from app.core.crypto import decrypt_token
-from app.core.enums import CollaborationStatus, NotificationType, SubmissionType
+from app.core.enums import CollaborationStatus, InvoiceStatus, NotificationType, SubmissionType
 from app.models.business import Business
 from app.models.campaign import Campaign
 from app.models.collaboration import Collaboration
@@ -12,6 +12,7 @@ from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
+from app.repositories.invoice_repo import InvoiceRepository
 from app.schemas.collaboration import ContentSubmitRequest, RequestRevisionRequest
 from app.services import instagram_service, notification_service
 
@@ -78,6 +79,7 @@ def _collaboration_to_response(
         "revision_limit": 1,
         "revision_history": revision_history or [],
         "payment_confirmed_at": collab.payment_confirmed_at,
+        "payment_confirmed_by": collab.payment_confirmed_by,
         "campaign_title": campaign.title if campaign else None,
         "business_name": business.business_name if business else None,
         "brand_logo": business.logo_url if business else None,
@@ -634,6 +636,7 @@ async def confirm_payment(
     repo: CollaborationRepository | None = None,
     business_repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
+    invoice_repo: InvoiceRepository | None = None,
 ) -> dict:
     """Business confirms they paid the creator directly (Kolably never
     moves the money itself — see `BizMarkPaid` in the design and the
@@ -644,6 +647,7 @@ async def confirm_payment(
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
     creator_repo = creator_repo or CreatorRepository()
+    invoice_repo = invoice_repo or InvoiceRepository()
 
     collab = await _get_owned_collaboration(
         collaboration_id, profile_id, repo=repo, business_repo=business_repo
@@ -654,15 +658,27 @@ async def confirm_payment(
             detail="Confirm the live post before marking payment as sent",
         )
 
+    now = datetime.now(UTC).isoformat()
     updated = await repo.update_status(collaboration_id, {
-        "payment_confirmed_at": datetime.now(UTC).isoformat(),
+        "payment_confirmed_at": now,
+        "payment_confirmed_by": profile_id,
         "status": CollaborationStatus.COMPLETED.value,
-        "completed_at": datetime.now(UTC).isoformat(),
+        "completed_at": now,
     })
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to confirm payment",
+        )
+
+    invoice = await invoice_repo.get_by_collaboration_id(collaboration_id)
+    if invoice and not await invoice_repo.update_status(
+        invoice.id,
+        {"status": InvoiceStatus.PAID.value, "paid_at": now, "paid_by": profile_id},
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Payment confirmed but invoice synchronization failed",
         )
 
     creator = await creator_repo.get_by_id(collab.creator_id)
