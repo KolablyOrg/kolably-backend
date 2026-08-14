@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -17,6 +18,8 @@ from app.schemas.creator import (
 )
 from app.services import instagram_service
 from app.services.campaign_service import _campaign_to_response
+
+logger = logging.getLogger(__name__)
 
 _TOKEN_REFRESH_THRESHOLD = timedelta(days=10)
 _DEFAULT_TOKEN_LIFETIME_SECONDS = 5_184_000  # ~60 days
@@ -549,24 +552,21 @@ async def connect_instagram(
     return _creator_to_response(updated)
 
 
-async def sync_instagram(
-    profile_id: str,
-    *,
-    repo: CreatorRepository | None = None,
-) -> CreatorResponse:
-    """Re-fetch the stats subset only (follower/following count, photo,
-    engagement rate) — name/bio/website stay as connect-time pre-filled them,
-    matching the connect-once/sync-stats-only split in API_REQUIREMENTS.md §2.
+async def _refresh_instagram_stats(creator: Creator, *, repo: CreatorRepository) -> Creator:
+    """Core Instagram re-fetch (follower/following count, photo, engagement
+    rate) shared by the single-creator `sync_instagram` endpoint and the
+    daily batch job (`refresh_all_instagram_stats`). name/bio/website stay
+    as connect-time pre-filled them, matching the connect-once/sync-stats-
+    only split in API_REQUIREMENTS.md §2.
 
     Also proactively refreshes the long-lived token if it's close to
     expiring (<10 days left), so a creator who never revisits doesn't
     silently lose their connection at the 60-day mark.
-    """
-    repo = repo or CreatorRepository()
-    creator = await repo.get_by_profile_id(profile_id)
-    if not creator or not creator.instagram_access_token:
-        raise _not_connected()
 
+    Raises whatever the underlying Instagram API call raises — callers that
+    process many creators in a loop (the batch job) are expected to catch
+    per-creator so one bad token doesn't block everyone else.
+    """
     access_token = decrypt_token(creator.instagram_access_token)
     expires_at = _parse_expiry(creator.instagram_token_expires_at)
 
@@ -581,7 +581,7 @@ async def sync_instagram(
     media = await instagram_service.fetch_media(access_token)
     engagement_rate = await instagram_service.calculate_engagement_rate(access_token, media)
 
-    updated = await repo.update_by_profile_id(profile_id, {
+    updated = await repo.update_by_profile_id(creator.profile_id, {
         "follower_count": ig_profile.get("followers_count"),
         "following_count": ig_profile.get("follows_count"),
         "profile_photo_url": ig_profile.get("profile_picture_url"),
@@ -590,8 +590,61 @@ async def sync_instagram(
         "instagram_token_expires_at": expires_at.isoformat(),
         "instagram_synced_at": datetime.now(UTC).isoformat(),
     })
+    if updated is None:
+        raise _not_connected()
+    return updated
 
+
+async def sync_instagram(
+    profile_id: str,
+    *,
+    repo: CreatorRepository | None = None,
+) -> CreatorResponse:
+    """Re-fetch the stats subset only (follower/following count, photo,
+    engagement rate) for the current creator — see `_refresh_instagram_stats`."""
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_profile_id(profile_id)
+    if not creator or not creator.instagram_access_token:
+        raise _not_connected()
+
+    updated = await _refresh_instagram_stats(creator, repo=repo)
     return _creator_to_response(updated)
+
+
+async def refresh_all_instagram_stats(*, repo: CreatorRepository | None = None) -> dict:
+    """Daily batch job: re-fetch live Instagram stats for every connected
+    creator, then snapshot everyone's current numbers into
+    `creator_stats_history` for growth tracking.
+
+    This is what actually keeps `engagement_rate`/`follower_count` current —
+    previously the only way to refresh them was a creator manually
+    (re)connecting or the app's own best-effort background sync, and the
+    only piece of write-side "history" tracking (`creator_repo.
+    snapshot_all_creators`) was never actually invoked by anything (no
+    cron/systemd/CI schedule called `/cron/snapshot-stats`), so day-over-day
+    growth badges always read "0% vs last N days". See `app/core/scheduler.py`
+    for what actually calls this on a schedule now.
+
+    Per-creator failures (expired/revoked token, a transient Instagram API
+    error, ...) are caught and skipped so one broken connection never blocks
+    the rest of the batch.
+    """
+    repo = repo or CreatorRepository()
+    creators = await repo.list_instagram_connected()
+
+    refreshed = 0
+    failed = 0
+    for creator in creators:
+        try:
+            await _refresh_instagram_stats(creator, repo=repo)
+            refreshed += 1
+        except Exception:
+            logger.exception("Instagram stats refresh failed for creator_id=%s", creator.id)
+            failed += 1
+
+    await repo.snapshot_all_creators()
+
+    return {"total": len(creators), "refreshed": refreshed, "failed": failed}
 
 
 async def disconnect_instagram(

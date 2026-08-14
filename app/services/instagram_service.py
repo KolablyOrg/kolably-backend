@@ -192,13 +192,22 @@ async def calculate_engagement_rate(access_token: str, media: list[dict]) -> flo
     Same shape as the `avg_engagement_rate` formula already used for business
     dashboards (`business_service.py`). Returns `None` if there's no media to
     average (nothing self-reported to overwrite with).
+
+    Each media item's insights are fetched independently and a failure on
+    one item (an unsupported metric for that media type, a story that's
+    expired, a transient Graph API hiccup, ...) is skipped rather than
+    raising — otherwise a single bad post would null out the engagement
+    rate for an account whose other posts have perfectly good data.
     """
     if not media:
         return None
 
     ratios = []
     for item in media:
-        insights = await fetch_media_insights(access_token, item["id"], item["media_type"])
+        try:
+            insights = await fetch_media_insights(access_token, item["id"], item["media_type"])
+        except ExternalServiceError:
+            continue
         reach = insights.get("reach")
         if reach:
             ratios.append((insights.get("likes", 0) + insights.get("comments", 0)) / reach)
