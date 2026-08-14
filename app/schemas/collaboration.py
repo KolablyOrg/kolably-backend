@@ -5,7 +5,7 @@ Collaboration-related Pydantic schemas.
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.enums import Platform, SubmissionType
 
@@ -45,6 +45,20 @@ class ContentSubmitRequest(BaseModel):
 class RevisionNoteItem(BaseModel):
     timestamp: str | None = None
     note: str = Field(..., min_length=1)
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parts = value.split(":")
+        if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
+            raise ValueError("Timestamp must use M:SS or H:MM:SS format")
+        seconds = int(parts[-1])
+        minutes = int(parts[-2])
+        if seconds > 59 or (len(parts) == 3 and minutes > 59):
+            raise ValueError("Timestamp contains an invalid minute or second")
+        return value
 
 
 class RequestRevisionRequest(BaseModel):

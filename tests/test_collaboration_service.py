@@ -485,6 +485,11 @@ async def test_request_revision_requires_at_least_one_note():
     assert exc.value.status_code == 400
 
 
+def test_revision_note_rejects_invalid_timestamp_format():
+    with pytest.raises(ValueError):
+        RevisionNoteItem(timestamp="4:75", note="Trim the intro")
+
+
 async def test_request_revision_rejects_non_owning_business():
     with pytest.raises(HTTPException) as exc:
         await collaboration_service.request_revision(
