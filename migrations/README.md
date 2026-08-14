@@ -95,6 +95,7 @@ When making schema changes:
 | 021 | Alter businesses: add kyb_rejection_reason (admin approve/reject KYB) |
 | 022 | Add durable collaboration revision history and server-side revision-round counter |
 | 023 | Synchronize direct payment confirmation with invoice status and record audit actors |
+| 024 | Add collaboration lifecycle notification types for submission, approval, and verification |
 
 ## Notes
 

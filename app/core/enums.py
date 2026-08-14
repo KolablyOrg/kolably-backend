@@ -86,6 +86,9 @@ class NotificationType(StrEnum):
     NEW_MESSAGE = "new_message"
     COLLABORATION_COMPLETED = "collaboration_completed"
     INVOICE_RECEIVED = "invoice_received"
+    COLLABORATION_CONTENT_SUBMITTED = "collaboration_content_submitted"
+    COLLABORATION_DRAFT_APPROVED = "collaboration_draft_approved"
+    COLLABORATION_LIVE_VERIFIED = "collaboration_live_verified"
 
 
 class InvoiceStatus(StrEnum):

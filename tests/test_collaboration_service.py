@@ -298,7 +298,7 @@ async def test_list_collaborations_batches_joins_across_items():
 
 
 # ── submit_content ──────────────────────────────────────────────────
-async def test_submit_content_inserts_submission_and_transitions_status():
+async def test_submit_content_inserts_submission_and_transitions_status(_stub_notifications):
     repo = FakeCollaborationRepo()
 
     result = await collaboration_service.submit_content(
@@ -315,6 +315,8 @@ async def test_submit_content_inserts_submission_and_transitions_status():
     assert repo.inserted_submissions[0]["platform"] == "instagram"
     assert repo.updates == [("collab1", {"status": "content_submitted"})]
     assert result["status"] == "content_submitted"
+    assert _stub_notifications[0]["profile_id"] == "p-business"
+    assert _stub_notifications[0]["type"].value == "collaboration_content_submitted"
 
 
 async def test_submit_content_does_not_retransition_when_already_submitted():
@@ -375,7 +377,7 @@ async def test_submit_content_live_requires_approved_status():
     assert exc.value.status_code == 400
 
 
-async def test_submit_content_live_transitions_to_live_submitted():
+async def test_submit_content_live_transitions_to_live_submitted(_stub_notifications):
     repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "approved"})
 
     result = await collaboration_service.submit_content(
@@ -395,6 +397,8 @@ async def test_submit_content_live_transitions_to_live_submitted():
     assert repo.inserted_submissions[0]["submission_type"] == "live"
     assert repo.updates == [("collab1", {"status": "live_submitted"})]
     assert result["status"] == "live_submitted"
+    assert _stub_notifications[0]["profile_id"] == "p-business"
+    assert _stub_notifications[0]["type"].value == "collaboration_content_submitted"
 
 
 async def test_submit_content_draft_rejected_once_approved():
@@ -489,7 +493,7 @@ async def test_request_revision_rejects_non_owning_business():
 
 
 # ── approve_draft ────────────────────────────────────────────────────
-async def test_approve_draft_transitions_status():
+async def test_approve_draft_transitions_status(_stub_notifications):
     repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"})
 
     result = await collaboration_service.approve_draft(
@@ -497,10 +501,13 @@ async def test_approve_draft_transitions_status():
         profile_id="p-business",
         repo=repo,
         business_repo=FakeBusinessRepo(),
+        creator_repo=FakeCreatorRepo(),
     )
 
     assert result["status"] == "approved"
     assert repo.updates == [("collab1", {"status": "approved"})]
+    assert _stub_notifications[0]["profile_id"] == "p-creator"
+    assert _stub_notifications[0]["type"].value == "collaboration_draft_approved"
 
 
 async def test_approve_draft_rejects_when_not_submitted():
@@ -525,7 +532,7 @@ LIVE_SUBMISSION = {
 }
 
 
-async def test_verify_live_post_checks_permalink_and_tag(monkeypatch):
+async def test_verify_live_post_checks_permalink_and_tag(monkeypatch, _stub_notifications):
     async def fake_fetch_media(access_token):
         return [
             {"permalink": "https://instagram.com/reel/live1", "caption": "Loved the @acme_co brunch!"},
@@ -553,6 +560,8 @@ async def test_verify_live_post_checks_permalink_and_tag(monkeypatch):
     assert checks["post_live"] is True
     assert checks["tagged_business"] is True
     assert checks["paid_partnership_label"] is None  # never fabricated
+    assert _stub_notifications[0]["profile_id"] == "p-creator"
+    assert _stub_notifications[0]["type"].value == "collaboration_live_verified"
 
 
 async def test_verify_live_post_post_not_found(monkeypatch):

@@ -358,6 +358,7 @@ async def submit_content(
     """
     repo = repo or CollaborationRepository()
     creator_repo = creator_repo or CreatorRepository()
+    business_repo = business_repo or BusinessRepository()
 
     creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
     collab = await repo.get_by_id(collaboration_id)
@@ -424,6 +425,17 @@ async def submit_content(
         updated = await repo.update_status(collaboration_id, {"status": next_status.value})
         if updated:
             collab = updated
+
+    business = await business_repo.get_by_id(collab.business_id)
+    if business:
+        phase = "live post" if submission_type == SubmissionType.LIVE.value else "draft"
+        await notification_service.create_notification(
+            profile_id=business.profile_id,
+            type=NotificationType.COLLABORATION_CONTENT_SUBMITTED,
+            title="Content submitted",
+            body=f"A creator submitted a {phase} for your collaboration.",
+            related_id=collaboration_id,
+        )
 
     return await get_collaboration(
         collaboration_id, repo=repo, campaign_repo=campaign_repo, business_repo=business_repo
@@ -510,11 +522,13 @@ async def approve_draft(
     *,
     repo: CollaborationRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
 ) -> dict:
     """Business approves a submitted draft — creator can now post it live
     and submit the live link (`submit_content` with submission_type='live')."""
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
+    creator_repo = creator_repo or CreatorRepository()
 
     collab = await _get_owned_collaboration(
         collaboration_id, profile_id, repo=repo, business_repo=business_repo
@@ -532,6 +546,16 @@ async def approve_draft(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to approve draft",
+        )
+
+    creator = await creator_repo.get_by_id(collab.creator_id)
+    if creator:
+        await notification_service.create_notification(
+            profile_id=creator.profile_id,
+            type=NotificationType.COLLABORATION_DRAFT_APPROVED,
+            title="Draft approved",
+            body="Your draft was approved. You can now publish the live post.",
+            related_id=collaboration_id,
         )
 
     return _collaboration_to_response(updated)
@@ -619,10 +643,25 @@ async def verify_live_post(
                 # from proceeding to a manual decision.
 
     now = datetime.now(UTC).isoformat()
-    await repo.update_submission(submission["id"], {
+    updated_submission = await repo.update_submission(submission["id"], {
         "verification_checks": checks,
         "verified_at": now,
     })
+    if not updated_submission:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to record live-post verification",
+        )
+
+    creator = await creator_repo.get_by_id(collab.creator_id)
+    if creator:
+        await notification_service.create_notification(
+            profile_id=creator.profile_id,
+            type=NotificationType.COLLABORATION_LIVE_VERIFIED,
+            title="Live post verification updated",
+            body="Your live post was reviewed. Any unavailable checks still require manual confirmation.",
+            related_id=collaboration_id,
+        )
 
     return await get_collaboration(
         collaboration_id, repo=repo, campaign_repo=campaign_repo, business_repo=business_repo
