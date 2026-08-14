@@ -116,3 +116,16 @@ class CollaborationRepository(BaseRepository):
     ) -> Collaboration | None:
         rows = await self.update("collaborations", data, {"id": collaboration_id})
         return Collaboration.from_row(rows[0]) if rows else None
+
+    async def list_revision_history(self, collaboration_id: str) -> list[dict]:
+        return await self.select(
+            "collaboration_revision_history",
+            columns="*",
+            filters={"collaboration_id": collaboration_id},
+            order_by="created_at",
+            order_desc=True,
+        )
+
+    async def insert_revision_history(self, data: dict) -> dict | None:
+        rows = await self.insert("collaboration_revision_history", data)
+        return rows[0] if rows else None

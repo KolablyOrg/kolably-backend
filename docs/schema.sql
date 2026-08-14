@@ -271,8 +271,9 @@ create table if not exists collaborations (
   business_id      uuid not null references businesses(id) on delete cascade,
 
   status           text not null default 'active'
-                   check (status in ('active', 'content_submitted', 'completed', 'cancelled')),
+                   check (status in ('active', 'content_submitted', 'revision_requested', 'approved', 'live_submitted', 'completed', 'cancelled')),
   affiliate_url    text,       -- reserved: affiliate tracking is planned, not built (see collaboration_service TODO)
+  revision_rounds  integer not null default 0 check (revision_rounds >= 0),
 
   created_at       timestamptz not null default now(),
   completed_at     timestamptz
@@ -281,6 +282,19 @@ create index if not exists idx_collaborations_creator_id on collaborations(creat
 create index if not exists idx_collaborations_business_id on collaborations(business_id);
 create index if not exists idx_collaborations_campaign_id on collaborations(campaign_id);
 create index if not exists idx_collaborations_status on collaborations(status);
+
+create table if not exists collaboration_revision_history (
+  id               uuid primary key default gen_random_uuid(),
+  collaboration_id uuid not null references collaborations(id) on delete cascade,
+  revision_number  integer not null check (revision_number > 0),
+  requested_by     uuid not null references profiles(id) on delete restrict,
+  notes            jsonb not null default '[]',
+  overall_note     text,
+  created_at       timestamptz not null default now(),
+  unique (collaboration_id, revision_number)
+);
+create index if not exists idx_collab_revision_history_collaboration
+  on collaboration_revision_history(collaboration_id, created_at desc);
 
 create table if not exists content_submissions (
   id                uuid primary key default gen_random_uuid(),

@@ -48,6 +48,7 @@ class FakeCollaborationRepo:
         self.updates = []
         self.inserted_submissions = []
         self.updated_submissions = []
+        self.revision_history = []
 
     async def get_by_id(self, collaboration_id: str):
         return Collaboration.from_row(self._row) if self._row else None
@@ -82,6 +83,18 @@ class FakeCollaborationRepo:
                 sub.update(data)
                 return sub
         return None
+
+    async def list_revision_history(self, collaboration_id: str):
+        return self.revision_history
+
+    async def insert_revision_history(self, data: dict):
+        row = {
+            **data,
+            "id": f"revision-{len(self.revision_history) + 1}",
+            "created_at": "2024-01-01T00:00:00+00:00",
+        }
+        self.revision_history.append(row)
+        return row
 
 
 class FakeCampaignRepo:
@@ -399,6 +412,8 @@ async def test_request_revision_transitions_status_and_stores_notes(_stub_notifi
     assert result["status"] == "revision_requested"
     assert result["revision_notes"] == [{"timestamp": "0:04", "note": "Trim the intro"}]
     assert result["revision_overall_note"] == "Punchier caption please"
+    assert result["revision_rounds"] == 1
+    assert result["revision_history"][0]["revision_number"] == 1
     assert len(_stub_notifications) == 1
     assert _stub_notifications[0]["type"].value == "revision_requested"
 
@@ -410,6 +425,19 @@ async def test_request_revision_rejects_when_not_submitted():
             profile_id="p-business",
             data=RequestRevisionRequest(overall_note="Fix it"),
             repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "active"}),
+            business_repo=FakeBusinessRepo(),
+            creator_repo=FakeCreatorRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
+async def test_request_revision_rejects_after_free_round_is_used():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.request_revision(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            data=RequestRevisionRequest(overall_note="Fix it again"),
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted", "revision_rounds": 1}),
             business_repo=FakeBusinessRepo(),
             creator_repo=FakeCreatorRepo(),
         )

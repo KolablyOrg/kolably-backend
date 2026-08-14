@@ -30,6 +30,7 @@ class Collaboration:
     # ── Brand-side collab management (added via migration 20260814) ──────
     revision_notes: list[dict[str, Any]] = field(default_factory=list)
     revision_overall_note: str | None = None
+    revision_rounds: int = 0
     payment_confirmed_at: datetime | None = None
 
     @classmethod
@@ -61,6 +62,7 @@ class Collaboration:
             updated_at=row.get("updated_at"),
             revision_notes=revision_notes,
             revision_overall_note=row.get("revision_overall_note"),
+            revision_rounds=int(row.get("revision_rounds") or 0),
             payment_confirmed_at=row.get("payment_confirmed_at"),
         )
 
@@ -84,5 +86,6 @@ class Collaboration:
             "updated_at": self.updated_at,
             "revision_notes": self.revision_notes,
             "revision_overall_note": self.revision_overall_note,
+            "revision_rounds": self.revision_rounds,
             "payment_confirmed_at": self.payment_confirmed_at,
         }

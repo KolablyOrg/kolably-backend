@@ -53,6 +53,7 @@ def _collaboration_to_response(
     *,
     campaign: Campaign | None = None,
     business: Business | None = None,
+    revision_history: list[dict] | None = None,
 ) -> dict:
     """Convert a Collaboration model to a response dict.
 
@@ -73,6 +74,9 @@ def _collaboration_to_response(
         "completed_at": collab.completed_at,
         "revision_notes": collab.revision_notes or [],
         "revision_overall_note": collab.revision_overall_note,
+        "revision_rounds": collab.revision_rounds,
+        "revision_limit": 1,
+        "revision_history": revision_history or [],
         "payment_confirmed_at": collab.payment_confirmed_at,
         "campaign_title": campaign.title if campaign else None,
         "business_name": business.business_name if business else None,
@@ -191,6 +195,7 @@ async def get_collaboration(
         )
 
     submissions_raw = await repo.list_submissions(collaboration_id)
+    revision_history = await repo.list_revision_history(collaboration_id)
     submissions = [
         {
             "id": sub["id"],
@@ -213,6 +218,7 @@ async def get_collaboration(
     business = await business_repo.get_by_id(collab.business_id)
     resp = _collaboration_to_response(collab, campaign=campaign, business=business)
     resp["content_submissions"] = submissions
+    resp["revision_history"] = revision_history
     return resp
 
 
@@ -447,6 +453,11 @@ async def request_revision(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only a submitted draft awaiting review can have a revision requested",
         )
+    if collab.revision_rounds >= 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The free revision round has already been used for this collaboration",
+        )
     if not data.notes and not (data.overall_note and data.overall_note.strip()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -455,6 +466,7 @@ async def request_revision(
 
     updated = await repo.update_status(collaboration_id, {
         "status": CollaborationStatus.REVISION_REQUESTED.value,
+        "revision_rounds": collab.revision_rounds + 1,
         "revision_notes": [n.model_dump() for n in data.notes],
         "revision_overall_note": (data.overall_note or "").strip() or None,
     })
@@ -462,6 +474,19 @@ async def request_revision(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to request revision",
+        )
+
+    history = await repo.insert_revision_history({
+        "collaboration_id": collaboration_id,
+        "revision_number": collab.revision_rounds + 1,
+        "requested_by": profile_id,
+        "notes": [n.model_dump() for n in data.notes],
+        "overall_note": (data.overall_note or "").strip() or None,
+    })
+    if not history:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to record revision history",
         )
 
     creator = await creator_repo.get_by_id(collab.creator_id)
@@ -474,7 +499,7 @@ async def request_revision(
             related_id=collaboration_id,
         )
 
-    return _collaboration_to_response(updated)
+    return _collaboration_to_response(updated, revision_history=[history])
 
 
 async def approve_draft(

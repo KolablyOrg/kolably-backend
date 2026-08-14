@@ -52,6 +52,16 @@ class RequestRevisionRequest(BaseModel):
     overall_note: str | None = None
 
 
+class RevisionHistoryResponse(BaseModel):
+    id: str
+    collaboration_id: str
+    revision_number: int
+    requested_by: str
+    notes: list[RevisionNoteItem] = []
+    overall_note: str | None = None
+    created_at: datetime
+
+
 class CollaborationCampaignInfo(BaseModel):
     """Joined campaign fields the mobile collab screens render — deliverables,
     payout, and deadlines all live on the campaign, not the collaboration."""
@@ -84,6 +94,9 @@ class CollaborationResponse(BaseModel):
     completed_at: datetime | None = None
     revision_notes: list[RevisionNoteItem] = []
     revision_overall_note: str | None = None
+    revision_rounds: int = 0
+    revision_limit: int = 1
+    revision_history: list[RevisionHistoryResponse] = []
     payment_confirmed_at: datetime | None = None
     # Joined so mobile can render brand/campaign context without a second
     # round trip — previously absent entirely, which left collab-detail.tsx
