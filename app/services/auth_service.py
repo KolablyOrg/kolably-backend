@@ -93,9 +93,11 @@ async def signup_creator(
         "username": data.username,
         "city": data.city,
         "niche": data.niche,
-        "follower_count": data.follower_count,
-        "instagram_handle": data.instagram_handle,
         "profile_photo_url": data.profile_photo_url,
+        # follower_count/instagram_handle intentionally omitted — they stay
+        # at their DB defaults (0 / null) until the creator actually
+        # connects Instagram via connect_instagram, which is the only
+        # legitimate writer of those columns.
     })
 
     session = auth_response.session
@@ -677,15 +679,15 @@ async def update_user_profile(
 
     if role == "creator":
         repo = creator_repo or CreatorRepository()
+        # instagram_handle/follower_count deliberately excluded — Instagram
+        # data is never self-reportable, see UpdateProfileRequest docstring.
         valid_fields = {
             "name",
             "username",
             "city",
-            "instagram_handle",
             "tiktok_handle",
             "youtube_handle",
             "niche",
-            "follower_count",
             "profile_photo_url",
             "bio",
             "categories",

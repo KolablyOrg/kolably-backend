@@ -245,8 +245,10 @@ POST   /creators/me/instagram/import-portfolio → list[PortfolioItemResponse]
   `graph.instagram.com/me?fields=followers_count,follows_count,profile_picture_url,name,biography,website`
   plus media insights for `engagement_rate`, and does a **one-time full
   pre-fill**: `follower_count`/`following_count`/`profile_photo_url`/
-  `engagement_rate`/`name`/`bio`/`website`, replacing whatever was
-  self-reported/uploaded at signup.
+  `engagement_rate`/`name`/`bio`/`website`. As of the removal of
+  self-reportable Instagram fields, `follower_count`/`instagram_handle` sit
+  at their DB defaults (`0`/`null`) until this runs — connect is the first
+  and only time they're ever populated pre-sync.
 - `sync` only re-fetches the pure-stats subset —
   `follower_count`/`following_count`/`profile_photo_url`/`engagement_rate` —
   on demand (call on profile view if `instagram_synced_at` is stale, e.g.
