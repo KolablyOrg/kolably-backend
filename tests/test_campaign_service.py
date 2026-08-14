@@ -386,6 +386,52 @@ async def test_publish_campaign_rejects_non_owner():
     assert exc.value.status_code == 403
 
 
+@pytest.mark.parametrize("source_status", [CampaignStatus.ACTIVE, CampaignStatus.CLOSED, CampaignStatus.COMPLETED])
+async def test_publish_campaign_rejects_non_draft(source_status):
+    repo = FakeCampaignRepo(row={**CAMPAIGN_ROW, "status": source_status.value})
+    business_repo = FakeBusinessRepo(business_id="b1")
+
+    with pytest.raises(HTTPException) as exc:
+        await campaign_service.publish_campaign(
+            "camp1", "p-business", campaign_repo=repo, business_repo=business_repo
+        )
+
+    assert exc.value.status_code == 409
+    assert repo.updated is None
+
+
+@pytest.mark.parametrize(
+    ("compensation_type", "cash_min", "cash_max", "product_description"),
+    [
+        ("cash", None, None, None),
+        ("cash", 300, 100, None),
+        ("product", None, None, None),
+        ("cash_and_product", 100, 200, None),
+    ],
+)
+async def test_publish_campaign_rejects_invalid_compensation(
+    compensation_type, cash_min, cash_max, product_description
+):
+    repo = FakeCampaignRepo(
+        row={
+            **CAMPAIGN_ROW,
+            "status": "draft",
+            "compensation_type": compensation_type,
+            "cash_amount_min": cash_min,
+            "cash_amount_max": cash_max,
+            "free_product_description": product_description,
+        }
+    )
+    business_repo = FakeBusinessRepo(business_id="b1")
+
+    with pytest.raises(HTTPException) as exc:
+        await campaign_service.publish_campaign(
+            "camp1", "p-business", campaign_repo=repo, business_repo=business_repo
+        )
+
+    assert exc.value.status_code == 422
+
+
 # ── deliverables enum serialization ───────────────────
 
 
@@ -465,6 +511,18 @@ async def test_update_campaign_general_serializes_deadline_as_iso_string():
 
     assert isinstance(repo.updated["deadline"], str)
     assert "2026-09-15" in repo.updated["deadline"]
+
+
+async def test_update_campaign_general_preserves_explicit_null_to_clear_fields():
+    repo = FakeCampaignRepo(row={**CAMPAIGN_ROW, "status": "draft", "cover_image_url": "https://old.example/cover.jpg"})
+    business_repo = FakeBusinessRepo(business_id="b1")
+
+    await campaign_service.update_campaign_general(
+        "camp1", "p-business", CampaignUpdateRequest(cover_image_url=None),
+        campaign_repo=repo, business_repo=business_repo,
+    )
+
+    assert repo.updated == {"cover_image_url": None}
 
 
 # ── recommended niche mapping ─────────────────────────

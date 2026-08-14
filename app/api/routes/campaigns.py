@@ -157,7 +157,7 @@ async def list_campaigns(
     budget_max: float | None = Query(None, ge=0),
     deliverables: list[str] | None = Query(None),
     only_qualified: bool | None = Query(None),
-    user: UserInToken = Depends(get_current_user),
+    user: UserInToken | None = Depends(get_optional_user),
 ):
     """List active campaigns — the main feed for creators."""
     return await campaign_service.list_campaigns(

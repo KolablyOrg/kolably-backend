@@ -279,7 +279,7 @@ async def update_campaign_targeting(
     )
 
     # mode="json" so enums/datetimes are JSON-safe for PostgREST.
-    update_data: dict[str, Any] = data.model_dump(mode="json", exclude_none=True)
+    update_data: dict[str, Any] = data.model_dump(mode="json", exclude_unset=True)
 
     campaign = await campaign_repo.update_campaign(campaign_id, update_data)
     if not campaign:
@@ -308,7 +308,7 @@ async def update_campaign_general(
 
     # mode="json" is required: bare datetime objects in the payload make the
     # Supabase/httpx client raise (unserializable) → opaque 500 on deadline PATCH.
-    update_data: dict[str, Any] = data.model_dump(mode="json", exclude_none=True)
+    update_data: dict[str, Any] = data.model_dump(mode="json", exclude_unset=True)
     if not update_data:
         return _campaign_to_response(campaign)
 
@@ -336,6 +336,12 @@ async def publish_campaign(
         campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
     )
 
+    if campaign.status != CampaignStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only draft campaigns can be published",
+        )
+
     required = {
         "title": campaign.title,
         "objective": campaign.objective,
@@ -352,6 +358,24 @@ async def publish_campaign(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"missing_fields": missing, "message": "Campaign is incomplete"},
+        )
+
+    if campaign.compensation_type.value in {"cash", "cash_and_product"}:
+        if campaign.cash_amount_min is None or campaign.cash_amount_max is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"message": "Cash compensation requires minimum and maximum amounts"},
+            )
+        if campaign.cash_amount_min < 0 or campaign.cash_amount_max < campaign.cash_amount_min:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"message": "Cash compensation amounts are invalid"},
+            )
+
+    if campaign.compensation_type.value in {"product", "cash_and_product"} and not campaign.free_product_description:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": "Product compensation requires a product description"},
         )
 
     updated = await campaign_repo.update_campaign(
