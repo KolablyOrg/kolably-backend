@@ -30,7 +30,11 @@ class ContentSubmitRequest(BaseModel):
     platform: Platform
     submission_type: SubmissionType = Field(
         SubmissionType.DRAFT,
-        description="'draft' = pre-approval cut for review; 'live' = the published post, submitted after approval for verification + payout. Defaults to draft so existing callers are unaffected.",
+        description=(
+            "'draft' = pre-approval cut for review; 'live' = the published post, "
+            "submitted after approval for verification + payout. Defaults to draft "
+            "so existing callers are unaffected."
+        ),
     )
     views: int | None = Field(None, description="Required for non-instagram platforms; ignored for instagram")
     likes: int | None = None
