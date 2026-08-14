@@ -142,6 +142,8 @@ class UpdateProfileRequest(BaseModel):
     name: str | None = None
     username: str | None = None
     instagram_handle: str | None = None
+    tiktok_handle: str | None = None
+    youtube_handle: str | None = None
     niche: str | None = None
     follower_count: int | None = Field(None, ge=0)
     profile_photo_url: str | None = None

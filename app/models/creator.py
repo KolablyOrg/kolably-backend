@@ -64,6 +64,7 @@ class Creator:
     profile_photo_url: str | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     tiktok_handle: str | None = None
+    youtube_handle: str | None = None
     instagram_user_id: str | None = None
     instagram_access_token: str | None = None  # Encrypted at rest
     instagram_token_expires_at: datetime | None = None
@@ -119,6 +120,7 @@ class Creator:
             profile_photo_url=row.get("profile_photo_url"),
             created_at=row["created_at"],
             tiktok_handle=row.get("tiktok_handle"),
+            youtube_handle=row.get("youtube_handle"),
             instagram_user_id=row.get("instagram_user_id"),
             instagram_access_token=row.get("instagram_access_token"),
             instagram_token_expires_at=row.get("instagram_token_expires_at"),
@@ -168,6 +170,7 @@ class Creator:
             "profile_photo_url": self.profile_photo_url,
             "created_at": self.created_at,
             "tiktok_handle": self.tiktok_handle,
+            "youtube_handle": self.youtube_handle,
             "instagram_user_id": self.instagram_user_id,
             "instagram_access_token": self.instagram_access_token,
             "instagram_token_expires_at": self.instagram_token_expires_at,

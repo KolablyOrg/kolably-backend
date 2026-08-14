@@ -299,22 +299,31 @@ class CreatorRepository(BaseRepository):
         )
 
     async def count_collaborations_due_this_week(self, creator_id: str) -> int:
-        """Active collaborations whose `deadline` falls between now and 7
-        days from now — a literal "due this week" window. Already-overdue
-        collaborations aren't counted here (that's a distinct concern from
-        "coming up"); nothing currently surfaces an overdue stat separately."""
+        """Active collaborations whose *campaign's* content_due_at falls
+        between now and 7 days from now. Collaborations don't carry their
+        own deadline column (the model's `deadline` field has no backing
+        DB column — confirmed against the live schema) — the real due date
+        lives on campaigns.content_due_at."""
         import datetime
 
         now = datetime.datetime.utcnow()
         week_out = now + datetime.timedelta(days=7)
 
+        collab_rows = await self.select(
+            "collaborations",
+            columns="campaign_id",
+            filters={"creator_id": creator_id, "status": "active"},
+        )
+        campaign_ids = list({row["campaign_id"] for row in collab_rows if row.get("campaign_id")})
+        if not campaign_ids:
+            return 0
+
         query = (
-            (await self._table("collaborations"))
+            (await self._table("campaigns"))
             .select("id", count="exact")
-            .eq("creator_id", creator_id)
-            .eq("status", "active")
-            .gte("deadline", now.isoformat())
-            .lte("deadline", week_out.isoformat())
+            .in_("id", campaign_ids)
+            .gte("content_due_at", now.isoformat())
+            .lte("content_due_at", week_out.isoformat())
         )
         result = await self._execute(query)
         return result.count or 0
