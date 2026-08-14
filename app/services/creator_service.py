@@ -783,7 +783,13 @@ async def save_payout_details(
 
     update_data: dict[str, Any] = {
         "payout_method_type": data.method,
-        "payout_verified": True,  # Verified after test credit
+        # payout_verified intentionally left untouched here. Bank/UPI
+        # details are self-reported with no penny-drop/IFSC lookup behind
+        # them, so there is nothing to actually verify yet — it stays at
+        # its schema default (false) until real verification exists. Do
+        # not hardcode this to True; the UI reads it to show a "Verified"
+        # badge, and that would be a false claim to both creators and
+        # the brands who see it.
         "has_gst": data.has_gst,
     }
 
