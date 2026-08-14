@@ -64,8 +64,16 @@ class ApplicationDirection(StrEnum):
 class CollaborationStatus(StrEnum):
     ACTIVE = "active"
     CONTENT_SUBMITTED = "content_submitted"
+    REVISION_REQUESTED = "revision_requested"
+    APPROVED = "approved"
+    LIVE_SUBMITTED = "live_submitted"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+class SubmissionType(StrEnum):
+    DRAFT = "draft"
+    LIVE = "live"
 
 
 class NotificationType(StrEnum):

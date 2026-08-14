@@ -5,12 +5,13 @@ Unit tests for collaboration_service — repositories injected as fakes, no Supa
 import pytest
 from fastapi import HTTPException
 
-from app.core.enums import CampaignObjective, Platform
+from app.core.crypto import encrypt_token
+from app.core.enums import CampaignObjective, Platform, SubmissionType
 from app.models.business import Business
 from app.models.campaign import Campaign
 from app.models.collaboration import Collaboration
 from app.models.creator import Creator
-from app.schemas.collaboration import ContentSubmitRequest
+from app.schemas.collaboration import ContentSubmitRequest, RequestRevisionRequest, RevisionNoteItem
 from app.services import collaboration_service
 
 COLLAB_ROW = {
@@ -46,6 +47,7 @@ class FakeCollaborationRepo:
         self._submissions = list(submissions or [])
         self.updates = []
         self.inserted_submissions = []
+        self.updated_submissions = []
 
     async def get_by_id(self, collaboration_id: str):
         return Collaboration.from_row(self._row) if self._row else None
@@ -59,10 +61,27 @@ class FakeCollaborationRepo:
     async def list_submissions(self, collaboration_id: str):
         return self._submissions
 
+    async def get_latest_submission(self, collaboration_id: str, submission_type: str):
+        matches = [s for s in self._submissions if s.get("submission_type") == submission_type]
+        return matches[-1] if matches else None
+
     async def insert_submission(self, data: dict):
         self.inserted_submissions.append(data)
-        row = {**data, "id": "sub-new", "submitted_at": "2024-01-01T00:00:00+00:00"}
+        row = {
+            **data,
+            "id": f"sub-{len(self.inserted_submissions)}",
+            "submitted_at": "2024-01-01T00:00:00+00:00",
+        }
+        self._submissions.append(row)
         return row
+
+    async def update_submission(self, submission_id: str, data: dict):
+        self.updated_submissions.append((submission_id, data))
+        for sub in self._submissions:
+            if sub["id"] == submission_id:
+                sub.update(data)
+                return sub
+        return None
 
 
 class FakeCampaignRepo:
@@ -304,5 +323,274 @@ async def test_submit_content_rejects_completed_collaboration():
             data=ContentSubmitRequest(content_url="https://instagram.com/p/abc", platform=Platform.INSTAGRAM),
             repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "completed"}),
             creator_repo=FakeCreatorRepo(creator_id="c1"),
+        )
+    assert exc.value.status_code == 400
+
+
+# ── submit_content — live submission phase (brand collab-management) ───
+async def test_submit_content_live_requires_approved_status():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.submit_content(
+            collaboration_id="collab1",
+            profile_id="p-creator",
+            data=ContentSubmitRequest(
+                content_url="https://instagram.com/reel/live1",
+                platform=Platform.INSTAGRAM,
+                submission_type=SubmissionType.LIVE,
+            ),
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"}),
+            creator_repo=FakeCreatorRepo(creator_id="c1"),
+        )
+    assert exc.value.status_code == 400
+
+
+async def test_submit_content_live_transitions_to_live_submitted():
+    repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "approved"})
+
+    result = await collaboration_service.submit_content(
+        collaboration_id="collab1",
+        profile_id="p-creator",
+        data=ContentSubmitRequest(
+            content_url="https://instagram.com/reel/live1",
+            platform=Platform.INSTAGRAM,
+            submission_type=SubmissionType.LIVE,
+        ),
+        repo=repo,
+        creator_repo=FakeCreatorRepo(creator_id="c1"),
+        campaign_repo=FakeCampaignRepo(campaigns=[_campaign()]),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert repo.inserted_submissions[0]["submission_type"] == "live"
+    assert repo.updates == [("collab1", {"status": "live_submitted"})]
+    assert result["status"] == "live_submitted"
+
+
+async def test_submit_content_draft_rejected_once_approved():
+    """A draft resubmission doesn't make sense once the business has already
+    approved and the creator has moved on to posting live."""
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.submit_content(
+            collaboration_id="collab1",
+            profile_id="p-creator",
+            data=ContentSubmitRequest(content_url="https://instagram.com/p/abc", platform=Platform.INSTAGRAM),
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "approved"}),
+            creator_repo=FakeCreatorRepo(creator_id="c1"),
+        )
+    assert exc.value.status_code == 400
+
+
+# ── request_revision ─────────────────────────────────────────────────
+async def test_request_revision_transitions_status_and_stores_notes(_stub_notifications):
+    repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"})
+
+    result = await collaboration_service.request_revision(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        data=RequestRevisionRequest(
+            notes=[RevisionNoteItem(timestamp="0:04", note="Trim the intro")],
+            overall_note="Punchier caption please",
+        ),
+        repo=repo,
+        business_repo=FakeBusinessRepo(),
+        creator_repo=FakeCreatorRepo(),
+    )
+
+    assert result["status"] == "revision_requested"
+    assert result["revision_notes"] == [{"timestamp": "0:04", "note": "Trim the intro"}]
+    assert result["revision_overall_note"] == "Punchier caption please"
+    assert len(_stub_notifications) == 1
+    assert _stub_notifications[0]["type"].value == "revision_requested"
+
+
+async def test_request_revision_rejects_when_not_submitted():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.request_revision(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            data=RequestRevisionRequest(overall_note="Fix it"),
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "active"}),
+            business_repo=FakeBusinessRepo(),
+            creator_repo=FakeCreatorRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
+async def test_request_revision_requires_at_least_one_note():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.request_revision(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            data=RequestRevisionRequest(),
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"}),
+            business_repo=FakeBusinessRepo(),
+            creator_repo=FakeCreatorRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
+async def test_request_revision_rejects_non_owning_business():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.request_revision(
+            collaboration_id="collab1",
+            profile_id="p-other-business",
+            data=RequestRevisionRequest(overall_note="Fix it"),
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"}),
+            business_repo=FakeBusinessRepo(business_id="b-other"),
+            creator_repo=FakeCreatorRepo(),
+        )
+    assert exc.value.status_code == 403
+
+
+# ── approve_draft ────────────────────────────────────────────────────
+async def test_approve_draft_transitions_status():
+    repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"})
+
+    result = await collaboration_service.approve_draft(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        repo=repo,
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result["status"] == "approved"
+    assert repo.updates == [("collab1", {"status": "approved"})]
+
+
+async def test_approve_draft_rejects_when_not_submitted():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.approve_draft(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "active"}),
+            business_repo=FakeBusinessRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
+# ── verify_live_post ─────────────────────────────────────────────────
+LIVE_SUBMISSION = {
+    "id": "sub-live",
+    "collaboration_id": "collab1",
+    "content_url": "https://instagram.com/reel/live1",
+    "platform": "instagram",
+    "submission_type": "live",
+    "submitted_at": "2024-01-01T00:00:00+00:00",
+}
+
+
+async def test_verify_live_post_checks_permalink_and_tag(monkeypatch):
+    async def fake_fetch_media(access_token):
+        return [
+            {"permalink": "https://instagram.com/reel/live1", "caption": "Loved the @acme_co brunch!"},
+        ]
+
+    monkeypatch.setattr(collaboration_service.instagram_service, "fetch_media", fake_fetch_media)
+
+    connected_creator = {**CREATOR_ROW, "instagram_access_token": encrypt_token("tok")}
+    business_with_handle = {**BUSINESS_ROW, "instagram_handle": "@acme_co"}
+    repo = FakeCollaborationRepo(
+        row={**COLLAB_ROW, "status": "live_submitted"},
+        submissions=[LIVE_SUBMISSION],
+    )
+
+    result = await collaboration_service.verify_live_post(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        repo=repo,
+        business_repo=FakeBusinessRepo(row=business_with_handle),
+        creator_repo=FakeCreatorRepo(row=connected_creator),
+        campaign_repo=FakeCampaignRepo(campaigns=[]),
+    )
+
+    checks = result["content_submissions"][0]["verification_checks"]
+    assert checks["post_live"] is True
+    assert checks["tagged_business"] is True
+    assert checks["paid_partnership_label"] is None  # never fabricated
+
+
+async def test_verify_live_post_post_not_found(monkeypatch):
+    async def fake_fetch_media(access_token):
+        return [{"permalink": "https://instagram.com/reel/some-other-post", "caption": "unrelated"}]
+
+    monkeypatch.setattr(collaboration_service.instagram_service, "fetch_media", fake_fetch_media)
+
+    connected_creator = {**CREATOR_ROW, "instagram_access_token": encrypt_token("tok")}
+    repo = FakeCollaborationRepo(
+        row={**COLLAB_ROW, "status": "live_submitted"},
+        submissions=[LIVE_SUBMISSION],
+    )
+
+    result = await collaboration_service.verify_live_post(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        repo=repo,
+        business_repo=FakeBusinessRepo(),
+        creator_repo=FakeCreatorRepo(row=connected_creator),
+        campaign_repo=FakeCampaignRepo(campaigns=[]),
+    )
+
+    checks = result["content_submissions"][0]["verification_checks"]
+    assert checks["post_live"] is False
+
+
+async def test_verify_live_post_degrades_gracefully_without_instagram_token():
+    """No token to verify with (e.g. creator disconnected Instagram since
+    posting) shouldn't error out — just nothing gets auto-checked."""
+    repo = FakeCollaborationRepo(
+        row={**COLLAB_ROW, "status": "live_submitted"},
+        submissions=[LIVE_SUBMISSION],
+    )
+
+    result = await collaboration_service.verify_live_post(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        repo=repo,
+        business_repo=FakeBusinessRepo(),
+        creator_repo=FakeCreatorRepo(row={**CREATOR_ROW, "instagram_access_token": None}),
+        campaign_repo=FakeCampaignRepo(campaigns=[]),
+    )
+
+    checks = result["content_submissions"][0]["verification_checks"]
+    assert checks == {"post_live": None, "tagged_business": None, "paid_partnership_label": None}
+
+
+async def test_verify_live_post_rejects_when_not_live_submitted():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.verify_live_post(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "approved"}),
+            business_repo=FakeBusinessRepo(),
+            creator_repo=FakeCreatorRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
+# ── confirm_payment ──────────────────────────────────────────────────
+async def test_confirm_payment_completes_collaboration(_stub_notifications):
+    repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "live_submitted"})
+
+    result = await collaboration_service.confirm_payment(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        repo=repo,
+        business_repo=FakeBusinessRepo(),
+        creator_repo=FakeCreatorRepo(),
+    )
+
+    assert result["status"] == "completed"
+    assert result["payment_confirmed_at"] is not None
+    assert len(_stub_notifications) == 1
+
+
+async def test_confirm_payment_rejects_before_live_submission():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.confirm_payment(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "approved"}),
+            business_repo=FakeBusinessRepo(),
+            creator_repo=FakeCreatorRepo(),
         )
     assert exc.value.status_code == 400

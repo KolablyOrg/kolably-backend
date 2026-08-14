@@ -27,6 +27,10 @@ class Collaboration:
     completed_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime | None = None
+    # ── Brand-side collab management (added via migration 20260814) ──────
+    revision_notes: list[dict[str, Any]] = field(default_factory=list)
+    revision_overall_note: str | None = None
+    payment_confirmed_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Collaboration":
@@ -34,6 +38,10 @@ class Collaboration:
         deliverables = row.get("deliverables") or []
         if isinstance(deliverables, str):
             deliverables = json.loads(deliverables) if deliverables else []
+
+        revision_notes = row.get("revision_notes") or []
+        if isinstance(revision_notes, str):
+            revision_notes = json.loads(revision_notes) if revision_notes else []
 
         return cls(
             id=row["id"],
@@ -51,6 +59,9 @@ class Collaboration:
             completed_at=row.get("completed_at"),
             created_at=row["created_at"],
             updated_at=row.get("updated_at"),
+            revision_notes=revision_notes,
+            revision_overall_note=row.get("revision_overall_note"),
+            payment_confirmed_at=row.get("payment_confirmed_at"),
         )
 
     def to_row(self) -> dict[str, Any]:
@@ -71,4 +82,7 @@ class Collaboration:
             "completed_at": self.completed_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "revision_notes": self.revision_notes,
+            "revision_overall_note": self.revision_overall_note,
+            "payment_confirmed_at": self.payment_confirmed_at,
         }

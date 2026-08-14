@@ -12,6 +12,7 @@ from app.models.creator import Creator, PortfolioItem
 from app.schemas.creator import (
     CreatorResponse,
     CreatorUpdateRequest,
+    PayoutSetupRequest,
     PortfolioItemCreateRequest,
 )
 from app.services import creator_service
@@ -583,3 +584,82 @@ async def test_list_saved_campaigns_returns_full_campaign_objects():
     assert item.description == "Promote the summer menu"
     assert item.deliverables[0].platform.value == "instagram"
     assert item.max_creators == 5
+
+
+# ── Payout details ─────────────────────────────────────
+#
+# Bank/UPI details here are self-reported — there is no penny-drop/IFSC
+# lookup or any other real check behind them. `payout_verified` must never
+# be set true by this code path; doing so would put a false "Verified"
+# badge in front of both the creator and any brand who sees it.
+
+
+async def test_save_payout_details_bank_does_not_set_verified():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
+
+    result = await creator_service.save_payout_details(
+        profile_id="p1",
+        data=PayoutSetupRequest(
+            method="bank",
+            account_name="Alice Cooper",
+            account_number="1234567890",
+            ifsc_code="hdfc0001234",
+            bank_name="HDFC Bank",
+        ),
+        repo=repo,
+    )
+
+    assert "payout_verified" not in repo.updated_with
+    assert result["payout_verified"] is False
+    assert repo.updated_with["account_number_last4"] == "7890"
+    assert repo.updated_with["ifsc_code"] == "HDFC0001234"
+
+
+async def test_save_payout_details_upi_does_not_set_verified():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
+
+    result = await creator_service.save_payout_details(
+        profile_id="p1",
+        data=PayoutSetupRequest(method="upi", upi_id="alice@upi"),
+        repo=repo,
+    )
+
+    assert "payout_verified" not in repo.updated_with
+    assert result["payout_verified"] is False
+
+
+async def test_save_payout_details_never_flips_verified_true_even_when_resaved():
+    """Regression guard: even a creator who already has a (legacy/stale)
+    payout_verified=True row must not have that echoed back as a fresh
+    'verification' — this endpoint has no verification logic at all."""
+    repo = FakeCreatorRepo(row={**CREATOR_ROW, "payout_verified": True})
+
+    await creator_service.save_payout_details(
+        profile_id="p1",
+        data=PayoutSetupRequest(method="upi", upi_id="alice@upi"),
+        repo=repo,
+    )
+
+    assert "payout_verified" not in repo.updated_with
+
+
+async def test_save_payout_details_bank_requires_account_and_ifsc():
+    repo = FakeCreatorRepo(row=dict(CREATOR_ROW))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await creator_service.save_payout_details(
+            profile_id="p1",
+            data=PayoutSetupRequest(method="bank"),
+            repo=repo,
+        )
+
+    assert exc_info.value.status_code == 422
+    assert repo.updated_with is None
+
+
+async def test_get_payout_details_reflects_stored_verified_state():
+    repo = FakeCreatorRepo(row={**CREATOR_ROW, "payout_verified": False})
+
+    result = await creator_service.get_payout_details(profile_id="p1", repo=repo)
+
+    assert result["payout_verified"] is False
