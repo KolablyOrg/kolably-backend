@@ -154,6 +154,12 @@ class FakeInvoiceRepo:
         return Invoice.from_row(self._row)
 
 
+class FailingInvoiceRepo(FakeInvoiceRepo):
+    async def update_status(self, invoice_id, data):
+        self.status_updates.append((invoice_id, data))
+        return None
+
+
 @pytest.fixture(autouse=True)
 def _stub_notifications(monkeypatch):
     sent = []
@@ -678,3 +684,109 @@ async def test_confirm_payment_rejects_before_live_submission():
             creator_repo=FakeCreatorRepo(),
         )
     assert exc.value.status_code == 400
+
+
+async def test_collaboration_lifecycle_runs_from_draft_to_payment(_stub_notifications):
+    repo = FakeCollaborationRepo()
+    creator_repo = FakeCreatorRepo()
+    business_repo = FakeBusinessRepo()
+    invoice_repo = FakeInvoiceRepo()
+
+    draft = await collaboration_service.submit_content(
+        collaboration_id="collab1",
+        profile_id="p-creator",
+        data=ContentSubmitRequest(
+            content_url="https://instagram.com/p/draft",
+            platform=Platform.INSTAGRAM,
+        ),
+        repo=repo,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+        campaign_repo=FakeCampaignRepo(campaigns=[]),
+    )
+    approved = await collaboration_service.approve_draft(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        repo=repo,
+        business_repo=business_repo,
+        creator_repo=creator_repo,
+    )
+    live = await collaboration_service.submit_content(
+        collaboration_id="collab1",
+        profile_id="p-creator",
+        data=ContentSubmitRequest(
+            content_url="https://instagram.com/reel/live",
+            platform=Platform.INSTAGRAM,
+            submission_type=SubmissionType.LIVE,
+        ),
+        repo=repo,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+        campaign_repo=FakeCampaignRepo(campaigns=[]),
+    )
+    verified = await collaboration_service.verify_live_post(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        repo=repo,
+        business_repo=business_repo,
+        creator_repo=creator_repo,
+        campaign_repo=FakeCampaignRepo(campaigns=[]),
+    )
+    paid = await collaboration_service.confirm_payment(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        repo=repo,
+        business_repo=business_repo,
+        creator_repo=creator_repo,
+        invoice_repo=invoice_repo,
+    )
+
+    assert [draft["status"], approved["status"], live["status"], verified["status"], paid["status"]] == [
+        "content_submitted",
+        "approved",
+        "live_submitted",
+        "live_submitted",
+        "completed",
+    ]
+    assert [notification["type"].value for notification in _stub_notifications] == [
+        "collaboration_content_submitted",
+        "collaboration_draft_approved",
+        "collaboration_content_submitted",
+        "collaboration_live_verified",
+        "collaboration_completed",
+    ]
+
+
+async def test_confirm_payment_rejects_duplicate_confirmation():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.confirm_payment(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "completed"}),
+            business_repo=FakeBusinessRepo(),
+            creator_repo=FakeCreatorRepo(),
+            invoice_repo=FakeInvoiceRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
+async def test_confirm_payment_surfaces_invoice_sync_failure():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.confirm_payment(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "live_submitted"}),
+            business_repo=FakeBusinessRepo(),
+            creator_repo=FakeCreatorRepo(),
+            invoice_repo=FailingInvoiceRepo(
+                {
+                    "id": "inv1",
+                    "collaboration_id": "collab1",
+                    "creator_id": "c1",
+                    "business_id": "b1",
+                    "status": "sent",
+                    "created_at": "2024-01-01T00:00:00+00:00",
+                }
+            ),
+        )
+    assert exc.value.status_code == 500
