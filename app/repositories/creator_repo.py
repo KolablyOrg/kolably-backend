@@ -355,33 +355,62 @@ class CreatorRepository(BaseRepository):
         result = await self._execute(query)
         return result.data[0] if result and result.data else None
 
+    async def list_instagram_connected(self) -> list[Creator]:
+        """All creators with a live Instagram connection (a real access
+        token on file — not just a self-reported `instagram_handle` string,
+        which is set at signup regardless of whether Instagram was ever
+        actually connected)."""
+        result = await self._execute(
+            (await self._table("creators"))
+            .select("*")
+            .not_.is_("instagram_user_id", "null")
+            .not_.is_("instagram_access_token", "null")
+        )
+        return [Creator.from_row(row) for row in (result.data or [])]
+
     async def snapshot_all_creators(self) -> None:
         """
-        Takes a daily snapshot of all creators' current follower count, engagement rate, and total views.
-        This ignores creators without an Instagram connection to save space.
+        Takes a daily snapshot of all Instagram-connected creators' current
+        follower count and engagement rate, for day-over-day growth tracking.
+
+        Filters on `instagram_user_id IS NOT NULL` — there is no
+        `instagram_connected` column on `creators`; that's a computed-only
+        field on the `Creator` model (see `Creator.from_row`), so filtering
+        on it directly against the DB always 400'd and this snapshot never
+        actually ran. `views_count` isn't tracked on `creators` yet either
+        (no backing column) — every snapshot records 0 for it, same
+        "not implemented yet" fallback already used in
+        `creator_service.get_creator_stats`.
         """
-        # Fetch all active creators
-        creators = await self.select(
-            "creators",
-            columns="id, follower_count, engagement_rate, views_count",
-            filters={"instagram_connected": True}
+        result = await self._execute(
+            (await self._table("creators"))
+            .select("id, follower_count, engagement_rate")
+            .not_.is_("instagram_user_id", "null")
         )
+        creators = result.data or []
         if not creators:
             return
 
-        # Prepare bulk insert payload
         payload = [
             {
                 "creator_id": c["id"],
                 "follower_count": c.get("follower_count") or 0,
                 "engagement_rate": c.get("engagement_rate") or 0.0,
-                "views_count": c.get("views_count") or 0,
+                "views_count": 0,
             }
             for c in creators
         ]
-        
-        # Upsert based on (creator_id, snapshot_date) constraint
-        await self.upsert("creator_stats_history", payload)
+
+        # `on_conflict` must be explicit — the table's PK is a fresh random
+        # `id` on every insert (never actually collides), so a bare upsert
+        # would try to insert a new row every time and hit the separate
+        # UNIQUE(creator_id, snapshot_date) constraint as a hard error
+        # instead of merging into today's existing snapshot.
+        await self._execute(
+            (await self._table("creator_stats_history")).upsert(
+                payload, on_conflict="creator_id,snapshot_date"
+            )
+        )
 
     async def save_campaign(self, creator_id: str, campaign_id: str) -> None:
         """Idempotent — re-saving an already-saved campaign is a no-op."""
