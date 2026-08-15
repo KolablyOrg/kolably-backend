@@ -53,6 +53,26 @@ def _profile_to_dict(profile: UserProfile) -> dict:
     }
 
 
+def _confirmed_session_tokens(auth_response) -> tuple[str | None, str | None]:
+    """Only hand back real tokens if the email is actually confirmed.
+
+    `auth_implementation.md` documents "Supabase Auth won't issue a session
+    to an unverified user" as the design assumption — but that's a property
+    of the Supabase project's own "Confirm email" auth setting, not
+    something this code enforces. If that setting is ever off (as it
+    currently is), `sign_up()` returns a full session immediately
+    regardless of confirmation, and blindly forwarding it would let anyone
+    sign up with an email they don't own and land straight in the app with
+    zero verification. Withholding the tokens here makes the guarantee true
+    independent of that dashboard setting — `login()` already has the
+    equivalent check for the sign-in path.
+    """
+    session = auth_response.session
+    if not session or not auth_response.user.email_confirmed_at:
+        return None, None
+    return session.access_token, session.refresh_token
+
+
 async def signup_creator(
     data: CreatorSignupRequest,
     *,
@@ -110,10 +130,10 @@ async def signup_creator(
         # legitimate writer of those columns.
     })
 
-    session = auth_response.session
+    access_token, refresh_token = _confirmed_session_tokens(auth_response)
     return {
-        "access_token": session.access_token if session else None,
-        "refresh_token": session.refresh_token if session else None,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": {
             "id": profile_id,
@@ -178,10 +198,10 @@ async def signup_business(
         "owner_name": data.name,
     })
 
-    session = auth_response.session
+    access_token, refresh_token = _confirmed_session_tokens(auth_response)
     return {
-        "access_token": session.access_token if session else None,
-        "refresh_token": session.refresh_token if session else None,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": {
             "id": profile_id,
@@ -648,6 +668,66 @@ async def resend_verification_email(email: str) -> dict:
         )
 
     return {"message": "Confirmation email sent"}
+
+
+async def verify_signup_otp(
+    email: str,
+    token: str,
+    *,
+    profile_repo: ProfileRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> dict:
+    """Confirm a signup with the 6-digit code emailed at signup time — the
+    OTP counterpart to clicking the confirmation link.
+
+    Chosen over the link for this product specifically because it works
+    identically no matter which platform (mobile app vs web app) the person
+    is using right now: a link needs a `redirect_to` picked in advance for
+    each platform (see the mobile-deep-link vs web-URL split already built
+    for password reset), whereas a code just gets typed into whichever app
+    the person is already sitting in — nothing to redirect, nothing to get
+    wrong per platform.
+    """
+    supabase = await get_supabase_client()
+
+    try:
+        auth_response = await supabase.auth.verify_otp({
+            "email": email,
+            "token": token,
+            "type": "signup",
+        })
+    except AuthApiError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    if not auth_response.user or not auth_response.session:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired code",
+        )
+
+    auth_id = str(auth_response.user.id)
+    # Reuse get_user_profile's already-correct enrichment (creator/business
+    # nested data, full_name fallback) instead of hand-rolling a thinner
+    # user dict here — a minimal shape would have regressed the blank-name
+    # bug that fallback was built to fix.
+    user = await get_user_profile(
+        auth_id,
+        profile_repo=profile_repo,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+    )
+
+    session = auth_response.session
+    return {
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+        "token_type": "bearer",
+        "user": user,
+    }
 
 
 async def reset_password(access_token: str, new_password: str) -> dict:

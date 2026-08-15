@@ -30,6 +30,7 @@ from app.schemas.auth import (
     TwoFactorStatusResponse,
     TwoFactorVerifyLoginRequest,
     UpdateProfileRequest,
+    VerifySignupOtpRequest,
 )
 from app.schemas.user import UserInToken
 from app.services import auth_service, google_oauth_service, instagram_service, twofa_service
@@ -263,6 +264,14 @@ async def resend_verification(data: ResendVerificationRequest):
     """Re-send the signup confirmation email — for the 'check your email'
     screen a creator/business lands on right after signup."""
     return await auth_service.resend_verification_email(data.email)
+
+
+@router.post("/verify-signup-otp", response_model=AuthTokenResponse)
+async def verify_signup_otp(data: VerifySignupOtpRequest):
+    """Confirm a signup with the 6-digit code emailed at signup time — the
+    OTP counterpart to clicking the confirmation link (see
+    auth_service.verify_signup_otp for why OTP was chosen over a link)."""
+    return await auth_service.verify_signup_otp(data.email, data.token)
 
 
 # ── Current User ──────────────────────────────────────

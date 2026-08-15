@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from supabase_auth.errors import AuthApiError
 
 from app.models.user import UserProfile
-from app.schemas.auth import GoogleAuthRequest
+from app.schemas.auth import BusinessSignupRequest, CreatorSignupRequest, GoogleAuthRequest
 from app.services import auth_service
 
 NOW = datetime(2026, 7, 26, 12, 0, 0, tzinfo=UTC)
@@ -39,11 +39,22 @@ def _make_profile(data: dict) -> UserProfile:
 
 
 class FakeUser:
-    def __init__(self, created_at, last_sign_in_at, user_metadata=None, id="auth-1"):
+    def __init__(
+        self,
+        created_at,
+        last_sign_in_at,
+        user_metadata=None,
+        id="auth-1",
+        email_confirmed_at=NOW,
+    ):
         self.id = id
         self.created_at = created_at
         self.last_sign_in_at = last_sign_in_at
         self.user_metadata = user_metadata or {}
+        # Defaults truthy (confirmed) so every existing google_auth test —
+        # none of which exercise email confirmation — keeps passing
+        # unchanged; signup tests override it explicitly.
+        self.email_confirmed_at = email_confirmed_at
 
 
 class FakeSession:
@@ -65,6 +76,18 @@ class FakeGoTrue:
         self.last_reset_password_call = None
 
     async def sign_in_with_id_token(self, credentials):
+        self.last_credentials = credentials
+        if self._error:
+            raise self._error
+        return self._response
+
+    async def sign_up(self, credentials):
+        self.last_credentials = credentials
+        if self._error:
+            raise self._error
+        return self._response
+
+    async def verify_otp(self, credentials):
         self.last_credentials = credentials
         if self._error:
             raise self._error
@@ -96,12 +119,16 @@ class FakeProfileRepo:
 
 
 class FakeCreatorRepo:
-    def __init__(self):
+    def __init__(self, creator=None):
         self.inserted = None
+        self._creator = creator
 
     async def insert_creator(self, data):
         self.inserted = data
         return {**data, "id": "creator-1"}
+
+    async def get_by_profile_id(self, profile_id):
+        return self._creator
 
 
 class FakeBusinessRepo:
@@ -388,5 +415,186 @@ async def test_forgot_password_raises_400_on_auth_api_error(monkeypatch):
 
     with pytest.raises(HTTPException) as exc_info:
         await auth_service.forgot_password("alice@example.com")
+
+    assert exc_info.value.status_code == 400
+
+
+# ── signup_creator / signup_business: email confirmation gate ─────────
+#
+# Regression coverage for a real gap: sign_up() was trusted to only return
+# a session for a confirmed user (per auth_implementation.md §6.2), but
+# that's actually a property of the Supabase project's own "Confirm email"
+# setting — with it off, sign_up() hands back a full session immediately
+# regardless of confirmation, and the old code forwarded it unconditionally,
+# letting anyone in with zero proof they own the email they signed up with.
+
+CREATOR_SIGNUP_DATA = CreatorSignupRequest(
+    name="Alice",
+    username="alice",
+    email="alice@example.com",
+    password="Password123",
+    city="Springfield",
+    niche="food",
+)
+
+BUSINESS_SIGNUP_DATA = BusinessSignupRequest(
+    name="Bob Biz",
+    email="bob@example.com",
+    password="Password123",
+)
+
+
+async def test_signup_creator_withholds_tokens_when_email_unconfirmed(monkeypatch):
+    """The exact real-world bug: Supabase's 'Confirm email' setting is off,
+    so sign_up() returns a real session immediately even though the user
+    hasn't proven anything. The response must not carry that session."""
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=None)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+
+    result = await auth_service.signup_creator(
+        CREATOR_SIGNUP_DATA,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+    )
+
+    assert result["access_token"] is None
+    assert result["refresh_token"] is None
+
+
+async def test_signup_creator_returns_tokens_when_email_confirmed(monkeypatch):
+    """If the account genuinely is pre-confirmed (e.g. an admin-created
+    account, or 'Confirm email' legitimately off by design for a given
+    flow), a real session is still returned — this isn't a blanket ban on
+    signup returning a session, only on trusting an unconfirmed one."""
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+
+    result = await auth_service.signup_creator(
+        CREATOR_SIGNUP_DATA,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+    )
+
+    assert result["access_token"] == "access-token"
+    assert result["refresh_token"] == "refresh-token"
+
+
+async def test_signup_creator_no_session_at_all_still_withholds_tokens(monkeypatch):
+    """The 'normal', intended case: Supabase itself declines to issue a
+    session for an unconfirmed signup. Confirms the fix doesn't regress
+    the already-correct path."""
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=None)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+
+    result = await auth_service.signup_creator(
+        CREATOR_SIGNUP_DATA,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+    )
+
+    assert result["access_token"] is None
+    assert result["refresh_token"] is None
+
+
+async def test_signup_business_withholds_tokens_when_email_unconfirmed(monkeypatch):
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=None)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+
+    result = await auth_service.signup_business(
+        BUSINESS_SIGNUP_DATA,
+        profile_repo=FakeProfileRepo({**PROFILE, "role": "business"}),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result["access_token"] is None
+    assert result["refresh_token"] is None
+
+
+async def test_signup_business_returns_tokens_when_email_confirmed(monkeypatch):
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+
+    result = await auth_service.signup_business(
+        BUSINESS_SIGNUP_DATA,
+        profile_repo=FakeProfileRepo({**PROFILE, "role": "business"}),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result["access_token"] == "access-token"
+    assert result["refresh_token"] == "refresh-token"
+
+
+# ── verify_signup_otp ───────────────────────────────────────────────
+#
+# OTP was chosen over the confirmation link specifically because it works
+# the same regardless of platform — see auth_service.verify_signup_otp's
+# docstring. These cover the code being right, wrong, and the response
+# shape actually carrying enough user data to render a name (a thinner
+# shape here would've silently reintroduced the blank-name bug fixed
+# earlier via normalizeAuthUser's fallback chain).
+
+
+async def test_verify_signup_otp_success_returns_full_session_and_profile(monkeypatch):
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+
+    result = await auth_service.verify_signup_otp(
+        "alice@example.com",
+        "123456",
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result["access_token"] == "access-token"
+    assert result["refresh_token"] == "refresh-token"
+    assert result["user"]["id"] == "profile-1"
+    assert result["user"]["email"] == "alice@example.com"
+
+
+async def test_verify_signup_otp_forwards_email_and_type(monkeypatch):
+    """Regression: type must be 'signup' — verify_otp also handles
+    'recovery'/'email_change' etc., and sending the wrong type rejects a
+    perfectly valid code."""
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    gotrue = FakeGoTrue(response=FakeAuthResponse(user, FakeSession()))
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.verify_signup_otp(
+        "alice@example.com",
+        "123456",
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert gotrue.last_credentials == {
+        "email": "alice@example.com",
+        "token": "123456",
+        "type": "signup",
+    }
+
+
+async def test_verify_signup_otp_invalid_code_raises_400(monkeypatch):
+    _patch_supabase(
+        monkeypatch,
+        FakeGoTrue(error=AuthApiError("Token has expired or is invalid", 403, None)),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.verify_signup_otp("alice@example.com", "000000")
+
+    assert exc_info.value.status_code == 400
+
+
+async def test_verify_signup_otp_no_session_raises_400(monkeypatch):
+    """Defensive: verify_otp succeeding with no session/user would be an
+    unexpected Supabase response shape, not something to silently pass
+    through as a login."""
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=None)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.verify_signup_otp("alice@example.com", "123456")
 
     assert exc_info.value.status_code == 400

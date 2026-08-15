@@ -101,6 +101,18 @@ class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
 
+class VerifySignupOtpRequest(BaseModel):
+    """POST /auth/verify-signup-otp — confirms a signup with the 6-digit
+    code emailed at signup time, in place of clicking a link. Works
+    identically regardless of which platform (mobile app vs web app) the
+    person is using right now, since there's no redirect/deep-link to get
+    right for each — they just type the code into whatever app they're
+    already sitting in."""
+
+    email: EmailStr
+    token: str = Field(..., min_length=1)
+
+
 class ResetPasswordRequest(BaseModel):
     access_token: str
     new_password: str = Field(..., min_length=8)
