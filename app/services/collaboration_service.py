@@ -8,13 +8,14 @@ from app.core.enums import CollaborationStatus, InvoiceStatus, NotificationType,
 from app.models.business import Business
 from app.models.campaign import Campaign
 from app.models.collaboration import Collaboration
+from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.invoice_repo import InvoiceRepository
 from app.schemas.collaboration import ContentSubmitRequest, RequestRevisionRequest
-from app.services import instagram_service, notification_service
+from app.services import business_access, instagram_service, notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,12 @@ async def _get_business_id_for_user(
     profile_id: str,
     *,
     repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> str:
     repo = repo or BusinessRepository()
-    business_id = await repo.get_id_by_profile_id(profile_id)
+    business_id = await business_access.get_business_id_for_profile(
+        profile_id, business_repo=repo, member_repo=member_repo
+    )
     if not business_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -134,6 +138,7 @@ async def list_collaborations(
     creator_repo: CreatorRepository | None = None,
     business_repo: BusinessRepository | None = None,
     campaign_repo: CampaignRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
@@ -148,7 +153,7 @@ async def list_collaborations(
             campaign_id=campaign_id,
         )
     elif role == "business":
-        business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+        business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
         collabs, total = await repo.list_by_business(
             business_id=business_id,
             page=page,
@@ -180,10 +185,14 @@ async def list_collaborations(
 
 async def get_collaboration(
     collaboration_id: str,
+    profile_id: str,
+    role: str,
     *,
     repo: CollaborationRepository | None = None,
     campaign_repo: CampaignRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
 ) -> dict:
     repo = repo or CollaborationRepository()
     campaign_repo = campaign_repo or CampaignRepository()
@@ -195,6 +204,23 @@ async def get_collaboration(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Collaboration not found",
         )
+
+    if role == "creator":
+        creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
+        if collab.creator_id != creator_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not own this collaboration",
+            )
+    elif role == "business":
+        access_role = await business_access.get_role_for_profile(
+            collab.business_id, profile_id, business_repo=business_repo, member_repo=member_repo
+        )
+        if access_role is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not own this collaboration",
+            )
 
     submissions_raw = await repo.list_submissions(collaboration_id)
     revision_history = await repo.list_revision_history(collaboration_id)
@@ -230,9 +256,11 @@ async def _get_owned_collaboration(
     *,
     repo: CollaborationRepository,
     business_repo: BusinessRepository,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> Collaboration:
-    """Load a collaboration, ensuring the caller is the business side of it —
-    only the business marks a collaboration complete or cancelled."""
+    """Load a collaboration, ensuring the caller has write access to the
+    business side of it (owner or editor — viewers are blocked) — only the
+    business manages a collaboration's lifecycle."""
     collab = await repo.get_by_id(collaboration_id)
     if not collab:
         raise HTTPException(
@@ -240,12 +268,15 @@ async def _get_owned_collaboration(
             detail="Collaboration not found",
         )
 
-    business_id = await _get_business_id_for_user(profile_id, repo=business_repo)
+    business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     if collab.business_id != business_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not own this collaboration",
         )
+    await business_access.require_write_access(
+        business_id, profile_id, business_repo=business_repo, member_repo=member_repo
+    )
     return collab
 
 
@@ -256,13 +287,14 @@ async def complete_collaboration(
     repo: CollaborationRepository | None = None,
     business_repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
     creator_repo = creator_repo or CreatorRepository()
 
     collab = await _get_owned_collaboration(
-        collaboration_id, profile_id, repo=repo, business_repo=business_repo
+        collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
     if collab.status == CollaborationStatus.COMPLETED:
         raise HTTPException(
@@ -304,12 +336,13 @@ async def cancel_collaboration(
     *,
     repo: CollaborationRepository | None = None,
     business_repo: BusinessRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
 
     collab = await _get_owned_collaboration(
-        collaboration_id, profile_id, repo=repo, business_repo=business_repo
+        collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
     if collab.status in (CollaborationStatus.COMPLETED, CollaborationStatus.CANCELLED):
         raise HTTPException(
@@ -438,7 +471,8 @@ async def submit_content(
         )
 
     return await get_collaboration(
-        collaboration_id, repo=repo, campaign_repo=campaign_repo, business_repo=business_repo
+        collaboration_id, profile_id, "creator",
+        repo=repo, campaign_repo=campaign_repo, business_repo=business_repo, creator_repo=creator_repo,
     )
 
 
@@ -450,6 +484,7 @@ async def request_revision(
     repo: CollaborationRepository | None = None,
     business_repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     """Business asks for changes on a submitted draft — mirrors the
     `revision_requested` pattern already used at the application stage
@@ -460,7 +495,7 @@ async def request_revision(
     creator_repo = creator_repo or CreatorRepository()
 
     collab = await _get_owned_collaboration(
-        collaboration_id, profile_id, repo=repo, business_repo=business_repo
+        collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
     if collab.status != CollaborationStatus.CONTENT_SUBMITTED:
         raise HTTPException(
@@ -523,6 +558,7 @@ async def approve_draft(
     repo: CollaborationRepository | None = None,
     business_repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     """Business approves a submitted draft — creator can now post it live
     and submit the live link (`submit_content` with submission_type='live')."""
@@ -531,7 +567,7 @@ async def approve_draft(
     creator_repo = creator_repo or CreatorRepository()
 
     collab = await _get_owned_collaboration(
-        collaboration_id, profile_id, repo=repo, business_repo=business_repo
+        collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
     if collab.status != CollaborationStatus.CONTENT_SUBMITTED:
         raise HTTPException(
@@ -569,6 +605,7 @@ async def verify_live_post(
     business_repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     campaign_repo: CampaignRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     """Best-effort automated check of the creator's live post, for Instagram
     submissions only (the only platform this app has Graph API access for —
@@ -596,7 +633,7 @@ async def verify_live_post(
     creator_repo = creator_repo or CreatorRepository()
 
     collab = await _get_owned_collaboration(
-        collaboration_id, profile_id, repo=repo, business_repo=business_repo
+        collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
     if collab.status != CollaborationStatus.LIVE_SUBMITTED:
         raise HTTPException(
@@ -664,7 +701,8 @@ async def verify_live_post(
         )
 
     return await get_collaboration(
-        collaboration_id, repo=repo, campaign_repo=campaign_repo, business_repo=business_repo
+        collaboration_id, profile_id, "business",
+        repo=repo, campaign_repo=campaign_repo, business_repo=business_repo, member_repo=member_repo,
     )
 
 
@@ -676,6 +714,7 @@ async def confirm_payment(
     business_repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
     invoice_repo: InvoiceRepository | None = None,
+    member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     """Business confirms they paid the creator directly (Kolably never
     moves the money itself — see `BizMarkPaid` in the design and the
@@ -689,7 +728,7 @@ async def confirm_payment(
     invoice_repo = invoice_repo or InvoiceRepository()
 
     collab = await _get_owned_collaboration(
-        collaboration_id, profile_id, repo=repo, business_repo=business_repo
+        collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
     if collab.status != CollaborationStatus.LIVE_SUBMITTED:
         raise HTTPException(

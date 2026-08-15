@@ -136,6 +136,20 @@ class FakeCreatorRepo:
         return self._creator_id
 
 
+class FakeMemberRepo:
+    async def get_active_by_profile_id(self, profile_id):
+        return None
+
+    async def get_active_membership(self, business_id, profile_id):
+        return None
+
+
+async def _active_member(role):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(role=role)
+
+
 class FakeInvoiceRepo:
     def __init__(self, row=None):
         self._row = row
@@ -252,6 +266,8 @@ def _campaign(**overrides):
 async def test_get_collaboration_includes_campaign_and_business_join():
     result = await collaboration_service.get_collaboration(
         "collab1",
+        profile_id="p-business",
+        role="business",
         repo=FakeCollaborationRepo(),
         campaign_repo=FakeCampaignRepo(campaigns=[_campaign()]),
         business_repo=FakeBusinessRepo(),
@@ -270,11 +286,22 @@ async def test_get_collaboration_join_fields_null_when_campaign_missing():
     business_repo = FakeBusinessRepo()
     business_repo.get_by_id = _no_business
 
+    # The join-fetch's business lookup is deliberately nerfed above (that's
+    # what this test is exercising), which would also starve the new
+    # business_access authorization check of an "owner" match — grant access
+    # via a fake team membership instead, so this test stays about the join
+    # fields rather than incidentally testing authorization.
+    member_repo = FakeMemberRepo()
+    member_repo.get_active_membership = lambda business_id, profile_id: _active_member("editor")
+
     result = await collaboration_service.get_collaboration(
         "collab1",
+        profile_id="p-business",
+        role="business",
         repo=FakeCollaborationRepo(),
         campaign_repo=FakeCampaignRepo(campaigns=[]),
         business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     assert result["campaign_title"] is None

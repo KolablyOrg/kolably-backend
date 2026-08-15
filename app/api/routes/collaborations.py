@@ -41,7 +41,9 @@ async def get_collaboration(
     user: UserInToken = Depends(get_current_user),
 ):
     """Get collaboration details."""
-    return await collaboration_service.get_collaboration(collaboration_id)
+    return await collaboration_service.get_collaboration(
+        collaboration_id, profile_id=user.id, role=user.role.value
+    )
 
 
 @router.patch(
