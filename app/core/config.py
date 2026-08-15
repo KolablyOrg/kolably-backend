@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     # password — must also be added to Supabase's Redirect URLs allow list,
     # same requirement as the password-reset URLs above.
     WEB_TEAM_INVITE_REDIRECT_URL: str = "https://kolably.com/auth/accept-invite"
+    # Signup-confirmation emails are OTP-first (see verify_signup_otp) — the
+    # code is what the app actually uses. This redirect only matters for
+    # someone who clicks the link in the email instead: without it, Supabase
+    # fell back to the dashboard's default Site URL, which happened to be
+    # the password-reset page, so a signup confirmation link was landing
+    # people on "Reset your password". Deliberately one web URL regardless
+    # of platform — email links always open in a browser first, so there's
+    # no mobile-deep-link case to pick between the way password reset has.
+    # VerifyEmail.tsx reads the access_token Supabase appends here and logs
+    # the person in directly. Must also be added to Supabase's Redirect
+    # URLs allow list, same requirement as the URLs above.
+    WEB_SIGNUP_CONFIRM_REDIRECT_URL: str = "https://kolably.com/auth/verify-email"
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",

@@ -88,6 +88,9 @@ async def signup_creator(
                 "password": data.password,
                 "options": {
                     "data": {"role": "creator"},
+                    # Only matters if someone clicks the link instead of
+                    # using the code — see WEB_SIGNUP_CONFIRM_REDIRECT_URL.
+                    "email_redirect_to": settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL,
                 },
             }
         )
@@ -183,6 +186,7 @@ async def signup_business(
                 "password": data.password,
                 "options": {
                     "data": {"role": "business"},
+                    "email_redirect_to": settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL,
                 },
             }
         )
@@ -694,7 +698,11 @@ async def resend_verification_email(email: str) -> dict:
     supabase = await get_supabase_client()
 
     try:
-        await supabase.auth.resend({"type": "signup", "email": email})
+        await supabase.auth.resend({
+            "type": "signup",
+            "email": email,
+            "options": {"email_redirect_to": settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL},
+        })
     except AuthApiError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
