@@ -46,6 +46,7 @@ class FakeUser:
         user_metadata=None,
         id="auth-1",
         email_confirmed_at=NOW,
+        identities=None,
     ):
         self.id = id
         self.created_at = created_at
@@ -55,6 +56,12 @@ class FakeUser:
         # none of which exercise email confirmation — keeps passing
         # unchanged; signup tests override it explicitly.
         self.email_confirmed_at = email_confirmed_at
+        # A real signup always comes back with exactly one identity; an
+        # empty list is Supabase's tell for "this email is already
+        # registered" (see auth_service._is_repeated_signup). Defaults to
+        # the one-identity shape so existing tests keep describing genuine
+        # signups.
+        self.identities = [object()] if identities is None else identities
 
 
 class FakeSession:
@@ -142,6 +149,11 @@ class FakeBusinessRepo:
 
     async def get_by_profile_id(self, profile_id):
         return self._business
+
+
+async def _none(*args, **kwargs):
+    """Awaitable None — for stubbing a repo lookup that has to miss."""
+    return None
 
 
 def _patch_supabase(monkeypatch, gotrue):
@@ -541,6 +553,77 @@ async def test_signup_business_returns_tokens_when_email_confirmed(monkeypatch):
 
 EXISTING_CREATOR = {"id": "creator-1", "profile_id": "profile-1", "name": "Alice"}
 EXISTING_BUSINESS = {"id": "business-1", "profile_id": "profile-1", "owner_name": "Bob Biz"}
+
+
+async def test_signup_creator_sanitized_repeat_returns_409_not_500(monkeypatch):
+    """The actual production 500. For an already-registered *confirmed*
+    email, GoTrue returns 200 with a sanitized user: a random id that
+    matches no profile row, email_confirmed_at nulled, and — the only
+    reliable tell — an empty identities list. Looking that random id up
+    hit the "Profile creation trigger failed" 500, which is what surfaced
+    to the user as "our servers are having trouble"."""
+    user = FakeUser(
+        created_at=NOW,
+        last_sign_in_at=NOW,
+        id="random-uuid-matching-no-profile",
+        email_confirmed_at=None,
+        identities=[],
+    )
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+    # Deliberately returns None for any lookup — mirrors the real repo
+    # finding nothing for the sanitized id.
+    profile_repo = FakeProfileRepo(dict(PROFILE))
+    profile_repo.get_by_auth_id = lambda auth_id: _none()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.signup_creator(
+            CREATOR_SIGNUP_DATA,
+            profile_repo=profile_repo,
+            creator_repo=FakeCreatorRepo(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "already exists" in exc_info.value.detail
+
+
+async def test_signup_business_sanitized_repeat_returns_409_not_500(monkeypatch):
+    user = FakeUser(
+        created_at=NOW,
+        last_sign_in_at=NOW,
+        id="random-uuid-matching-no-profile",
+        email_confirmed_at=None,
+        identities=[],
+    )
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+    profile_repo = FakeProfileRepo({**PROFILE, "role": "business"})
+    profile_repo.get_by_auth_id = lambda auth_id: _none()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.signup_business(
+            BUSINESS_SIGNUP_DATA,
+            profile_repo=profile_repo,
+            business_repo=FakeBusinessRepo(),
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+async def test_signup_creator_genuine_signup_not_treated_as_repeat(monkeypatch):
+    """Guard against the check being too eager: a real first-time signup
+    carries one identity and must still create the creator row."""
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=None)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+    creator_repo = FakeCreatorRepo()
+
+    result = await auth_service.signup_creator(
+        CREATOR_SIGNUP_DATA,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=creator_repo,
+    )
+
+    assert result["access_token"] is None
+    assert creator_repo.inserted is not None
+    assert creator_repo.inserted["name"] == "Alice"
 
 
 async def test_signup_creator_conflicts_when_already_registered_and_confirmed(monkeypatch):

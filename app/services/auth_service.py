@@ -53,6 +53,31 @@ def _profile_to_dict(profile: UserProfile) -> dict:
     }
 
 
+def _is_repeated_signup(auth_response) -> bool:
+    """True when this signup was for an email that's already registered
+    and confirmed.
+
+    Supabase deliberately doesn't raise for that case — it returns 200
+    with a *sanitized* user: a freshly generated random id, a nulled
+    `email_confirmed_at`, and an empty `identities` list (GoTrue's
+    sanitizeUser). That's an anti-enumeration measure, so this endpoint
+    can't be used to probe which emails have accounts.
+
+    The empty `identities` list is the documented way to tell that fake
+    user apart from a genuine new signup, which always comes back with
+    exactly one identity. Looking the id up in `profiles` is NOT enough:
+    the random id simply won't match anything, which is indistinguishable
+    from the signup trigger having failed — that's exactly what happened
+    before this check existed, and a duplicate signup 500'd with a
+    misleading "Profile creation trigger failed".
+    """
+    identities = auth_response.user.identities
+    return identities is not None and len(identities) == 0
+
+
+_ACCOUNT_EXISTS_DETAIL = "An account with this email already exists. Try signing in instead."
+
+
 def _confirmed_session_tokens(auth_response) -> tuple[str | None, str | None]:
     """Only hand back real tokens if the email is actually confirmed.
 
@@ -106,6 +131,15 @@ async def signup_creator(
             detail="Signup failed — user not created",
         )
 
+    # Must come before the profile lookup below — the sanitized user
+    # Supabase returns here carries a random id that matches no profile,
+    # which would otherwise fall into the "trigger failed" 500.
+    if _is_repeated_signup(auth_response):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_ACCOUNT_EXISTS_DETAIL,
+        )
+
     auth_id = str(auth_response.user.id)
 
     profile_repo = profile_repo or ProfileRepository()
@@ -131,7 +165,7 @@ async def signup_creator(
         # unique constraint instead of giving a real answer.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email already exists. Try signing in instead.",
+            detail=_ACCOUNT_EXISTS_DETAIL,
         )
     elif not existing_creator:
         await creator_repo.insert_creator({
@@ -202,6 +236,14 @@ async def signup_business(
             detail="Signup failed — user not created",
         )
 
+    # See the matching check in signup_creator — must precede the profile
+    # lookup, whose 500 this was surfacing as.
+    if _is_repeated_signup(auth_response):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_ACCOUNT_EXISTS_DETAIL,
+        )
+
     auth_id = str(auth_response.user.id)
 
     profile_repo = profile_repo or ProfileRepository()
@@ -226,7 +268,7 @@ async def signup_business(
         # businesses_profile_id_key's unique constraint.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email already exists. Try signing in instead.",
+            detail=_ACCOUNT_EXISTS_DETAIL,
         )
     elif not existing_business:
         await business_repo.insert_business({
