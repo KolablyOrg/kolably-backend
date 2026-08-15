@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from fastapi import HTTPException, status
 
 from app.core.enums import ApplicationDirection, ApplicationStatus, CollaborationStatus, NotificationType
@@ -68,6 +70,7 @@ def _application_to_response(app: CampaignApplication) -> ApplicationResponse:
         status=app.status,
         revision_reason=app.revision_reason,
         created_at=app.created_at,
+        expires_at=app.expires_at,
     )
 
 
@@ -142,6 +145,7 @@ async def list_my_applications(
                 status=app.status,
                 revision_reason=app.revision_reason,
                 created_at=app.created_at,
+                expires_at=app.expires_at,
                 campaign=campaign_summary,
                 business=business_summary,
             )
@@ -199,6 +203,7 @@ async def list_business_applications(
                 status=app.status,
                 revision_reason=app.revision_reason,
                 created_at=app.created_at,
+                expires_at=app.expires_at,
                 creator=creator_summary,
             )
         )
@@ -418,6 +423,21 @@ async def accept_application(
         application, profile_id, role,
         campaign=campaign, creator_repo=creator_repo, business_repo=business_repo, member_repo=member_repo,
     )
+
+    # Invites carry a deadline (see campaign_service.invite_creator). It's
+    # enforced here rather than by a scheduled sweep: the only moment expiry
+    # actually matters is when someone tries to act on it, and checking at
+    # that point keeps the row's real history instead of rewriting statuses
+    # in the background.
+    if application.expires_at:
+        expires_at = application.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at < datetime.now(UTC):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This invitation has expired. Ask the brand to send a new one.",
+            )
 
     counts = await campaign_repo.fetch_application_counts([campaign.id])
     accepted_count = counts.get(campaign.id, {}).get("accepted_count", 0)

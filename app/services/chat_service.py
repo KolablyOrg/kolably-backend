@@ -93,6 +93,8 @@ def _message_to_response(msg: Message, *, seen: bool = False) -> dict:
         "content": msg.content,
         "created_at": msg.created_at,
         "seen": seen,
+        "kind": msg.kind,
+        "metadata": msg.metadata,
     }
 
 
@@ -281,6 +283,61 @@ async def send_message(
         )
 
     return _message_to_response(message)
+
+
+async def post_collaboration_event(
+    collaboration_id: str,
+    actor_profile_id: str,
+    event_type: str,
+    content: str,
+    *,
+    extra: dict | None = None,
+    repo: ChatRepository | None = None,
+) -> dict | None:
+    """Drop a system entry into the collaboration's chat thread.
+
+    This is what makes the thread a full record of the campaign rather than
+    just typed messages: drafts, review requests, revision notes, invoices
+    and payment confirmations all land here in order, so neither side has to
+    reconstruct "what happened when" from separate screens.
+
+    Deliberately best-effort — returns None instead of raising if there's no
+    conversation yet, or if the insert fails. These calls sit inside the
+    submit/review/invoice flows, and a chat-logging problem must never fail
+    the actual business action the user asked for.
+
+    Unlike `send_message` this doesn't notify: the callers already raise
+    their own, more specific notifications ("Draft submitted", "Changes
+    requested"), and a second generic "New message" for the same event would
+    just be noise.
+    """
+    repo = repo or ChatRepository()
+
+    try:
+        conversation = await repo.find_conversation_by_collaboration(collaboration_id)
+        if not conversation:
+            # Chat is created lazily when someone first opens it, so an event
+            # can legitimately fire before any conversation exists.
+            return None
+
+        message = await repo.insert_message({
+            "conversation_id": conversation.id,
+            # NOT NULL, and genuinely meaningful: whoever's action triggered
+            # this. Clients key rendering off `kind`, not the sender, so an
+            # event never renders as that person's chat bubble.
+            "sender_id": actor_profile_id,
+            "content": content,
+            "kind": "event",
+            "metadata": {
+                "event_type": event_type,
+                "collaboration_id": collaboration_id,
+                **(extra or {}),
+            },
+        })
+        return _message_to_response(message) if message else None
+    except Exception:
+        # Logging an event is never worth failing the caller's real work.
+        return None
 
 
 async def get_or_create_conversation(

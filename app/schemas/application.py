@@ -30,6 +30,9 @@ class ApplicationResponse(BaseModel):
     status: ApplicationStatus
     revision_reason: str | None = None
     created_at: datetime
+    # Only set on brand invites — drives the "Expires in N days" countdown
+    # and is re-checked server-side when the creator accepts.
+    expires_at: datetime | None = None
 
 
 class ApplicationWithCampaign(ApplicationResponse):

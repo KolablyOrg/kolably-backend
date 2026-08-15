@@ -23,6 +23,8 @@ class CampaignApplication:
     revision_reason: str | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime | None = None
+    # Deadline for a business_invited application; null for creator_applied.
+    expires_at: datetime | None = None
     # Joined relation data — populated only when the repo query selects it
     # (e.g. list_by_creator joins campaigns + businesses + profiles).
     campaign: dict[str, Any] | None = None
@@ -43,6 +45,7 @@ class CampaignApplication:
             revision_reason=row.get("revision_reason"),
             created_at=row["created_at"],
             updated_at=row.get("updated_at"),
+            expires_at=row.get("expires_at"),
             campaign=row.get("campaigns"),
             business=row.get("businesses"),
             creator=row.get("creators"),
@@ -62,4 +65,5 @@ class CampaignApplication:
             "revision_reason": self.revision_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "expires_at": self.expires_at,
         }

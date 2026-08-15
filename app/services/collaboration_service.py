@@ -15,7 +15,7 @@ from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.invoice_repo import InvoiceRepository
 from app.schemas.collaboration import ContentSubmitRequest, RequestRevisionRequest
-from app.services import business_access, instagram_service, notification_service
+from app.services import business_access, chat_service, instagram_service, notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,9 @@ def _collaboration_to_response(
             "business_name": business.business_name,
             "logo_url": business.logo_url,
             "gst_number": business.gst_number,
+            # profile_id is the profile's id (see business_service's
+            # user_id mapping) — the client needs it to open the chat.
+            "user_id": business.profile_id,
         }
     return resp
 
@@ -447,6 +450,11 @@ async def submit_content(
         "collaboration_id": collaboration_id,
         "content_url": data.content_url,
         "platform": platform,
+        # Identifies *which* deliverable this fulfils. Without these the
+        # brand just sees N rows that all say "instagram" and can't tell
+        # reel 1 from reel 2, or spot what's still missing.
+        "content_type": data.content_type,
+        "deliverable_index": data.deliverable_index,
         "submission_type": submission_type,
         "views": data.views,
         "likes": data.likes,
@@ -460,8 +468,8 @@ async def submit_content(
             collab = updated
 
     business = await business_repo.get_by_id(collab.business_id)
+    phase = "live post" if submission_type == SubmissionType.LIVE.value else "draft"
     if business:
-        phase = "live post" if submission_type == SubmissionType.LIVE.value else "draft"
         await notification_service.create_notification(
             profile_id=business.profile_id,
             type=NotificationType.COLLABORATION_CONTENT_SUBMITTED,
@@ -469,6 +477,14 @@ async def submit_content(
             body=f"A creator submitted a {phase} for your collaboration.",
             related_id=collaboration_id,
         )
+
+    await chat_service.post_collaboration_event(
+        collaboration_id,
+        profile_id,
+        "content_submitted",
+        f"Submitted a {phase} for review.",
+        extra={"submission_type": submission_type, "content_url": data.content_url},
+    )
 
     return await get_collaboration(
         collaboration_id, profile_id, "creator",
@@ -548,6 +564,27 @@ async def request_revision(
             related_id=collaboration_id,
         )
 
+    # Carry the actual notes into the thread — the whole point of the review
+    # landing in chat is that the creator can read what needs changing (and
+    # reply about it) without bouncing to another screen.
+    overall_note = (data.overall_note or "").strip()
+    note_count = len(data.notes or [])
+    summary = overall_note or (
+        f"Requested changes on {note_count} item{'s' if note_count != 1 else ''}."
+        if note_count
+        else "Requested changes on the draft."
+    )
+    await chat_service.post_collaboration_event(
+        collaboration_id,
+        profile_id,
+        "revision_requested",
+        summary,
+        extra={
+            "overall_note": overall_note or None,
+            "notes": [n.model_dump() for n in (data.notes or [])],
+        },
+    )
+
     return _collaboration_to_response(updated, revision_history=[history])
 
 
@@ -593,6 +630,13 @@ async def approve_draft(
             body="Your draft was approved. You can now publish the live post.",
             related_id=collaboration_id,
         )
+
+    await chat_service.post_collaboration_event(
+        collaboration_id,
+        profile_id,
+        "draft_approved",
+        "Approved the draft. Ready to publish.",
+    )
 
     return _collaboration_to_response(updated)
 
@@ -768,5 +812,12 @@ async def confirm_payment(
             body="The business confirmed they've paid you and marked this collaboration complete.",
             related_id=collaboration_id,
         )
+
+    await chat_service.post_collaboration_event(
+        collaboration_id,
+        profile_id,
+        "payment_confirmed",
+        "Confirmed payment. This collaboration is complete.",
+    )
 
     return _collaboration_to_response(updated)
