@@ -9,8 +9,8 @@ class ShortlistRepository(BaseRepository):
             (await self._table("business_shortlists"))
             .select(
                 "*, creator:creators!business_shortlists_creator_id_fkey("
-                "id, name, username, city, niche, follower_count, engagement_rate, "
-                "profile_photo_url, instagram_handle, instagram_connected, identity_status"
+                "id, name, city, niche, follower_count, engagement_rate, "
+                "profile_photo_url, instagram_handle"
                 ")"
             )
             .eq("business_id", business_id)
