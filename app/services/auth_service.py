@@ -117,18 +117,37 @@ async def signup_creator(
     profile_id = profile.id
 
     creator_repo = creator_repo or CreatorRepository()
-    await creator_repo.insert_creator({
-        "profile_id": profile_id,
-        "name": data.name,
-        "username": data.username,
-        "city": data.city,
-        "niche": data.niche,
-        "profile_photo_url": data.profile_photo_url,
-        # follower_count/instagram_handle intentionally omitted — they stay
-        # at their DB defaults (0 / null) until the creator actually
-        # connects Instagram via connect_instagram, which is the only
-        # legitimate writer of those columns.
-    })
+    existing_creator = await creator_repo.get_by_profile_id(profile_id)
+
+    if existing_creator and auth_response.user.email_confirmed_at:
+        # sign_up() doesn't error for an email that's already registered —
+        # Supabase returns 200 with that account's real id and no session
+        # (logged as "user_repeated_signup"), by design, so this endpoint
+        # can't be used to enumerate registered emails. Inserting
+        # unconditionally below would 500 on creators_profile_id_key's
+        # unique constraint instead of giving a real answer.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists. Try signing in instead.",
+        )
+    elif not existing_creator:
+        await creator_repo.insert_creator({
+            "profile_id": profile_id,
+            "name": data.name,
+            "username": data.username,
+            "city": data.city,
+            "niche": data.niche,
+            "profile_photo_url": data.profile_photo_url,
+            # follower_count/instagram_handle intentionally omitted — they
+            # stay at their DB defaults (0 / null) until the creator
+            # actually connects Instagram via connect_instagram, which is
+            # the only legitimate writer of those columns.
+        })
+    # else: existing_creator is set but the account isn't confirmed yet —
+    # someone re-submitting signup before finishing verification. Nothing
+    # new to insert; fall through and respond exactly like a first-time
+    # signup would (withheld tokens, same profile data), which sends them
+    # back to the verify-email screen instead of a scary duplicate error.
 
     access_token, refresh_token = _confirmed_session_tokens(auth_response)
     return {
@@ -193,10 +212,25 @@ async def signup_business(
     profile_id = profile.id
 
     business_repo = business_repo or BusinessRepository()
-    await business_repo.insert_business({
-        "profile_id": profile_id,
-        "owner_name": data.name,
-    })
+    existing_business = await business_repo.get_by_profile_id(profile_id)
+
+    if existing_business and auth_response.user.email_confirmed_at:
+        # See the matching check in signup_creator — sign_up() returns 200
+        # with the existing user's real id and no session for an
+        # already-registered email instead of erroring, so this has to be
+        # caught explicitly or the insert below 500s on
+        # businesses_profile_id_key's unique constraint.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists. Try signing in instead.",
+        )
+    elif not existing_business:
+        await business_repo.insert_business({
+            "profile_id": profile_id,
+            "owner_name": data.name,
+        })
+    # else: existing but unconfirmed — retrying signup before verifying.
+    # Fall through to the normal withheld-tokens response.
 
     access_token, refresh_token = _confirmed_session_tokens(auth_response)
     return {

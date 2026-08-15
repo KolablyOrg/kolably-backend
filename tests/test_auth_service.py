@@ -132,12 +132,16 @@ class FakeCreatorRepo:
 
 
 class FakeBusinessRepo:
-    def __init__(self):
+    def __init__(self, business=None):
         self.inserted = None
+        self._business = business
 
     async def insert_business(self, data):
         self.inserted = data
         return {**data, "id": "business-1"}
+
+    async def get_by_profile_id(self, profile_id):
+        return self._business
 
 
 def _patch_supabase(monkeypatch, gotrue):
@@ -522,6 +526,87 @@ async def test_signup_business_returns_tokens_when_email_confirmed(monkeypatch):
 
     assert result["access_token"] == "access-token"
     assert result["refresh_token"] == "refresh-token"
+
+
+# ── signup_creator / signup_business: duplicate-signup guard ──────────
+#
+# Regression coverage for a real production 500: sign_up() doesn't error
+# for an email that's already registered — Supabase returns HTTP 200 with
+# that account's real user id and no session (logged in the Supabase
+# dashboard as "user_repeated_signup"), by design, so this endpoint can't
+# be used to enumerate registered emails. The old code inserted a
+# creator/business row unconditionally, which hit creators_profile_id_key /
+# businesses_profile_id_key's unique constraint on a second attempt and
+# 500'd instead of giving a real answer.
+
+EXISTING_CREATOR = {"id": "creator-1", "profile_id": "profile-1", "name": "Alice"}
+EXISTING_BUSINESS = {"id": "business-1", "profile_id": "profile-1", "owner_name": "Bob Biz"}
+
+
+async def test_signup_creator_conflicts_when_already_registered_and_confirmed(monkeypatch):
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+    creator_repo = FakeCreatorRepo(creator=EXISTING_CREATOR)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.signup_creator(
+            CREATOR_SIGNUP_DATA,
+            profile_repo=FakeProfileRepo(dict(PROFILE)),
+            creator_repo=creator_repo,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert creator_repo.inserted is None  # never attempted the doomed insert
+
+
+async def test_signup_creator_repeat_attempt_while_still_unconfirmed_does_not_crash(monkeypatch):
+    """Someone re-submitting signup before finishing verification — not a
+    real conflict, just retry. Must not attempt a second insert (which
+    would also 500), and must still respond like a normal signup so the
+    frontend sends them back to the verify-email screen."""
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=None)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+    creator_repo = FakeCreatorRepo(creator=EXISTING_CREATOR)
+
+    result = await auth_service.signup_creator(
+        CREATOR_SIGNUP_DATA,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=creator_repo,
+    )
+
+    assert result["access_token"] is None
+    assert creator_repo.inserted is None
+
+
+async def test_signup_business_conflicts_when_already_registered_and_confirmed(monkeypatch):
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+    business_repo = FakeBusinessRepo(business=EXISTING_BUSINESS)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.signup_business(
+            BUSINESS_SIGNUP_DATA,
+            profile_repo=FakeProfileRepo({**PROFILE, "role": "business"}),
+            business_repo=business_repo,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert business_repo.inserted is None
+
+
+async def test_signup_business_repeat_attempt_while_still_unconfirmed_does_not_crash(monkeypatch):
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=None)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+    business_repo = FakeBusinessRepo(business=EXISTING_BUSINESS)
+
+    result = await auth_service.signup_business(
+        BUSINESS_SIGNUP_DATA,
+        profile_repo=FakeProfileRepo({**PROFILE, "role": "business"}),
+        business_repo=business_repo,
+    )
+
+    assert result["access_token"] is None
+    assert business_repo.inserted is None
 
 
 # ── verify_signup_otp ───────────────────────────────────────────────
