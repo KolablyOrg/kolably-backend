@@ -12,7 +12,7 @@ from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.invoice_repo import InvoiceRepository
 from app.schemas.invoice import InvoiceCreateRequest, InvoiceResponse
-from app.services import business_access, notification_service
+from app.services import business_access, chat_service, notification_service
 
 
 def _invoice_number(invoice: Invoice) -> str:
@@ -135,6 +135,14 @@ async def create_invoice(
         title="New invoice received",
         body=f"{creator.name} sent you an invoice for ₹{total_amount:,.0f}",
         related_id=row.id,
+    )
+
+    await chat_service.post_collaboration_event(
+        data.collaboration_id,
+        creator.profile_id,
+        "invoice_raised",
+        f"Raised an invoice for ₹{total_amount:,.0f}.",
+        extra={"invoice_id": row.id, "total_amount": total_amount},
     )
 
     return _invoice_to_response(row)

@@ -48,6 +48,12 @@ class Message:
     sender_id: str
     content: str
     created_at: datetime = field(default_factory=datetime.utcnow)
+    # 'text' = someone typed it; 'event' = a campaign lifecycle entry posted
+    # by the system (draft submitted, revision requested, invoice raised…).
+    # Defaults to 'text' so every existing construction site is unaffected.
+    kind: str = "text"
+    # Event-specific payload ({"event_type": ..., ...}); None for text.
+    metadata: dict[str, Any] | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Message":
@@ -57,6 +63,8 @@ class Message:
             sender_id=row["sender_id"],
             content=row["content"],
             created_at=row["created_at"],
+            kind=row.get("kind") or "text",
+            metadata=row.get("metadata"),
         )
 
     def to_row(self) -> dict[str, Any]:
@@ -66,4 +74,6 @@ class Message:
             "sender_id": self.sender_id,
             "content": self.content,
             "created_at": self.created_at,
+            "kind": self.kind,
+            "metadata": self.metadata,
         }

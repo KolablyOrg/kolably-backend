@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -33,6 +34,10 @@ from app.schemas.campaign import (
 from app.schemas.creator import CreatorSummary
 from app.schemas.user import UserInToken
 from app.services import business_access, notification_service
+
+# How long a brand invite stays acceptable. Enforced on accept (see
+# accept_application) rather than by a background sweep.
+INVITE_EXPIRY_DAYS = 7
 
 
 def _campaign_to_response(campaign: Campaign) -> CampaignResponse:
@@ -785,12 +790,26 @@ async def invite_creator(
             detail="Creator already has an application for this campaign",
         )
 
+    # Invites expire so they don't sit pending forever — the creator-facing
+    # design shows a countdown, and a brand shouldn't be held to an offer
+    # indefinitely. Capped by the campaign's own deadline where one exists:
+    # an invite outliving its campaign would be accept-able into a campaign
+    # that's already closed.
+    expires_at = datetime.now(UTC) + timedelta(days=INVITE_EXPIRY_DAYS)
+    campaign_deadline = getattr(campaign, "deadline", None)
+    if campaign_deadline:
+        deadline = campaign_deadline
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        expires_at = min(expires_at, deadline)
+
     insert_data = {
         "campaign_id": campaign_id,
         "creator_id": creator_id,
         "direction": ApplicationDirection.BUSINESS_INVITED.value,
         "message": message,
         "status": ApplicationStatus.PENDING.value,
+        "expires_at": expires_at,
     }
 
     application = await app_repo.insert_application(insert_data)

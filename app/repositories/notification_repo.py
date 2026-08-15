@@ -13,6 +13,11 @@ class NotificationRepository(BaseRepository):
             (await self._table("notifications"))
             .select("*", count="exact")
             .eq("profile_id", profile_id)
+            # Newest first. Without an explicit order Postgres returns rows in
+            # no guaranteed order, which put stale notifications above fresh
+            # ones — and, worse, made `.range()` below unsound: paging over an
+            # unordered set can repeat or skip rows between pages.
+            .order("created_at", desc=True)
         )
 
         start = (page - 1) * page_size

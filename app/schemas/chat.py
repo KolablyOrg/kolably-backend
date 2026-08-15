@@ -3,6 +3,7 @@ Chat / messaging Pydantic schemas.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -42,6 +43,12 @@ class MessageResponse(BaseModel):
     # Only meaningful for messages the requesting user sent — true once the
     # other participant's last_read_at has passed this message's timestamp.
     seen: bool = False
+    # 'text' | 'event'. Clients render 'event' as a neutral, centred system
+    # entry rather than a chat bubble attributed to a person — `sender_id`
+    # on an event is the actor who triggered it, not someone who typed.
+    kind: str = "text"
+    # For kind='event': {"event_type": "...", ...event-specific fields}.
+    metadata: dict[str, Any] | None = None
 
 
 class CollaborationContext(BaseModel):

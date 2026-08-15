@@ -12,8 +12,9 @@ from app.schemas.collaboration import (
     RequestRevisionRequest,
 )
 from app.schemas.common import PaginatedResponse
+from app.schemas.review import ReviewCreateRequest, ReviewResponse
 from app.schemas.user import UserInToken
-from app.services import collaboration_service
+from app.services import collaboration_service, review_service
 
 router = APIRouter()
 
@@ -160,6 +161,40 @@ async def confirm_payment(
     """Business confirms they paid the creator directly, completing the
     collaboration (business owner only)."""
     return await collaboration_service.confirm_payment(
+        collaboration_id=collaboration_id,
+        profile_id=user.id,
+    )
+
+
+# ── Reviews ───────────────────────────────────────────
+
+@router.post("/{collaboration_id}/review", response_model=ReviewResponse)
+async def submit_review(
+    collaboration_id: str,
+    data: ReviewCreateRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Rate the other party after a completed collaboration.
+
+    Works in both directions — who is being reviewed is derived from which
+    side of the collaboration the caller is on, never from the request body.
+    Submitting again edits the existing review rather than adding a second.
+    """
+    return await review_service.submit_review(
+        collaboration_id=collaboration_id,
+        profile_id=user.id,
+        data=data,
+    )
+
+
+@router.get("/{collaboration_id}/review", response_model=ReviewResponse | None)
+async def get_my_review(
+    collaboration_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """The caller's own review for this collaboration, or null — lets the
+    client show "edit your review" instead of offering a duplicate."""
+    return await review_service.get_my_review(
         collaboration_id=collaboration_id,
         profile_id=user.id,
     )

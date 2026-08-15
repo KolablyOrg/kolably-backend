@@ -15,6 +15,8 @@ class ContentSubmissionResponse(BaseModel):
     collaboration_id: str
     content_url: str
     platform: Platform
+    content_type: str | None = None
+    deliverable_index: int | None = None
     submission_type: SubmissionType = SubmissionType.DRAFT
     views: int | None = None
     likes: int | None = None
@@ -28,6 +30,17 @@ class ContentSubmissionResponse(BaseModel):
 class ContentSubmitRequest(BaseModel):
     content_url: str
     platform: Platform
+    # Which campaign deliverable this submission fulfils. Optional so older
+    # clients keep working, but without them the brand can't tell one
+    # submission from another beyond its platform.
+    content_type: str | None = Field(
+        None, description="reel/story/post — mirrors the campaign deliverable's content_type"
+    )
+    deliverable_index: int | None = Field(
+        None,
+        ge=0,
+        description="Zero-based slot in the expanded deliverable list, so 'reel 2 of 2' is identifiable",
+    )
     submission_type: SubmissionType = Field(
         SubmissionType.DRAFT,
         description=(
@@ -94,6 +107,12 @@ class CollaborationBusinessInfo(BaseModel):
     business_name: str
     logo_url: str | None = None
     gst_number: str | None = None
+    # The brand's *profile* id — what POST /chat/conversations takes as
+    # participant_id (`id` above is the business record id, which that
+    # endpoint rejects). Without it the client had a `business` object that
+    # looked complete but couldn't open a chat, and its own fallback fetch
+    # was skipped precisely because this object was present.
+    user_id: str | None = None
 
 
 class CollaborationResponse(BaseModel):
