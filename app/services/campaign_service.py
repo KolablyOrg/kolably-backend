@@ -105,6 +105,7 @@ def _campaign_to_summary(
         created_at=campaign.created_at,
         applicant_count=campaign.applicant_count,
         accepted_count=campaign.accepted_count,
+        pending_applicant_count=getattr(campaign, "pending_applicant_count", None),
         max_creators=campaign.max_creators,
         business_name=business_name,
         business_logo_url=business_logo_url,
@@ -467,6 +468,7 @@ async def list_campaigns(
             campaign.applicant_count = count_data.get("applicant_count")
             campaign.accepted_count = count_data.get("accepted_count")
             campaign.posted_count = count_data.get("posted_count")
+            campaign.pending_applicant_count = count_data.get("pending_applicant_count")
 
     business_ids = list({c.business_id for c in campaigns if c.business_id})
     businesses = await business_repo.get_by_ids(business_ids)

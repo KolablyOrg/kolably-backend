@@ -194,16 +194,18 @@ class CampaignRepository(BaseRepository):
         for row in rows:
             cid = row["campaign_id"]
             entry = counts.setdefault(
-                cid, {"applicant_count": 0, "accepted_count": 0, "posted_count": 0}
+                cid, {"applicant_count": 0, "accepted_count": 0, "posted_count": 0, "pending_applicant_count": 0}
             )
             entry["applicant_count"] += 1
+            if row["status"] == "pending":
+                entry["pending_applicant_count"] += 1
             if row["status"] == "accepted":
                 entry["accepted_count"] += 1
 
         posted = await self.fetch_posted_counts(campaign_ids)
         for cid, posted_count in posted.items():
             entry = counts.setdefault(
-                cid, {"applicant_count": 0, "accepted_count": 0, "posted_count": 0}
+                cid, {"applicant_count": 0, "accepted_count": 0, "posted_count": 0, "pending_applicant_count": 0}
             )
             entry["posted_count"] = posted_count
 

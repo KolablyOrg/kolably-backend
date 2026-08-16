@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from app.core.dependencies import get_current_user, require_role
 from app.core.enums import UserRole
 from app.schemas.collaboration import (
+    ApproveSubmissionRequest,
     CollaborationResponse,
     ContentSubmitRequest,
     RequestRevisionRequest,
@@ -123,13 +124,14 @@ async def request_revision(
 )
 async def approve_draft(
     collaboration_id: str,
+    data: ApproveSubmissionRequest,
     user: UserInToken = Depends(get_current_user),
 ):
-    """Business approves a submitted draft — creator can now post it live
-    (business owner only)."""
+    """Business approves one submitted draft deliverable (business owner only)."""
     return await collaboration_service.approve_draft(
         collaboration_id=collaboration_id,
         profile_id=user.id,
+        data=data,
     )
 
 

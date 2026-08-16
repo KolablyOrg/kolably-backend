@@ -4,7 +4,13 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, status
 
 from app.core.crypto import decrypt_token
-from app.core.enums import CollaborationStatus, InvoiceStatus, NotificationType, SubmissionType
+from app.core.enums import (
+    CollaborationStatus,
+    DraftReviewStatus,
+    InvoiceStatus,
+    NotificationType,
+    SubmissionType,
+)
 from app.models.business import Business
 from app.models.campaign import Campaign
 from app.models.collaboration import Collaboration
@@ -14,10 +20,139 @@ from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.invoice_repo import InvoiceRepository
-from app.schemas.collaboration import ContentSubmitRequest, RequestRevisionRequest
+from app.schemas.collaboration import (
+    ApproveSubmissionRequest,
+    ContentSubmitRequest,
+    RequestRevisionRequest,
+)
 from app.services import business_access, chat_service, instagram_service, notification_service
 
 logger = logging.getLogger(__name__)
+
+
+def _required_deliverable_count(campaign: Campaign | None) -> int:
+    if not campaign or not campaign.deliverables:
+        return 0
+    total = 0
+    for deliverable in campaign.deliverables:
+        quantity = deliverable.quantity if hasattr(deliverable, "quantity") else deliverable.get("quantity", 1)
+        try:
+            parsed = int(quantity)
+        except (TypeError, ValueError):
+            parsed = 1
+        total += max(1, min(parsed, 20))
+    return total
+
+
+def _latest_drafts_by_index(submissions: list[dict]) -> dict[int, dict]:
+    by_index: dict[int, dict] = {}
+    unindexed: list[dict] = []
+    for sub in submissions:
+        if (sub.get("submission_type") or SubmissionType.DRAFT.value) == SubmissionType.LIVE.value:
+            continue
+        idx = sub.get("deliverable_index")
+        if idx is None or not isinstance(idx, (int, float)):
+            unindexed.append(sub)
+            continue
+        key = int(idx)
+        existing = by_index.get(key)
+        if not existing or sub.get("submitted_at", "") > existing.get("submitted_at", ""):
+            by_index[key] = sub
+
+    if by_index:
+        return by_index
+
+    if not unindexed:
+        return {}
+
+    sorted_subs = sorted(unindexed, key=lambda s: s.get("submitted_at", ""), reverse=True)
+    latest_time = sorted_subs[0].get("submitted_at", "")
+    batch = [sub for sub in sorted_subs if sub.get("submitted_at", "") == latest_time] or sorted_subs
+    if len(batch) > 1:
+        from datetime import datetime
+
+        def _ts(value: str) -> float:
+            try:
+                return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+            except (TypeError, ValueError):
+                return 0.0
+
+        anchor = _ts(batch[0].get("submitted_at", ""))
+        batch = [sub for sub in batch if anchor - _ts(sub.get("submitted_at", "")) <= 120]
+
+    batch = sorted(batch, key=lambda s: s.get("submitted_at", ""))
+    return {index: sub for index, sub in enumerate(batch)}
+
+
+def _serialize_submission(sub: dict) -> dict:
+    return {
+        "id": sub["id"],
+        "collaboration_id": sub["collaboration_id"],
+        "content_url": sub["content_url"],
+        "platform": sub["platform"],
+        "content_type": sub.get("content_type"),
+        "deliverable_index": sub.get("deliverable_index"),
+        "submission_type": sub.get("submission_type") or SubmissionType.DRAFT.value,
+        "views": sub.get("views"),
+        "likes": sub.get("likes"),
+        "comments": sub.get("comments"),
+        "synced_at": sub.get("synced_at"),
+        "submitted_at": sub["submitted_at"],
+        "verification_checks": sub.get("verification_checks"),
+        "verified_at": sub.get("verified_at"),
+        "draft_status": sub.get("draft_status") or DraftReviewStatus.PENDING.value,
+        "revision_notes": sub.get("revision_notes") or [],
+        "revision_overall_note": sub.get("revision_overall_note"),
+    }
+
+
+async def _all_required_drafts_approved(
+    collaboration_id: str,
+    *,
+    repo: CollaborationRepository,
+    campaign_repo: CampaignRepository,
+    campaign_id: str,
+) -> bool:
+    submissions = await repo.list_submissions(collaboration_id)
+    by_index = _latest_drafts_by_index(submissions)
+    if not by_index:
+        return False
+
+    campaign = await campaign_repo.get_by_id(campaign_id)
+    required = _required_deliverable_count(campaign)
+    if required <= 0:
+        required = max(by_index.keys()) + 1
+
+    if len(by_index) < required:
+        return False
+    for index in range(required):
+        sub = by_index.get(index)
+        if not sub:
+            return False
+        if (sub.get("draft_status") or DraftReviewStatus.PENDING.value) != DraftReviewStatus.APPROVED.value:
+            return False
+    return True
+
+
+async def _get_owned_draft_submission(
+    collaboration_id: str,
+    submission_id: str,
+    *,
+    repo: CollaborationRepository,
+) -> dict:
+    submissions = await repo.list_submissions(collaboration_id)
+    submission = next((sub for sub in submissions if sub["id"] == submission_id), None)
+    if not submission:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission not found",
+        )
+    if (submission.get("submission_type") or SubmissionType.DRAFT.value) == SubmissionType.LIVE.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only draft submissions can be reviewed",
+        )
+    return submission
 
 
 async def _get_creator_id_for_user(
@@ -228,20 +363,7 @@ async def get_collaboration(
     submissions_raw = await repo.list_submissions(collaboration_id)
     revision_history = await repo.list_revision_history(collaboration_id)
     submissions = [
-        {
-            "id": sub["id"],
-            "collaboration_id": sub["collaboration_id"],
-            "content_url": sub["content_url"],
-            "platform": sub["platform"],
-            "submission_type": sub.get("submission_type") or "draft",
-            "views": sub.get("views"),
-            "likes": sub.get("likes"),
-            "comments": sub.get("comments"),
-            "synced_at": sub.get("synced_at"),
-            "submitted_at": sub["submitted_at"],
-            "verification_checks": sub.get("verification_checks"),
-            "verified_at": sub.get("verified_at"),
-        }
+        _serialize_submission(sub)
         for sub in submissions_raw
     ]
 
@@ -421,7 +543,10 @@ async def submit_content(
     ) or SubmissionType.DRAFT.value
 
     if submission_type == SubmissionType.LIVE.value:
-        if collab.status != CollaborationStatus.APPROVED:
+        if collab.status not in (
+            CollaborationStatus.APPROVED,
+            CollaborationStatus.LIVE_SUBMITTED,
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="The draft needs to be approved before you submit the live post link",
@@ -456,6 +581,9 @@ async def submit_content(
         "content_type": data.content_type,
         "deliverable_index": data.deliverable_index,
         "submission_type": submission_type,
+        "draft_status": DraftReviewStatus.PENDING.value
+        if submission_type == SubmissionType.DRAFT.value
+        else None,
         "views": data.views,
         "likes": data.likes,
         "comments": data.comments,
@@ -502,10 +630,7 @@ async def request_revision(
     creator_repo: CreatorRepository | None = None,
     member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
-    """Business asks for changes on a submitted draft — mirrors the
-    `revision_requested` pattern already used at the application stage
-    (`applications.py`'s request-revision), one step later in the funnel.
-    """
+    """Business asks for changes on one submitted draft deliverable."""
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
     creator_repo = creator_repo or CreatorRepository()
@@ -529,8 +654,30 @@ async def request_revision(
             detail="Add at least one timestamped note or an overall note",
         )
 
+    submission = await _get_owned_draft_submission(
+        collaboration_id, data.submission_id, repo=repo
+    )
+    if (submission.get("draft_status") or DraftReviewStatus.PENDING.value) == DraftReviewStatus.APPROVED.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This deliverable has already been approved",
+        )
+
+    updated_submission = await repo.update_submission(
+        data.submission_id,
+        {
+            "draft_status": DraftReviewStatus.NEEDS_REVISION.value,
+            "revision_notes": [n.model_dump() for n in data.notes],
+            "revision_overall_note": (data.overall_note or "").strip() or None,
+        },
+    )
+    if not updated_submission:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update submission",
+        )
+
     updated = await repo.update_status(collaboration_id, {
-        "status": CollaborationStatus.REVISION_REQUESTED.value,
         "revision_rounds": collab.revision_rounds + 1,
         "revision_notes": [n.model_dump() for n in data.notes],
         "revision_overall_note": (data.overall_note or "").strip() or None,
@@ -560,19 +707,17 @@ async def request_revision(
             profile_id=creator.profile_id,
             type=NotificationType.REVISION_REQUESTED,
             title="Revision requested",
-            body="The business asked for changes on your submitted draft.",
+            body="The business asked for changes on one of your submitted drafts.",
             related_id=collaboration_id,
         )
 
-    # Carry the actual notes into the thread — the whole point of the review
-    # landing in chat is that the creator can read what needs changing (and
-    # reply about it) without bouncing to another screen.
     overall_note = (data.overall_note or "").strip()
     note_count = len(data.notes or [])
+    deliverable_label = submission.get("content_type") or "draft"
     summary = overall_note or (
-        f"Requested changes on {note_count} item{'s' if note_count != 1 else ''}."
-        if note_count
-        else "Requested changes on the draft."
+        f"Requested changes on the {deliverable_label}."
+        if note_count == 0
+        else f"Requested changes on the {deliverable_label} ({note_count} note{'s' if note_count != 1 else ''})."
     )
     await chat_service.post_collaboration_event(
         collaboration_id,
@@ -580,28 +725,36 @@ async def request_revision(
         "revision_requested",
         summary,
         extra={
+            "submission_id": data.submission_id,
+            "deliverable_index": submission.get("deliverable_index"),
             "overall_note": overall_note or None,
             "notes": [n.model_dump() for n in (data.notes or [])],
         },
     )
 
-    return _collaboration_to_response(updated, revision_history=[history])
+    return await get_collaboration(
+        collaboration_id, profile_id, "business",
+        repo=repo, business_repo=business_repo, creator_repo=creator_repo, member_repo=member_repo,
+    )
 
 
 async def approve_draft(
     collaboration_id: str,
     profile_id: str,
+    data: ApproveSubmissionRequest,
     *,
     repo: CollaborationRepository | None = None,
     business_repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
     member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
-    """Business approves a submitted draft — creator can now post it live
-    and submit the live link (`submit_content` with submission_type='live')."""
+    """Business approves one draft deliverable. When every required deliverable
+    is approved, the collaboration moves to `approved`."""
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
     creator_repo = creator_repo or CreatorRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
 
     collab = await _get_owned_collaboration(
         collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
@@ -612,33 +765,76 @@ async def approve_draft(
             detail="Only a submitted draft awaiting review can be approved",
         )
 
-    updated = await repo.update_status(
-        collaboration_id, {"status": CollaborationStatus.APPROVED.value}
+    submission = await _get_owned_draft_submission(
+        collaboration_id, data.submission_id, repo=repo
     )
-    if not updated:
+    if (submission.get("draft_status") or DraftReviewStatus.PENDING.value) == DraftReviewStatus.APPROVED.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This deliverable has already been approved",
+        )
+
+    updated_submission = await repo.update_submission(
+        data.submission_id,
+        {"draft_status": DraftReviewStatus.APPROVED.value},
+    )
+    if not updated_submission:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to approve draft",
         )
 
-    creator = await creator_repo.get_by_id(collab.creator_id)
-    if creator:
-        await notification_service.create_notification(
-            profile_id=creator.profile_id,
-            type=NotificationType.COLLABORATION_DRAFT_APPROVED,
-            title="Draft approved",
-            body="Your draft was approved. You can now publish the live post.",
-            related_id=collaboration_id,
-        )
-
-    await chat_service.post_collaboration_event(
+    deliverable_label = submission.get("content_type") or "draft"
+    all_approved = await _all_required_drafts_approved(
         collaboration_id,
-        profile_id,
-        "draft_approved",
-        "Approved the draft. Ready to publish.",
+        repo=repo,
+        campaign_repo=campaign_repo,
+        campaign_id=collab.campaign_id,
     )
 
-    return _collaboration_to_response(updated)
+    updated = collab
+    if all_approved:
+        updated = await repo.update_status(
+            collaboration_id, {"status": CollaborationStatus.APPROVED.value}
+        )
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to approve draft",
+            )
+
+        creator = await creator_repo.get_by_id(collab.creator_id)
+        if creator:
+            await notification_service.create_notification(
+                profile_id=creator.profile_id,
+                type=NotificationType.COLLABORATION_DRAFT_APPROVED,
+                title="Draft approved",
+                body="All deliverables were approved. You can now publish the live posts.",
+                related_id=collaboration_id,
+            )
+
+        await chat_service.post_collaboration_event(
+            collaboration_id,
+            profile_id,
+            "draft_approved",
+            "Approved all deliverables. Ready to publish.",
+        )
+    else:
+        await chat_service.post_collaboration_event(
+            collaboration_id,
+            profile_id,
+            "draft_approved",
+            f"Approved the {deliverable_label}.",
+            extra={
+                "submission_id": data.submission_id,
+                "deliverable_index": submission.get("deliverable_index"),
+            },
+        )
+
+    return await get_collaboration(
+        collaboration_id, profile_id, "business",
+        repo=repo, business_repo=business_repo, creator_repo=creator_repo, member_repo=member_repo,
+    )
 
 
 async def verify_live_post(

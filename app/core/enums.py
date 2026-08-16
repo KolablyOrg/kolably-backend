@@ -76,6 +76,12 @@ class SubmissionType(StrEnum):
     LIVE = "live"
 
 
+class DraftReviewStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    NEEDS_REVISION = "needs_revision"
+
+
 class NotificationType(StrEnum):
     APPLICATION_RECEIVED = "application_received"
     APPLICATION_ACCEPTED = "application_accepted"

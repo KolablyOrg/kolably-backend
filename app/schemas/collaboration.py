@@ -7,7 +7,26 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.enums import Platform, SubmissionType
+from app.core.enums import Platform, SubmissionType, DraftReviewStatus
+
+
+class RevisionNoteItem(BaseModel):
+    timestamp: str | None = None
+    note: str = Field(..., min_length=1)
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parts = value.split(":")
+        if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
+            raise ValueError("Timestamp must use M:SS or H:MM:SS format")
+        seconds = int(parts[-1])
+        minutes = int(parts[-2])
+        if seconds > 59 or (len(parts) == 3 and minutes > 59):
+            raise ValueError("Timestamp contains an invalid minute or second")
+        return value
 
 
 class ContentSubmissionResponse(BaseModel):
@@ -25,6 +44,9 @@ class ContentSubmissionResponse(BaseModel):
     submitted_at: datetime
     verification_checks: dict[str, Any] | None = None
     verified_at: datetime | None = None
+    draft_status: DraftReviewStatus | None = None
+    revision_notes: list[RevisionNoteItem] = []
+    revision_overall_note: str | None = None
 
 
 class ContentSubmitRequest(BaseModel):
@@ -55,28 +77,20 @@ class ContentSubmitRequest(BaseModel):
     notes: str | None = None
 
 
-class RevisionNoteItem(BaseModel):
-    timestamp: str | None = None
-    note: str = Field(..., min_length=1)
-
-    @field_validator("timestamp")
-    @classmethod
-    def validate_timestamp(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        parts = value.split(":")
-        if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
-            raise ValueError("Timestamp must use M:SS or H:MM:SS format")
-        seconds = int(parts[-1])
-        minutes = int(parts[-2])
-        if seconds > 59 or (len(parts) == 3 and minutes > 59):
-            raise ValueError("Timestamp contains an invalid minute or second")
-        return value
-
-
 class RequestRevisionRequest(BaseModel):
+    submission_id: str = Field(
+        ...,
+        description="The draft submission (deliverable) that needs changes",
+    )
     notes: list[RevisionNoteItem] = Field(default_factory=list)
     overall_note: str | None = None
+
+
+class ApproveSubmissionRequest(BaseModel):
+    submission_id: str = Field(
+        ...,
+        description="The draft submission (deliverable) to approve",
+    )
 
 
 class RevisionHistoryResponse(BaseModel):

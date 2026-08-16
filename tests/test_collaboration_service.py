@@ -11,7 +11,12 @@ from app.models.business import Business
 from app.models.campaign import Campaign
 from app.models.collaboration import Collaboration
 from app.models.creator import Creator
-from app.schemas.collaboration import ContentSubmitRequest, RequestRevisionRequest, RevisionNoteItem
+from app.schemas.collaboration import (
+    ApproveSubmissionRequest,
+    ContentSubmitRequest,
+    RequestRevisionRequest,
+    RevisionNoteItem,
+)
 from app.services import collaboration_service
 
 COLLAB_ROW = {
@@ -450,12 +455,16 @@ async def test_submit_content_draft_rejected_once_approved():
 
 # ── request_revision ─────────────────────────────────────────────────
 async def test_request_revision_transitions_status_and_stores_notes(_stub_notifications):
-    repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"})
+    repo = FakeCollaborationRepo(
+        row={**COLLAB_ROW, "status": "content_submitted"},
+        submissions=[dict(DRAFT_SUBMISSION)],
+    )
 
     result = await collaboration_service.request_revision(
         collaboration_id="collab1",
         profile_id="p-business",
         data=RequestRevisionRequest(
+            submission_id="sub-draft",
             notes=[RevisionNoteItem(timestamp="0:04", note="Trim the intro")],
             overall_note="Punchier caption please",
         ),
@@ -464,11 +473,12 @@ async def test_request_revision_transitions_status_and_stores_notes(_stub_notifi
         creator_repo=FakeCreatorRepo(),
     )
 
-    assert result["status"] == "revision_requested"
+    assert result["status"] == "content_submitted"
     assert result["revision_notes"] == [{"timestamp": "0:04", "note": "Trim the intro"}]
     assert result["revision_overall_note"] == "Punchier caption please"
     assert result["revision_rounds"] == 1
     assert result["revision_history"][0]["revision_number"] == 1
+    assert repo.updated_submissions[0][1]["draft_status"] == "needs_revision"
     assert len(_stub_notifications) == 1
     assert _stub_notifications[0]["type"].value == "revision_requested"
 
@@ -478,7 +488,7 @@ async def test_request_revision_rejects_when_not_submitted():
         await collaboration_service.request_revision(
             collaboration_id="collab1",
             profile_id="p-business",
-            data=RequestRevisionRequest(overall_note="Fix it"),
+            data=RequestRevisionRequest(submission_id="sub-draft", overall_note="Fix it"),
             repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "active"}),
             business_repo=FakeBusinessRepo(),
             creator_repo=FakeCreatorRepo(),
@@ -491,7 +501,7 @@ async def test_request_revision_rejects_after_free_round_is_used():
         await collaboration_service.request_revision(
             collaboration_id="collab1",
             profile_id="p-business",
-            data=RequestRevisionRequest(overall_note="Fix it again"),
+            data=RequestRevisionRequest(submission_id="sub-draft", overall_note="Fix it again"),
             repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted", "revision_rounds": 1}),
             business_repo=FakeBusinessRepo(),
             creator_repo=FakeCreatorRepo(),
@@ -504,8 +514,11 @@ async def test_request_revision_requires_at_least_one_note():
         await collaboration_service.request_revision(
             collaboration_id="collab1",
             profile_id="p-business",
-            data=RequestRevisionRequest(),
-            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"}),
+            data=RequestRevisionRequest(submission_id="sub-draft"),
+            repo=FakeCollaborationRepo(
+                row={**COLLAB_ROW, "status": "content_submitted"},
+                submissions=[dict(DRAFT_SUBMISSION)],
+            ),
             business_repo=FakeBusinessRepo(),
             creator_repo=FakeCreatorRepo(),
         )
@@ -522,7 +535,7 @@ async def test_request_revision_rejects_non_owning_business():
         await collaboration_service.request_revision(
             collaboration_id="collab1",
             profile_id="p-other-business",
-            data=RequestRevisionRequest(overall_note="Fix it"),
+            data=RequestRevisionRequest(submission_id="sub-draft", overall_note="Fix it"),
             repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"}),
             business_repo=FakeBusinessRepo(business_id="b-other"),
             creator_repo=FakeCreatorRepo(),
@@ -532,18 +545,24 @@ async def test_request_revision_rejects_non_owning_business():
 
 # ── approve_draft ────────────────────────────────────────────────────
 async def test_approve_draft_transitions_status(_stub_notifications):
-    repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "content_submitted"})
+    repo = FakeCollaborationRepo(
+        row={**COLLAB_ROW, "status": "content_submitted"},
+        submissions=[dict(DRAFT_SUBMISSION)],
+    )
 
     result = await collaboration_service.approve_draft(
         collaboration_id="collab1",
         profile_id="p-business",
+        data=ApproveSubmissionRequest(submission_id="sub-draft"),
         repo=repo,
         business_repo=FakeBusinessRepo(),
         creator_repo=FakeCreatorRepo(),
+        campaign_repo=FakeCampaignRepo(campaigns=[]),
     )
 
     assert result["status"] == "approved"
-    assert repo.updates == [("collab1", {"status": "approved"})]
+    assert repo.updated_submissions[0][1]["draft_status"] == "approved"
+    assert ("collab1", {"status": "approved"}) in repo.updates
     assert _stub_notifications[0]["profile_id"] == "p-creator"
     assert _stub_notifications[0]["type"].value == "collaboration_draft_approved"
 
@@ -553,8 +572,10 @@ async def test_approve_draft_rejects_when_not_submitted():
         await collaboration_service.approve_draft(
             collaboration_id="collab1",
             profile_id="p-business",
+            data=ApproveSubmissionRequest(submission_id="sub-draft"),
             repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "active"}),
             business_repo=FakeBusinessRepo(),
+            campaign_repo=FakeCampaignRepo(campaigns=[]),
         )
     assert exc.value.status_code == 400
 
@@ -566,6 +587,18 @@ LIVE_SUBMISSION = {
     "content_url": "https://instagram.com/reel/live1",
     "platform": "instagram",
     "submission_type": "live",
+    "submitted_at": "2024-01-01T00:00:00+00:00",
+}
+
+DRAFT_SUBMISSION = {
+    "id": "sub-draft",
+    "collaboration_id": "collab1",
+    "content_url": "https://instagram.com/reel/draft1",
+    "platform": "instagram",
+    "submission_type": "draft",
+    "content_type": "reel",
+    "deliverable_index": 0,
+    "draft_status": "pending",
     "submitted_at": "2024-01-01T00:00:00+00:00",
 }
 
@@ -739,9 +772,11 @@ async def test_collaboration_lifecycle_runs_from_draft_to_payment(_stub_notifica
     approved = await collaboration_service.approve_draft(
         collaboration_id="collab1",
         profile_id="p-business",
+        data=ApproveSubmissionRequest(submission_id=draft["content_submissions"][0]["id"]),
         repo=repo,
         business_repo=business_repo,
         creator_repo=creator_repo,
+        campaign_repo=FakeCampaignRepo(campaigns=[]),
     )
     live = await collaboration_service.submit_content(
         collaboration_id="collab1",

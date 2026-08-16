@@ -96,6 +96,7 @@ class Campaign:
     applicant_count: int | None = None
     accepted_count: int | None = None
     posted_count: int | None = None
+    pending_applicant_count: int | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any], counts: dict[str, Any] | None = None) -> "Campaign":
@@ -147,6 +148,7 @@ class Campaign:
             campaign.applicant_count = counts.get("applicant_count")
             campaign.accepted_count = counts.get("accepted_count")
             campaign.posted_count = counts.get("posted_count")
+            campaign.pending_applicant_count = counts.get("pending_applicant_count")
 
         return campaign
 
