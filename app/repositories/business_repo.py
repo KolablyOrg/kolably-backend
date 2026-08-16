@@ -105,7 +105,9 @@ class BusinessRepository(BaseRepository):
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = await self._execute(query.range(start, end))
+        result = await self._execute(
+            query.order("created_at", desc=True).range(start, end)
+        )
 
         rows = result.data or []
         return [Campaign.from_row(row) for row in rows], result.count or 0
