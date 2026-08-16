@@ -30,18 +30,121 @@ from app.services import business_access, chat_service, instagram_service, notif
 logger = logging.getLogger(__name__)
 
 
-def _required_deliverable_count(campaign: Campaign | None) -> int:
-    if not campaign or not campaign.deliverables:
+def _deliverable_slot_count(deliverables: list | None) -> int:
+    if not deliverables:
         return 0
     total = 0
-    for deliverable in campaign.deliverables:
-        quantity = deliverable.quantity if hasattr(deliverable, "quantity") else deliverable.get("quantity", 1)
+    for deliverable in deliverables:
+        if hasattr(deliverable, "quantity"):
+            quantity = deliverable.quantity
+        elif isinstance(deliverable, dict):
+            quantity = deliverable.get("quantity", 1)
+        else:
+            quantity = 1
         try:
             parsed = int(quantity)
         except (TypeError, ValueError):
             parsed = 1
         total += max(1, min(parsed, 20))
     return total
+
+
+def _required_deliverable_count(campaign: Campaign | None) -> int:
+    if not campaign or not campaign.deliverables:
+        return 0
+    items = [
+        d.to_dict() if hasattr(d, "to_dict") else d
+        for d in campaign.deliverables
+    ]
+    return _deliverable_slot_count(items)
+
+
+async def _resolve_required_deliverable_count(
+    campaign_id: str,
+    *,
+    campaign_repo: CampaignRepository,
+    collab: Collaboration | None = None,
+) -> int:
+    campaign = await campaign_repo.get_by_id(campaign_id)
+    required = _required_deliverable_count(campaign)
+    if required > 0:
+        return required
+    if collab and collab.deliverables:
+        return _deliverable_slot_count(collab.deliverables)
+    return 0
+
+
+async def _sync_draft_review_status(
+    collab: Collaboration,
+    *,
+    repo: CollaborationRepository,
+    campaign_repo: CampaignRepository,
+) -> Collaboration:
+    """Keep collab status aligned with per-deliverable draft review progress."""
+    submissions = await repo.list_submissions(collab.id)
+    if not _latest_drafts_by_index(submissions):
+        return collab
+
+    all_approved = await _all_required_drafts_approved(
+        collab.id,
+        repo=repo,
+        campaign_repo=campaign_repo,
+        campaign_id=collab.campaign_id,
+        collab=collab,
+    )
+
+    if all_approved:
+        if collab.status != CollaborationStatus.APPROVED:
+            updated = await repo.update_status(
+                collab.id, {"status": CollaborationStatus.APPROVED.value}
+            )
+            return updated or collab
+        return collab
+
+    if collab.status in (
+        CollaborationStatus.APPROVED,
+        CollaborationStatus.ACTIVE,
+        CollaborationStatus.REVISION_REQUESTED,
+    ):
+        updated = await repo.update_status(
+            collab.id, {"status": CollaborationStatus.CONTENT_SUBMITTED.value}
+        )
+        return updated or collab
+    return collab
+
+
+async def _assert_can_review_draft(
+    collab: Collaboration,
+    *,
+    repo: CollaborationRepository,
+    campaign_repo: CampaignRepository,
+) -> Collaboration:
+    if collab.status in (
+        CollaborationStatus.COMPLETED,
+        CollaborationStatus.CANCELLED,
+        CollaborationStatus.LIVE_SUBMITTED,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot review drafts for a {collab.status.value} collaboration",
+        )
+
+    collab = await _sync_draft_review_status(
+        collab, repo=repo, campaign_repo=campaign_repo
+    )
+
+    if not _latest_drafts_by_index(await repo.list_submissions(collab.id)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No draft submissions to review",
+        )
+
+    if collab.status != CollaborationStatus.CONTENT_SUBMITTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only a submitted draft awaiting review can be approved",
+        )
+    return collab
 
 
 def _latest_drafts_by_index(submissions: list[dict]) -> dict[int, dict]:
@@ -112,16 +215,27 @@ async def _all_required_drafts_approved(
     repo: CollaborationRepository,
     campaign_repo: CampaignRepository,
     campaign_id: str,
+    collab: Collaboration | None = None,
 ) -> bool:
     submissions = await repo.list_submissions(collaboration_id)
     by_index = _latest_drafts_by_index(submissions)
     if not by_index:
         return False
 
-    campaign = await campaign_repo.get_by_id(campaign_id)
-    required = _required_deliverable_count(campaign)
+    if collab is None:
+        collab = await repo.get_by_id(collaboration_id)
+
+    required = await _resolve_required_deliverable_count(
+        campaign_id,
+        campaign_repo=campaign_repo,
+        collab=collab,
+    )
     if required <= 0:
-        required = max(by_index.keys()) + 1
+        return all(
+            (sub.get("draft_status") or DraftReviewStatus.PENDING.value)
+            == DraftReviewStatus.APPROVED.value
+            for sub in by_index.values()
+        )
 
     if len(by_index) < required:
         return False
@@ -359,6 +473,10 @@ async def get_collaboration(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not own this collaboration",
             )
+
+    collab = await _sync_draft_review_status(
+        collab, repo=repo, campaign_repo=campaign_repo
+    )
 
     submissions_raw = await repo.list_submissions(collaboration_id)
     revision_history = await repo.list_revision_history(collaboration_id)
@@ -628,21 +746,21 @@ async def request_revision(
     repo: CollaborationRepository | None = None,
     business_repo: BusinessRepository | None = None,
     creator_repo: CreatorRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
     member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
     """Business asks for changes on one submitted draft deliverable."""
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
     creator_repo = creator_repo or CreatorRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
 
     collab = await _get_owned_collaboration(
         collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
-    if collab.status != CollaborationStatus.CONTENT_SUBMITTED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only a submitted draft awaiting review can have a revision requested",
-        )
+    collab = await _assert_can_review_draft(
+        collab, repo=repo, campaign_repo=campaign_repo
+    )
     if collab.revision_rounds >= 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -734,7 +852,11 @@ async def request_revision(
 
     return await get_collaboration(
         collaboration_id, profile_id, "business",
-        repo=repo, business_repo=business_repo, creator_repo=creator_repo, member_repo=member_repo,
+        repo=repo,
+        campaign_repo=campaign_repo,
+        business_repo=business_repo,
+        creator_repo=creator_repo,
+        member_repo=member_repo,
     )
 
 
@@ -759,11 +881,9 @@ async def approve_draft(
     collab = await _get_owned_collaboration(
         collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
-    if collab.status != CollaborationStatus.CONTENT_SUBMITTED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only a submitted draft awaiting review can be approved",
-        )
+    collab = await _assert_can_review_draft(
+        collab, repo=repo, campaign_repo=campaign_repo
+    )
 
     submission = await _get_owned_draft_submission(
         collaboration_id, data.submission_id, repo=repo
@@ -790,6 +910,7 @@ async def approve_draft(
         repo=repo,
         campaign_repo=campaign_repo,
         campaign_id=collab.campaign_id,
+        collab=collab,
     )
 
     updated = collab
@@ -833,7 +954,11 @@ async def approve_draft(
 
     return await get_collaboration(
         collaboration_id, profile_id, "business",
-        repo=repo, business_repo=business_repo, creator_repo=creator_repo, member_repo=member_repo,
+        repo=repo,
+        campaign_repo=campaign_repo,
+        business_repo=business_repo,
+        creator_repo=creator_repo,
+        member_repo=member_repo,
     )
 
 

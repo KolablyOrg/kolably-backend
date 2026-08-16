@@ -6,9 +6,9 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.crypto import encrypt_token
-from app.core.enums import CampaignObjective, Platform, SubmissionType
+from app.core.enums import CampaignObjective, ContentType, Platform, SubmissionType
 from app.models.business import Business
-from app.models.campaign import Campaign
+from app.models.campaign import Campaign, CampaignDeliverable
 from app.models.collaboration import Collaboration
 from app.models.creator import Creator
 from app.schemas.collaboration import (
@@ -565,6 +565,50 @@ async def test_approve_draft_transitions_status(_stub_notifications):
     assert ("collab1", {"status": "approved"}) in repo.updates
     assert _stub_notifications[0]["profile_id"] == "p-creator"
     assert _stub_notifications[0]["type"].value == "collaboration_draft_approved"
+
+
+async def test_approve_draft_recovers_from_prematurely_approved_status():
+    two_piece_campaign = _campaign(
+        deliverables=[
+            CampaignDeliverable(
+                platform=Platform.INSTAGRAM,
+                content_type=ContentType.REEL,
+                quantity=1,
+            ),
+            CampaignDeliverable(
+                platform=Platform.INSTAGRAM,
+                content_type=ContentType.STORY,
+                quantity=1,
+            ),
+        ],
+    )
+    repo = FakeCollaborationRepo(
+        row={**COLLAB_ROW, "status": "approved"},
+        submissions=[
+            {**DRAFT_SUBMISSION, "draft_status": "approved", "deliverable_index": 0},
+            {
+                **DRAFT_SUBMISSION,
+                "id": "sub-draft-2",
+                "deliverable_index": 1,
+                "draft_status": "pending",
+                "content_type": "story",
+            },
+        ],
+    )
+
+    result = await collaboration_service.approve_draft(
+        collaboration_id="collab1",
+        profile_id="p-business",
+        data=ApproveSubmissionRequest(submission_id="sub-draft-2"),
+        repo=repo,
+        business_repo=FakeBusinessRepo(),
+        creator_repo=FakeCreatorRepo(),
+        campaign_repo=FakeCampaignRepo(campaigns=[two_piece_campaign]),
+    )
+
+    assert result["status"] == "approved"
+    assert ("collab1", {"status": "content_submitted"}) in repo.updates
+    assert repo.updated_submissions[-1][1]["draft_status"] == "approved"
 
 
 async def test_approve_draft_rejects_when_not_submitted():
