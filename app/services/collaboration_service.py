@@ -81,6 +81,14 @@ async def _sync_draft_review_status(
     campaign_repo: CampaignRepository,
 ) -> Collaboration:
     """Keep collab status aligned with per-deliverable draft review progress."""
+    if collab.status not in (
+        CollaborationStatus.ACTIVE,
+        CollaborationStatus.CONTENT_SUBMITTED,
+        CollaborationStatus.REVISION_REQUESTED,
+        CollaborationStatus.APPROVED,
+    ):
+        return collab
+
     submissions = await repo.list_submissions(collab.id)
     if not _latest_drafts_by_index(submissions):
         return collab

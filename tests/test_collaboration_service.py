@@ -471,6 +471,7 @@ async def test_request_revision_transitions_status_and_stores_notes(_stub_notifi
         repo=repo,
         business_repo=FakeBusinessRepo(),
         creator_repo=FakeCreatorRepo(),
+        campaign_repo=FakeCampaignRepo(campaigns=[]),
     )
 
     assert result["status"] == "content_submitted"
@@ -521,6 +522,7 @@ async def test_request_revision_requires_at_least_one_note():
             ),
             business_repo=FakeBusinessRepo(),
             creator_repo=FakeCreatorRepo(),
+            campaign_repo=FakeCampaignRepo(campaigns=[]),
         )
     assert exc.value.status_code == 400
 

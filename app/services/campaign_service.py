@@ -801,6 +801,8 @@ async def invite_creator(
     campaign_deadline = getattr(campaign, "deadline", None)
     if campaign_deadline:
         deadline = campaign_deadline
+        if isinstance(deadline, str):
+            deadline = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
         if deadline.tzinfo is None:
             deadline = deadline.replace(tzinfo=UTC)
         expires_at = min(expires_at, deadline)
