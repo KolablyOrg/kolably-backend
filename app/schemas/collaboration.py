@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.core.enums import Platform, SubmissionType, DraftReviewStatus
+from app.core.enums import DraftReviewStatus, Platform, SubmissionType
 
 
 class RevisionNoteItem(BaseModel):
