@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -34,6 +35,8 @@ from app.schemas.campaign import (
 from app.schemas.creator import CreatorSummary
 from app.schemas.user import UserInToken
 from app.services import business_access, notification_service
+
+logger = logging.getLogger(__name__)
 
 # How long a brand invite stays acceptable. Enforced on accept (see
 # accept_application) rather than by a background sweep.
@@ -225,9 +228,14 @@ async def create_campaign_step1(
 
     campaign = await campaign_repo.insert_campaign(insert_data)
     if not campaign:
+        logger.error(
+            "insert_campaign returned no row for business_id=%s title=%r",
+            business_id,
+            data.title,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create campaign",
+            detail="Something went wrong creating your campaign. Please try again.",
         )
 
     return _campaign_to_response(campaign)

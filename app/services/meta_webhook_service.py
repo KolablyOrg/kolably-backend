@@ -3,6 +3,7 @@ Handlers for server-to-server callbacks Meta sends to the app (as opposed to
 `instagram_service.py`, which is calls *we* make outward to Meta's Graph API).
 """
 
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -12,6 +13,8 @@ from app.core.meta_signed_request import InvalidSignedRequestError, parse_signed
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.data_deletion_repo import DataDeletionRepository
 from app.repositories.profile_repo import ProfileRepository
+
+logger = logging.getLogger(__name__)
 
 _STATUS_BASE_URL = "https://kolably.com/data-deletion/status"
 
@@ -39,7 +42,8 @@ def _verify(signed_request: str) -> dict:
             signed_request, secrets=[settings.APP_SECRET, settings.INSTAGRAM_APP_SECRET]
         )
     except InvalidSignedRequestError as e:
-        raise BadRequestError(str(e))
+        logger.exception("Meta signed_request verification failed")
+        raise BadRequestError("Invalid signed request") from e
 
 
 async def handle_data_deletion(

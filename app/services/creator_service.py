@@ -367,7 +367,8 @@ async def get_creator_portfolio(
                         await repo.update_portfolio_item(str(item.id), {"media_url": new_url})
                         item.media_url = new_url
         except Exception:
-            pass  # Best-effort repair; don't block portfolio response
+            # Best-effort repair; don't block portfolio response.
+            logger.exception("Portfolio thumbnail repair failed for creator_id=%s", creator_id)
 
     return {
         "items": [_portfolio_item_to_response(item) for item in items],

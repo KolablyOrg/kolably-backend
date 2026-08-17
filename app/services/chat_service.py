@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from fastapi import HTTPException, status
@@ -11,6 +12,8 @@ from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.profile_repo import ProfileRepository
 from app.services import notification_service
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_dt(value) -> datetime | None:
@@ -336,7 +339,13 @@ async def post_collaboration_event(
         })
         return _message_to_response(message) if message else None
     except Exception:
-        # Logging an event is never worth failing the caller's real work.
+        # Logging an event is never worth failing the caller's real work,
+        # but the failure still needs to be visible server-side.
+        logger.exception(
+            "post_collaboration_event failed for collaboration_id=%s event_type=%s",
+            collaboration_id,
+            event_type,
+        )
         return None
 
 

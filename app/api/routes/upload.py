@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Literal
 
@@ -6,6 +7,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from app.core.dependencies import get_current_user
 from app.core.supabase import get_supabase_admin_client
 from app.schemas.user import UserInToken
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
@@ -61,6 +64,7 @@ async def upload_image(
         return {"url": public_url}
     except Exception as e:
         error_msg = str(e)
+        logger.exception("Image upload failed for user_id=%s purpose=%s: %s", user.id, purpose, error_msg)
         if "Bucket not found" in error_msg or "row-level security" in error_msg:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -68,5 +72,5 @@ async def upload_image(
             )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to upload image: {error_msg}"
+            detail="Failed to upload image. Please try again."
         )

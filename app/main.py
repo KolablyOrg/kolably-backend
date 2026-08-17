@@ -12,7 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import settings
+from app.core.error_handlers import register_exception_handlers
+from app.core.logging_config import configure_logging
 from app.core.scheduler import start_scheduler, stop_scheduler
+
+configure_logging()
 
 
 @asynccontextmanager
@@ -30,6 +34,8 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+register_exception_handlers(app)
 
 # ── CORS ──────────────────────────────────────────────
 app.add_middleware(

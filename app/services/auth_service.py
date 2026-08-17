@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
@@ -22,6 +23,8 @@ from app.schemas.auth import (
 )
 from app.services import business_access, google_oauth_service, instagram_service, twofa_service
 
+logger = logging.getLogger(__name__)
+
 # GoTrue sets last_sign_in_at == created_at (to the second) only on the very
 # first sign-in for an auth.users row; a small tolerance absorbs clock/DB skew.
 _NEW_USER_SIGN_IN_TOLERANCE_SECONDS = 5
@@ -32,7 +35,7 @@ async def _record_login_event(profile_id: str, ip_address: str | None, user_agen
     try:
         await LoginEventRepository().record(profile_id, ip_address, user_agent)
     except Exception:
-        pass
+        logger.exception("Failed to record login event for profile_id=%s", profile_id)
 
 
 def _profile_to_dict(profile: UserProfile) -> dict:

@@ -315,9 +315,15 @@ async def complete_collaboration(
         "completed_at": datetime.now(UTC).isoformat(),
     })
     if not updated:
+        logger.error(
+            "complete_collaboration: update_status returned no row for collaboration_id=%s "
+            "(profile_id=%s) after status checks passed",
+            collaboration_id,
+            profile_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to complete collaboration",
+            detail="Could not mark the collaboration as completed due to a server error",
         )
 
     creator = await creator_repo.get_by_id(collab.creator_id)

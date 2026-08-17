@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
@@ -23,6 +24,8 @@ from app.schemas.business import BusinessSummary
 from app.schemas.campaign import CampaignSummary
 from app.schemas.creator import CreatorSummary
 from app.services import business_access, chat_service, notification_service
+
+logger = logging.getLogger(__name__)
 
 
 async def _get_creator_id_for_user(
@@ -259,9 +262,14 @@ async def apply_to_campaign(
         "status": ApplicationStatus.PENDING.value,
     })
     if not application:
+        logger.error(
+            "insert_application returned no row for campaign_id=%s creator_id=%s",
+            data.campaign_id,
+            creator_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to submit application",
+            detail="Something went wrong saving your application. Please try again.",
         )
 
     business_repo = business_repo or BusinessRepository()
