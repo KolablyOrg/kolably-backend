@@ -498,6 +498,7 @@ async def reject_application(
     profile_id: str,
     role: str,
     *,
+    reason: str | None = None,
     app_repo: ApplicationRepository | None = None,
     campaign_repo: CampaignRepository | None = None,
     creator_repo: CreatorRepository | None = None,
@@ -528,11 +529,21 @@ async def reject_application(
         application, campaign, creator_repo=creator_repo, business_repo=business_repo
     )
     if notify_profile_id:
+        # Direction-aware: a business declining a creator's application reads
+        # differently from a creator declining a business's invite — the
+        # invited side never "applied" for anything.
+        if application.direction == ApplicationDirection.CREATOR_APPLIED:
+            body = f'Your application for "{campaign.title}" was not accepted.'
+        else:
+            body = f'Your invite to "{campaign.title}" was declined.'
+        reason = (reason or "").strip()
+        if reason:
+            body += f" Reason: {reason}"
         await notification_service.create_notification(
             profile_id=notify_profile_id,
             type=NotificationType.APPLICATION_REJECTED,
             title="Application update",
-            body=f'Your application for "{campaign.title}" was not accepted.',
+            body=body,
             related_id=application.id,
         )
 

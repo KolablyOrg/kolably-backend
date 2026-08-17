@@ -8,6 +8,7 @@ from app.core.dependencies import get_current_user, require_instagram_connected,
 from app.core.enums import UserRole
 from app.schemas.application import (
     ApplicationCreateRequest,
+    ApplicationRejectRequest,
     ApplicationResponse,
     ApplicationRevisionRequest,
     ApplicationUpdateRequest,
@@ -85,6 +86,7 @@ async def accept_application(
 @router.patch("/{application_id}/reject", response_model=ApplicationResponse)
 async def reject_application(
     application_id: str,
+    data: ApplicationRejectRequest | None = None,
     user: UserInToken = Depends(get_current_user),
 ):
     """Reject an application/invite — same direction-based authorization as accept."""
@@ -92,6 +94,7 @@ async def reject_application(
         application_id=application_id,
         profile_id=user.id,
         role=user.role.value,
+        reason=data.reason if data else None,
     )
 
 

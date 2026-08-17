@@ -4,7 +4,7 @@ Application-related Pydantic schemas.
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.enums import ApplicationDirection, ApplicationStatus
 from app.schemas.business import BusinessSummary
@@ -56,3 +56,9 @@ class ApplicationUpdateRequest(BaseModel):
 class ApplicationRevisionRequest(BaseModel):
     """Business requests revision."""
     reason: str
+
+
+class ApplicationRejectRequest(BaseModel):
+    """Optional decline reason — shown to the other party in their
+    notification, not persisted as its own column."""
+    reason: str | None = Field(None, max_length=500)

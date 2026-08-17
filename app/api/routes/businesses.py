@@ -2,7 +2,7 @@
 Business routes — profile, discovery, dashboard.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.dependencies import get_current_user, require_role
 from app.core.enums import CampaignStatus, UserRole
@@ -23,8 +23,9 @@ from app.schemas.business import (
 )
 from app.schemas.campaign import CampaignSummary
 from app.schemas.common import MessageResponse, PaginatedResponse
+from app.schemas.review import RatingSummaryResponse
 from app.schemas.user import UserInToken
-from app.services import application_service, business_service
+from app.services import application_service, business_service, review_service
 
 router = APIRouter()
 
@@ -228,9 +229,18 @@ async def get_business(business_id: str) -> BusinessResponse:
     """Get a specific business's public profile."""
     business = await business_service.get_business_by_id(business_id)
     if not business:
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
     return business
+
+
+@router.get("/{business_id}/rating", response_model=RatingSummaryResponse)
+async def get_business_rating(business_id: str) -> RatingSummaryResponse:
+    """Aggregate rating left by creators after completed collaborations —
+    `average_rating` is null (not 0) when nobody has reviewed yet."""
+    business = await business_service.get_business_by_id(business_id)
+    if not business:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
+    return await review_service.get_rating_summary(business.user_id)
 
 
 @router.patch(

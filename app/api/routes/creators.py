@@ -28,8 +28,9 @@ from app.schemas.creator import (
     PortfolioItemCreateRequest,
     PortfolioItemResponse,
 )
+from app.schemas.review import RatingSummaryResponse
 from app.schemas.user import UserInToken
-from app.services import creator_service
+from app.services import creator_service, review_service
 
 router = APIRouter()
 
@@ -231,6 +232,16 @@ async def get_creator(creator_id: str):
     if not creator:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Creator not found")
     return creator
+
+
+@router.get("/{creator_id}/rating", response_model=RatingSummaryResponse)
+async def get_creator_rating(creator_id: str) -> RatingSummaryResponse:
+    """Aggregate rating left by businesses after completed collaborations —
+    `average_rating` is null (not 0) when nobody has reviewed yet."""
+    creator = await creator_service.get_creator_by_id(creator_id)
+    if not creator:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Creator not found")
+    return await review_service.get_rating_summary(creator.user_id)
 
 
 @router.patch(

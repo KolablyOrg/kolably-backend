@@ -607,6 +607,8 @@ async def list_campaign_applications(
             profile_photo_url=creator_data.get("profile_photo_url"),
             follower_count=creator_data.get("follower_count"),
             niche=creator_data.get("niche"),
+            city=creator_data.get("city"),
+            engagement_rate=creator_data.get("engagement_rate"),
         )
         items.append(
             ApplicationWithCreator(

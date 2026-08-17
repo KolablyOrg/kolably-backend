@@ -85,7 +85,7 @@ class ApplicationRepository(BaseRepository):
         query = (
             (await self._table("campaign_applications"))
             .select(
-                "*, creators(id,name,profile_photo_url,follower_count,niche)",
+                "*, creators(id,name,profile_photo_url,follower_count,niche,city,engagement_rate)",
                 count="exact",
             )
             .eq("campaign_id", campaign_id)
