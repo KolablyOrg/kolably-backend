@@ -98,6 +98,7 @@ When making schema changes:
 | 024 | Add collaboration lifecycle notification types for submission, approval, and verification |
 | 025 | Create business_shortlists for persisted creator tags, notes, and comparison |
 | 026 | Add view_count to portfolio_items (Instagram video insights) |
+| 027 | Add views_count to creators (real aggregate for Engagement "Total views") |
 
 ## Notes
 

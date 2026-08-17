@@ -50,6 +50,7 @@ def _creator_to_response(creator: Creator) -> CreatorResponse:
         instagram_synced_at=creator.instagram_synced_at,
         website=creator.website,
         following_count=creator.following_count,
+        views_count=creator.views_count,
         # Settings fields
         categories=creator.categories or [],
         rate_per_reel=creator.rate_per_reel,
@@ -420,7 +421,7 @@ async def get_creator_stats(
     if history and creator:
         engagement_growth = calculate_growth(creator.engagement_rate, history.get("engagement_rate"))
         followers_growth = calculate_growth(creator.follower_count, history.get("follower_count"))
-        views_growth = calculate_growth(getattr(creator, "views_count", 0), history.get("views_count"))
+        views_growth = calculate_growth(creator.views_count, history.get("views_count"))
     else:
         # Fallback if no history is recorded yet
         engagement_growth = f"0% vs last {days} days"
@@ -435,7 +436,7 @@ async def get_creator_stats(
         followers_growth=followers_growth,
         views_growth=views_growth,
         engagement_rate=creator.engagement_rate if creator else 0,
-        total_views=getattr(creator, "views_count", 0) if creator else 0,
+        total_views=(creator.views_count or 0) if creator else 0,
     )
 
 
@@ -581,12 +582,19 @@ async def _refresh_instagram_stats(creator: Creator, *, repo: CreatorRepository)
     ig_profile = await instagram_service.fetch_profile(access_token)
     media = await instagram_service.fetch_media(access_token)
     engagement_rate = await instagram_service.calculate_engagement_rate(access_token, media)
+    # Sums whatever's already stored on portfolio_items (populated at
+    # import time — see import_instagram_portfolio) rather than re-fetching
+    # insights for every recent media item here, which would multiply this
+    # already-multi-call refresh across every connected creator in the daily
+    # batch job.
+    views_count = await repo.sum_portfolio_views(creator.id)
 
     updated = await repo.update_by_profile_id(creator.profile_id, {
         "follower_count": ig_profile.get("followers_count"),
         "following_count": ig_profile.get("follows_count"),
         "profile_photo_url": ig_profile.get("profile_picture_url"),
         "engagement_rate": engagement_rate,
+        "views_count": views_count,
         "instagram_access_token": encrypt_token(access_token),
         "instagram_token_expires_at": expires_at.isoformat(),
         "instagram_synced_at": datetime.now(UTC).isoformat(),

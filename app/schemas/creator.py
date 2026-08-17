@@ -32,6 +32,7 @@ class CreatorResponse(CreatorBase):
     instagram_synced_at: datetime | None = None
     website: str | None = None
     following_count: int | None = None
+    views_count: int | None = None
     # ── Settings fields ──────────────────────────────────────────
     categories: list[str] = []
     rate_per_reel: int | None = None

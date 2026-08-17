@@ -77,6 +77,9 @@ class Creator:
     instagram_connected: bool = False
     website: str | None = None
     following_count: int | None = None
+    # Sum of portfolio_items.view_count — refreshed alongside follower_count/
+    # engagement_rate by _refresh_instagram_stats, not computed live.
+    views_count: int | None = None
     portfolio: list[PortfolioItem] = field(default_factory=list)
     # ── Settings fields (added via migration 20260802) ───────────────
     categories: list[str] = field(default_factory=list)
@@ -133,6 +136,7 @@ class Creator:
             instagram_connected=bool(row.get("instagram_user_id")),
             website=row.get("website"),
             following_count=row.get("following_count"),
+            views_count=row.get("views_count"),
             categories=row.get("categories") or [],
             rate_per_reel=row.get("rate_per_reel"),
             rate_per_story=row.get("rate_per_story"),
@@ -182,6 +186,7 @@ class Creator:
             "instagram_synced_at": self.instagram_synced_at,
             "website": self.website,
             "following_count": self.following_count,
+            "views_count": self.views_count,
             "categories": self.categories,
             "rate_per_reel": self.rate_per_reel,
             "rate_per_story": self.rate_per_story,
