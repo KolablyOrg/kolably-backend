@@ -107,6 +107,8 @@ class PortfolioItemResponse(BaseModel):
     media_type: Literal["photo", "video"] = "photo"
     like_count: int | None = None
     comment_count: int | None = None
+    # Video-only — Instagram doesn't report views for photos.
+    view_count: int | None = None
     created_at: datetime
 
 
