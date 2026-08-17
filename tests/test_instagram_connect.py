@@ -127,6 +127,9 @@ class FakeCreatorRepo:
         existing = next((r for r in self._existing_portfolio if r["id"] == item_id), None)
         return _make_portfolio_item({**existing, **data}) if existing else None
 
+    async def sum_portfolio_views(self, creator_id):
+        return sum(int(row.get("view_count") or 0) for row in self._existing_portfolio)
+
 
 def _patch_instagram_service(monkeypatch, refresh_calls=None):
     async def fake_exchange_code_for_token(code, redirect_uri):

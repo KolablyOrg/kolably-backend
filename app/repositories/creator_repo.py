@@ -334,6 +334,17 @@ class CreatorRepository(BaseRepository):
         )
         return round(sum(float(row.get("total_amount") or 0) for row in rows), 2)
 
+    async def sum_portfolio_views(self, creator_id: str) -> int:
+        """Total view_count across this creator's portfolio items. Video-only
+        (photos never have a view_count — Instagram doesn't report views for
+        them), so this only ever counts what Instagram actually returned."""
+        rows = await self.select(
+            "portfolio_items",
+            columns="view_count",
+            filters={"creator_id": creator_id},
+        )
+        return sum(int(row.get("view_count") or 0) for row in rows)
+
     async def get_historical_stats(self, creator_id: str, days_ago: int) -> dict | None:
         """
         Fetch the snapshot for exactly `days_ago`. If not found, fetch the oldest snapshot
@@ -373,14 +384,14 @@ class CreatorRepository(BaseRepository):
         `instagram_connected` column on `creators`; that's a computed-only
         field on the `Creator` model (see `Creator.from_row`), so filtering
         on it directly against the DB always 400'd and this snapshot never
-        actually ran. `views_count` isn't tracked on `creators` yet either
-        (no backing column) — every snapshot records 0 for it, same
-        "not implemented yet" fallback already used in
-        `creator_service.get_creator_stats`.
+        actually ran. `views_count` is the sum of portfolio_items.view_count,
+        refreshed onto `creators.views_count` by `_refresh_instagram_stats`
+        (see migration 027) — it's whatever was last synced, not recomputed
+        live here.
         """
         result = await self._execute(
             (await self._table("creators"))
-            .select("id, follower_count, engagement_rate")
+            .select("id, follower_count, engagement_rate, views_count")
             .not_.is_("instagram_user_id", "null")
         )
         creators = result.data or []
@@ -392,7 +403,7 @@ class CreatorRepository(BaseRepository):
                 "creator_id": c["id"],
                 "follower_count": c.get("follower_count") or 0,
                 "engagement_rate": c.get("engagement_rate") or 0.0,
-                "views_count": 0,
+                "views_count": c.get("views_count") or 0,
             }
             for c in creators
         ]

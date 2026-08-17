@@ -18,8 +18,6 @@ from app.core.exceptions import ExternalServiceError
 from app.models.creator import Creator
 from app.services import creator_service, instagram_service
 
-NOW = datetime(2026, 8, 14, 12, 0, 0, tzinfo=UTC)
-
 
 def _make_connected_creator(creator_id: str, profile_id: str) -> Creator:
     return Creator(
@@ -28,7 +26,12 @@ def _make_connected_creator(creator_id: str, profile_id: str) -> Creator:
         name="Creator",
         instagram_user_id=f"ig-{creator_id}",
         instagram_access_token=encrypt_token("valid-tok"),
-        instagram_token_expires_at=(NOW + timedelta(days=30)).isoformat(),
+        # Relative to actual wall-clock time, not a fixed fixture date — the
+        # code under test compares against datetime.now(UTC) directly, and a
+        # fixed past timestamp here would eventually drift into the refresh
+        # threshold as real time passes (see test_instagram_connect.py for
+        # the same fix after this exact pattern broke CI).
+        instagram_token_expires_at=(datetime.now(UTC) + timedelta(days=30)).isoformat(),
         instagram_synced_at=None,
     )
 
@@ -53,6 +56,9 @@ class FakeBatchCreatorRepo:
 
     async def snapshot_all_creators(self):
         self.snapshot_called = True
+
+    async def sum_portfolio_views(self, creator_id):
+        return 0
 
 
 def _patch_instagram_service(monkeypatch):
