@@ -7,6 +7,8 @@ gives a natural authorization rule: you may review someone precisely when
 you finished a piece of work with them.
 """
 
+import logging
+
 from fastapi import HTTPException, status
 
 from app.core.enums import CollaborationStatus
@@ -15,6 +17,8 @@ from app.repositories.collaboration_repo import CollaborationRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.review_repo import ReviewRepository
 from app.schemas.review import RatingSummaryResponse, ReviewCreateRequest, ReviewResponse
+
+logger = logging.getLogger(__name__)
 
 
 def _to_response(row: dict) -> ReviewResponse:
@@ -122,9 +126,15 @@ async def submit_review(
     )
 
     if not row:
+        logger.error(
+            "submit_review: %s returned no row for collaboration_id=%s reviewer_profile_id=%s",
+            "update_review" if existing else "insert_review",
+            collaboration_id,
+            profile_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to save review",
+            detail="Could not save the review due to a server error",
         )
     return _to_response(row)
 

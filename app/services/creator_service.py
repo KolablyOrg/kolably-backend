@@ -367,7 +367,8 @@ async def get_creator_portfolio(
                         await repo.update_portfolio_item(str(item.id), {"media_url": new_url})
                         item.media_url = new_url
         except Exception:
-            pass  # Best-effort repair; don't block portfolio response
+            # Best-effort repair; don't block portfolio response.
+            logger.exception("Portfolio thumbnail repair failed for creator_id=%s", creator_id)
 
     return {
         "items": [_portfolio_item_to_response(item) for item in items],
@@ -406,8 +407,13 @@ async def get_creator_stats(
 
         diff = current - past
         pct = (diff / past) * 100
-        sign = "↗" if diff > 0 else "↘" if diff < 0 else ""
-        return f"{sign} {abs(round(pct, 1))}% vs last {days} days".strip()
+        # ASCII sign, not an arrow glyph. The arrows this used to emit
+        # (↗ U+2197 / ↘ U+2198) aren't in the app's Poppins font, so they
+        # rendered as a tofu box *beside* the arrow icon the client already
+        # draws. A leading +/- also lets the client colour a decline red
+        # instead of showing every change as green growth.
+        sign = "+" if diff > 0 else "-" if diff < 0 else ""
+        return f"{sign}{abs(round(pct, 1))}% vs last {days} days"
 
     if history and creator:
         engagement_growth = calculate_growth(creator.engagement_rate, history.get("engagement_rate"))

@@ -4,6 +4,8 @@ Authentication routes — backend facade over Supabase Auth.
 Frontend calls these endpoints only. Supabase is a hidden implementation detail.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -37,6 +39,7 @@ from app.services import auth_service, google_oauth_service, instagram_service, 
 
 router = APIRouter()
 security = HTTPBearer()
+logger = logging.getLogger(__name__)
 
 
 # ── Signup ────────────────────────────────────────────
@@ -90,9 +93,10 @@ async def get_google_login_url(
         return {"url": google_oauth_service.build_authorize_url_with_relay(redirect_uri)}
     except RuntimeError as exc:
         # Common local-dev miss: TOKEN_ENCRYPTION_KEY unset → encrypt_token fails.
+        logger.exception("Failed to build Google OAuth authorize URL")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail="Authentication service is temporarily unavailable. Please try again shortly.",
         ) from exc
 
 
@@ -153,9 +157,10 @@ async def get_instagram_login_url(
         return {"url": instagram_service.build_authorize_url_with_relay(redirect_uri)}
     except RuntimeError as exc:
         # Common local-dev miss: TOKEN_ENCRYPTION_KEY unset → encrypt_token fails.
+        logger.exception("Failed to build Instagram OAuth authorize URL")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail="Authentication service is temporarily unavailable. Please try again shortly.",
         ) from exc
 
 

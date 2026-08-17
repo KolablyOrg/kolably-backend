@@ -179,7 +179,10 @@ async def list_invoices(
             business_id, status=status_filter, page=page, page_size=page_size
         )
     else:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only creator and business accounts can list invoices",
+        )
 
     return {
         "items": [_invoice_to_response(i) for i in invoices],

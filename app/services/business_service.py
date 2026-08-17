@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -27,6 +28,8 @@ from app.schemas.business import (
 )
 from app.schemas.campaign import CampaignSummary
 from app.services import business_access
+
+logger = logging.getLogger(__name__)
 
 
 def _business_to_response(business: Business) -> BusinessResponse:
@@ -291,7 +294,15 @@ async def update_shortlist(
         "updated_at": datetime.now(UTC).isoformat(),
     })
     if not row:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not save shortlist")
+        logger.error(
+            "shortlist upsert returned no row for business_id=%s creator_id=%s",
+            business_id,
+            creator_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Something went wrong saving this shortlist entry. Please try again.",
+        )
     creator = await creator_repo.get_by_id(creator_id)
     row["creator"] = {
         "id": creator.id,
