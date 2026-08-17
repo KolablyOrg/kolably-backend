@@ -107,7 +107,12 @@ def get_media_url_or_thumbnail(item: dict) -> str | None:
 
 
 def build_portfolio_items(creator_id: str, media: list[dict]) -> list[dict]:
-    """Shared shape for mapping fetched IG media into `portfolio_items` rows."""
+    """Shared shape for mapping fetched IG media into `portfolio_items` rows.
+
+    `view_count` defaults to None here — it isn't part of this batch media
+    fetch (Instagram only reports it via a separate per-media insights call,
+    and only for video), so callers that want it fill it in afterward.
+    """
     return [
         {
             "creator_id": creator_id,
@@ -116,6 +121,7 @@ def build_portfolio_items(creator_id: str, media: list[dict]) -> list[dict]:
             "media_type": "video" if item.get("media_type") == "VIDEO" else "photo",
             "like_count": item.get("like_count"),
             "comment_count": item.get("comments_count"),
+            "view_count": None,
         }
         for item in media
     ]

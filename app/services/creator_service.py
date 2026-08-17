@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 
 from app.core.crypto import decrypt_token, encrypt_token
 from app.core.enums import UserRole
+from app.core.exceptions import ExternalServiceError
 from app.models.campaign import Campaign
 from app.models.creator import Creator, PortfolioItem
 from app.repositories.campaign_repo import CampaignRepository
@@ -158,6 +159,7 @@ def _portfolio_item_to_response(item: PortfolioItem) -> dict:
         "media_type": item.media_type,
         "like_count": item.like_count,
         "comment_count": item.comment_count,
+        "view_count": item.view_count,
         "created_at": item.created_at,
     }
 
@@ -708,12 +710,12 @@ async def import_instagram_portfolio(
 
     Upserts by `post_link` (the Instagram permalink, stable per post) rather
     than always inserting: re-selecting a post that's already in the
-    portfolio refreshes its stored media_url/like_count/comment_count in
-    place instead of creating a duplicate row. This is also the only way a
-    creator can currently fix an older portfolio item stuck with a stale/
-    broken media_url (e.g. a reel imported before a thumbnail-extraction fix
-    landed) — re-picking it here corrects it, since there's no separate
-    portfolio-refresh action.
+    portfolio refreshes its stored media_url/like_count/comment_count/
+    view_count in place instead of creating a duplicate row. This is also
+    the only way a creator can currently fix an older portfolio item stuck
+    with a stale/broken media_url (e.g. a reel imported before a
+    thumbnail-extraction fix landed) — re-picking it here corrects it,
+    since there's no separate portfolio-refresh action.
     """
     repo = repo or CreatorRepository()
     creator = await repo.get_by_profile_id(profile_id)
@@ -732,6 +734,27 @@ async def import_instagram_portfolio(
 
     items = instagram_service.build_portfolio_items(creator.id, media)
 
+    # Views only exist for video content, and are a separate per-media
+    # insights call (not part of the batch /me/media fetch above) — bounded
+    # by the small number of items a creator actually imports at once (the
+    # client caps portfolio size at 8). A failure on one item's insights
+    # (an unsupported metric, a transient Graph API hiccup) just leaves that
+    # item's view_count unset rather than failing the whole import, matching
+    # calculate_engagement_rate's degradation for the same endpoint.
+    for media_item, built_item in zip(media, items):
+        if built_item["media_type"] != "video":
+            continue
+        try:
+            insights = await instagram_service.fetch_media_insights(
+                access_token, media_item["id"], media_item["media_type"]
+            )
+        except ExternalServiceError:
+            logger.exception(
+                "Failed to fetch view-count insights for instagram media_id=%s", media_item.get("id")
+            )
+            continue
+        built_item["view_count"] = insights.get("views")
+
     post_links = [item["post_link"] for item in items if item.get("post_link")]
     existing_by_link = {
         item.post_link: item
@@ -747,6 +770,7 @@ async def import_instagram_portfolio(
                 "media_url": item["media_url"],
                 "like_count": item["like_count"],
                 "comment_count": item["comment_count"],
+                "view_count": item.get("view_count"),
             })
             if refreshed:
                 updated.append(refreshed)

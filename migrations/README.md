@@ -97,6 +97,7 @@ When making schema changes:
 | 023 | Synchronize direct payment confirmation with invoice status and record audit actors |
 | 024 | Add collaboration lifecycle notification types for submission, approval, and verification |
 | 025 | Create business_shortlists for persisted creator tags, notes, and comparison |
+| 026 | Add view_count to portfolio_items (Instagram video insights) |
 
 ## Notes
 
