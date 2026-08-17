@@ -66,6 +66,20 @@ jobs:
               cp ../kolably_backend/.env .env
             fi
             
+            # Free disk space before the build — --no-cache forces a full
+            # rebuild every deploy, and the previous image tag just gets
+            # silently orphaned (docker rm below only removes the old
+            # *container*, never the image), so dangling images and build
+            # cache accumulate on every single deploy with nothing here ever
+            # clearing them. `docker system prune` skips anything still in
+            # use by a running container, so this is safe to run before the
+            # old container is even stopped.
+            echo "Disk usage before cleanup:"
+            df -h /
+            sudo docker system prune -af --volumes
+            echo "Disk usage after cleanup:"
+            df -h /
+
             # Build and Deploy
             sudo docker build --no-cache -t kolably-backend-cicd .
             sudo docker rm -f kolably-backend-prod || true
