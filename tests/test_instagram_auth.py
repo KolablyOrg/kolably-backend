@@ -244,6 +244,9 @@ async def test_instagram_auth_new_user_signup_prefills_everything(monkeypatch):
             "media_type": "video",
             "like_count": 1,
             "comment_count": 0,
+            # Not populated on this path — view_count only gets fetched
+            # during import_instagram_portfolio (see build_portfolio_items).
+            "view_count": None,
         }
     ]
 

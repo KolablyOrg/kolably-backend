@@ -14,8 +14,6 @@ from app.core.crypto import decrypt_token, encrypt_token
 from app.models.creator import Creator, PortfolioItem
 from app.services import creator_service, instagram_service
 
-NOW = datetime(2026, 7, 27, 12, 0, 0, tzinfo=UTC)
-
 CREATOR_ROW = {
     "id": "creator-1",
     "profile_id": "profile-1",
@@ -261,7 +259,11 @@ async def test_sync_instagram_refreshes_stats_only_when_token_still_fresh(monkey
         **CREATOR_ROW,
         "instagram_user_id": "17841441112302348",
         "instagram_access_token": encrypt_token("still-valid-tok"),
-        "instagram_token_expires_at": (NOW + timedelta(days=30)).isoformat(),
+        # Relative to actual wall-clock time — the code under test compares
+        # against datetime.now(UTC) directly, not a fixture, so a fixed past
+        # timestamp here would silently drift into the refresh threshold as
+        # real time passes (this is exactly what broke this test).
+        "instagram_token_expires_at": (datetime.now(UTC) + timedelta(days=30)).isoformat(),
     }
     repo = FakeCreatorRepo(creator=connected)
 
@@ -282,7 +284,7 @@ async def test_sync_instagram_proactively_refreshes_near_expiry_token(monkeypatc
         **CREATOR_ROW,
         "instagram_user_id": "17841441112302348",
         "instagram_access_token": encrypt_token("almost-expired-tok"),
-        "instagram_token_expires_at": (NOW + timedelta(days=3)).isoformat(),
+        "instagram_token_expires_at": (datetime.now(UTC) + timedelta(days=3)).isoformat(),
     }
     repo = FakeCreatorRepo(creator=connected)
 
