@@ -14,6 +14,7 @@ from app.schemas.campaign import CampaignResponse
 from app.schemas.common import PaginatedResponse
 from app.schemas.creator import (
     BulkDeletePortfolioRequest,
+    CreatorPublicResponse,
     CreatorResponse,
     CreatorStatsResponse,
     CreatorUpdateRequest,
@@ -187,7 +188,7 @@ async def submit_identity_verification(
     return await creator_service.submit_identity_verification(profile_id=user.id, data=data)
 
 
-@router.get("/", response_model=PaginatedResponse[CreatorResponse])
+@router.get("/", response_model=PaginatedResponse[CreatorPublicResponse])
 async def list_creators(
     search: str | None = Query(None),
     niche: str | None = Query(None),
@@ -225,7 +226,7 @@ async def get_creator_niches():
     return await creator_service.get_niches()
 
 
-@router.get("/{creator_id}", response_model=CreatorResponse)
+@router.get("/{creator_id}", response_model=CreatorPublicResponse)
 async def get_creator(creator_id: str):
     """Get a specific creator's public profile."""
     creator = await creator_service.get_creator_by_id(creator_id)

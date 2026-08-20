@@ -11,6 +11,8 @@ from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter
+from app.core.turnstile import verify_turnstile
 from app.schemas.auth import (
     AuthTokenResponse,
     BusinessSignupRequest,
@@ -45,20 +47,25 @@ logger = logging.getLogger(__name__)
 # ── Signup ────────────────────────────────────────────
 
 @router.post("/signup/creator", response_model=AuthTokenResponse)
-async def signup_creator(data: CreatorSignupRequest):
+@limiter.limit("5/minute")
+async def signup_creator(data: CreatorSignupRequest, request: Request):
     """Register a new creator account."""
+    await verify_turnstile(data.turnstile_token, request.client.host if request.client else None)
     return await auth_service.signup_creator(data)
 
 
 @router.post("/signup/business", response_model=AuthTokenResponse)
-async def signup_business(data: BusinessSignupRequest):
+@limiter.limit("5/minute")
+async def signup_business(data: BusinessSignupRequest, request: Request):
     """Register a new business account."""
+    await verify_turnstile(data.turnstile_token, request.client.host if request.client else None)
     return await auth_service.signup_business(data)
 
 
 # ── Login / Logout ────────────────────────────────────
 
 @router.post("/login", response_model=AuthTokenResponse)
+@limiter.limit("10/minute")
 async def login(data: LoginRequest, request: Request):
     """Authenticate user and return tokens + profile — or, if 2FA is
     enabled, an `mfa_token` that POST /auth/2fa/verify exchanges for tokens."""
@@ -219,13 +226,15 @@ async def refresh_token(data: RefreshTokenRequest):
 # ── Password Reset ────────────────────────────────────
 
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(data: ForgotPasswordRequest):
+@limiter.limit("5/minute")
+async def forgot_password(data: ForgotPasswordRequest, request: Request):
     """Send password reset email."""
     return await auth_service.forgot_password(data.email, redirect_to=data.redirect_to)
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(data: ResetPasswordRequest):
+@limiter.limit("10/minute")
+async def reset_password(data: ResetPasswordRequest, request: Request):
     """Reset user password with valid reset token."""
     return await auth_service.reset_password(data.access_token, data.new_password)
 
@@ -257,7 +266,8 @@ async def disable_2fa(
 
 
 @router.post("/2fa/verify", response_model=AuthTokenResponse)
-async def verify_2fa_login(data: TwoFactorVerifyLoginRequest):
+@limiter.limit("10/minute")
+async def verify_2fa_login(data: TwoFactorVerifyLoginRequest, request: Request):
     """Second half of a 2FA-gated login — exchanges the `mfa_token` from
     POST /auth/login (when the account has 2FA enabled) plus a live code for
     real tokens."""

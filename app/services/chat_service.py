@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 
@@ -25,12 +26,15 @@ def _parse_dt(value) -> datetime | None:
 
 
 async def _resolve_participant_summary(
-    profile_id: str,
+    profile_id: str | None,
     *,
     profile_repo: ProfileRepository,
     creator_repo: CreatorRepository,
     business_repo: BusinessRepository,
 ) -> dict:
+    if profile_id is None:
+        return {"id": "", "name": "", "avatar_url": None}
+
     profile = await profile_repo.get_by_id(profile_id)
     if not profile:
         return {"id": profile_id, "name": "", "avatar_url": None}
@@ -127,18 +131,18 @@ async def _conversation_to_response(
 ) -> dict:
     participant_ids = await repo.get_participant_ids(conv.id)
     other_id = next((pid for pid in participant_ids if pid != profile_id), None)
-    other_participant = (
-        await _resolve_participant_summary(
-            other_id, profile_repo=profile_repo, creator_repo=creator_repo, business_repo=business_repo
-        )
-        if other_id
-        else {"id": "", "name": "", "avatar_url": None}
-    )
 
-    last_message = await repo.get_last_message(conv.id)
-    unread_count = await repo.count_unread(conv.id, profile_id)
-    collaboration = await _resolve_collaboration_context(
-        conv.collaboration_id, collab_repo=collab_repo, campaign_repo=campaign_repo
+    # These four lookups are independent of each other — run them
+    # concurrently instead of paying four sequential network round-trips.
+    other_participant, last_message, unread_count, collaboration = await asyncio.gather(
+        _resolve_participant_summary(
+            other_id, profile_repo=profile_repo, creator_repo=creator_repo, business_repo=business_repo
+        ),
+        repo.get_last_message(conv.id),
+        repo.count_unread(conv.id, profile_id),
+        _resolve_collaboration_context(
+            conv.collaboration_id, collab_repo=collab_repo, campaign_repo=campaign_repo
+        ),
     )
 
     return {
@@ -175,14 +179,19 @@ async def list_conversations(
     conversation_ids = await repo.list_conversation_ids_for_profile(profile_id)
     conversations = await repo.get_conversations_by_ids(conversation_ids)
 
-    items = [
-        await _conversation_to_response(
-            c, profile_id, repo=repo, profile_repo=profile_repo,
-            creator_repo=creator_repo, business_repo=business_repo,
-            collab_repo=collab_repo, campaign_repo=campaign_repo,
+    # Each conversation's lookups are independent of every other
+    # conversation's — this used to await them one at a time, so N
+    # conversations paid N times the round-trip latency of one.
+    items = await asyncio.gather(
+        *(
+            _conversation_to_response(
+                c, profile_id, repo=repo, profile_repo=profile_repo,
+                creator_repo=creator_repo, business_repo=business_repo,
+                collab_repo=collab_repo, campaign_repo=campaign_repo,
+            )
+            for c in conversations
         )
-        for c in conversations
-    ]
+    )
     items.sort(key=lambda c: c["last_message_at"] or c["created_at"], reverse=True)
     return items
 

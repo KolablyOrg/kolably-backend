@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     # ── Token encryption ──────────────────────────────
     TOKEN_ENCRYPTION_KEY: str = ""  # Fernet key — encrypts instagram_access_token at rest
 
+    # ── Bot protection (Cloudflare Turnstile) ──────────
+    # Inert until set — no key, no verification call, signups behave exactly
+    # as before (see app/core/turnstile.py). Once set, EVERY call to
+    # /auth/signup/* must include a valid turnstile_token, including from the
+    # mobile app — mobile does not currently obtain one, so setting this
+    # will break mobile signup until it integrates Turnstile's mobile SDK too.
+    TURNSTILE_SECRET_KEY: str = ""
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

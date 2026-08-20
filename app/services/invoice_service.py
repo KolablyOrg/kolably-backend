@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 
+from app.core.crypto import decrypt_token_if_encrypted
 from app.core.enums import CollaborationStatus, InvoiceStatus, NotificationType, UserRole
 from app.models.business import Business
 from app.models.creator import Creator
@@ -52,7 +53,7 @@ def _bank_display(creator: Creator) -> str | None:
 def _billed_by_snapshot(creator: Creator) -> dict:
     return {
         "name": creator.name,
-        "pan": creator.pan_number,
+        "pan": decrypt_token_if_encrypted(creator.pan_number),
         "gst": creator.gst_number if creator.has_gst else None,
         "bank_display": _bank_display(creator),
     }

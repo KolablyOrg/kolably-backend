@@ -21,12 +21,16 @@ class CreatorSignupRequest(BaseModel):
     city: str
     niche: str
     profile_photo_url: str | None = None
+    # Only enforced once TURNSTILE_SECRET_KEY is configured — see
+    # app/core/turnstile.py. Absent from mobile's signup payload today.
+    turnstile_token: str | None = None
 
 
 class BusinessSignupRequest(BaseModel):
     name: str  # owner's full name
     email: EmailStr
     password: str = Field(..., min_length=8)
+    turnstile_token: str | None = None
 
 
 # ── Login ─────────────────────────────────────────────

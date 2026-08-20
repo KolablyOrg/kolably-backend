@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from supabase_auth.errors import AuthApiError
 
 from app.core.config import settings
+from app.core.crypto import encrypt_token
 from app.core.enums import UserRole
 from app.core.supabase import get_supabase_admin_client
 from app.models.business import Business
@@ -429,7 +430,7 @@ async def submit_kyb_verification(
     update_data = {
         "business_type": data.business_type,
         "legal_entity_name": data.legal_entity_name,
-        "pan_number": data.pan_number.upper().strip(),
+        "pan_number": encrypt_token(data.pan_number.upper().strip()),
         "gst_number": data.gst_number,
         "business_proof_document_url": data.document_url,
         "kyb_status": "pending",
