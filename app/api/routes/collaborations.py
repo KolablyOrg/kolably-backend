@@ -2,6 +2,8 @@
 Collaboration routes — managing active collaborations, content submission, completion.
 """
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user, require_role
@@ -39,12 +41,15 @@ async def list_collaborations(
 
 @router.get("/{collaboration_id}", response_model=CollaborationResponse)
 async def get_collaboration(
-    collaboration_id: str,
+    # UUID (not str): FastAPI validates the path segment itself and returns
+    # a clean 422 for a malformed id, instead of a non-UUID string reaching
+    # the DB layer and coming back as an unhandled 500.
+    collaboration_id: UUID,
     user: UserInToken = Depends(get_current_user),
 ):
     """Get collaboration details."""
     return await collaboration_service.get_collaboration(
-        collaboration_id, profile_id=user.id, role=user.role.value
+        str(collaboration_id), profile_id=user.id, role=user.role.value
     )
 
 

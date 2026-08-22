@@ -5,7 +5,7 @@ Creator-related Pydantic schemas.
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CreatorBase(BaseModel):
@@ -54,6 +54,43 @@ class CreatorResponse(CreatorBase):
     identity_status: Literal["unverified", "pending", "verified", "rejected"] = "unverified"
 
 
+class CreatorPublicResponse(CreatorBase):
+    """What anyone (including unauthenticated visitors) can see about a
+    creator — public discovery list and public profile view.
+
+    Deliberately excludes everything `CreatorResponse` carries for the
+    owner's own private settings: payout_method_type, account_number_last4,
+    bank_name, upi_id, payout_verified, identity_status, and
+    notification_preferences. A brand or anonymous visitor has no business
+    seeing another person's bank/UPI/KYC details."""
+
+    id: str
+    user_id: str
+    created_at: datetime
+    tiktok_handle: str | None = None
+    youtube_handle: str | None = None
+    instagram_connected: bool = False
+    instagram_synced_at: datetime | None = None
+    website: str | None = None
+    following_count: int | None = None
+    categories: list[str] = []
+    rate_per_reel: int | None = None
+    rate_per_story: int | None = None
+    show_rate_card: bool = False
+    open_to: list[str] = []
+    is_discoverable: bool = True
+
+    @model_validator(mode="after")
+    def hide_rates_unless_opted_in(self) -> "CreatorPublicResponse":
+        # show_rate_card is the creator's own choice to reveal rates
+        # publicly — respect it even though the caller (CreatorResponse,
+        # which always carries the real values) doesn't gate on it itself.
+        if not self.show_rate_card:
+            self.rate_per_reel = None
+            self.rate_per_story = None
+        return self
+
+
 class CreatorUpdateRequest(BaseModel):
     """instagram_handle/follower_count are deliberately absent — never
     self-reportable. They only ever come from a real Instagram Login/connect
@@ -76,6 +113,15 @@ class CreatorUpdateRequest(BaseModel):
     is_discoverable: bool | None = None
     notification_preferences: dict[str, Any] | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        # None means "not being updated" — distinct from "", which would
+        # otherwise silently blank out the creator's real name.
+        if value is not None and not value.strip():
+            raise ValueError("Name can't be empty")
+        return value.strip() if value is not None else value
+
 
 class CreatorSummary(BaseModel):
     """Minimal creator info for nested responses."""
@@ -88,6 +134,17 @@ class CreatorSummary(BaseModel):
     engagement_rate: float | None = None
 
 
+def _require_http_url(value: str | None, field_name: str) -> str | None:
+    # Both fields get rendered as a raw `<a href>`/`background-image: url()`
+    # on the frontend — an unvalidated `javascript:`/`data:` scheme here is
+    # a stored-XSS vector triggered when anyone clicks the portfolio tile.
+    if value is None:
+        return value
+    if not value.lower().startswith(("http://", "https://")):
+        raise ValueError(f"{field_name} must be an http(s) URL")
+    return value
+
+
 class PortfolioItemCreateRequest(BaseModel):
     """Manual portfolio addition — `media_url` comes from the client uploading
     directly to Supabase Storage (`portfolio` bucket); the backend only stores
@@ -97,6 +154,16 @@ class PortfolioItemCreateRequest(BaseModel):
     media_url: str = Field(..., min_length=1)
     post_link: str | None = None
     media_type: Literal["photo", "video"] = "photo"
+
+    @field_validator("media_url")
+    @classmethod
+    def validate_media_url(cls, value: str) -> str:
+        return _require_http_url(value, "media_url")
+
+    @field_validator("post_link")
+    @classmethod
+    def validate_post_link(cls, value: str | None) -> str | None:
+        return _require_http_url(value, "post_link")
 
 
 class PortfolioItemResponse(BaseModel):

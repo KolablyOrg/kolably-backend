@@ -26,6 +26,9 @@ class CreatorSignupRequest(BaseModel):
     # allow-list in auth_service.signup_creator. Optional so existing
     # callers that don't send it still get the web fallback.
     redirect_to: str | None = None
+    # Only enforced once TURNSTILE_SECRET_KEY is configured — see
+    # app/core/turnstile.py. Absent from mobile's signup payload today.
+    turnstile_token: str | None = None
 
 
 class BusinessSignupRequest(BaseModel):
@@ -33,6 +36,7 @@ class BusinessSignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     redirect_to: str | None = None
+    turnstile_token: str | None = None
 
 
 # ── Login ─────────────────────────────────────────────

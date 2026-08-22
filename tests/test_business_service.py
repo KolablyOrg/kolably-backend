@@ -5,6 +5,7 @@ Unit tests for business_service — repositories injected as fakes, no Supabase.
 import pytest
 from fastapi import HTTPException
 
+from app.core.crypto import decrypt_token
 from app.core.enums import UserRole
 from app.models.business import Business
 from app.models.campaign import Campaign
@@ -455,7 +456,9 @@ async def test_submit_kyb_verification_sets_pending_status_and_normalizes_pan():
 
     profile_id, update_data = repo.update_calls[0]
     assert profile_id == "p1"
-    assert update_data["pan_number"] == "ABCDE1234F"
+    # PAN is encrypted at rest — assert on the decrypted value, not the
+    # stored ciphertext.
+    assert decrypt_token(update_data["pan_number"]) == "ABCDE1234F"
     assert update_data["business_type"] == "company"
     assert update_data["legal_entity_name"] == "Cafe Kolab Pvt Ltd"
     assert update_data["gst_number"] == "22AAAAA0000A1Z5"

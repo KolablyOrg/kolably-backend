@@ -1,3 +1,5 @@
+import asyncio
+
 from app.models.campaign import Campaign
 from app.repositories.base import BaseRepository
 
@@ -184,10 +186,15 @@ class CampaignRepository(BaseRepository):
         if not campaign_ids:
             return {}
 
-        rows = await self.select(
-            "campaign_applications",
-            columns="campaign_id,status",
-            filters={"campaign_id": campaign_ids},
+        # Independent queries — run concurrently rather than paying two
+        # sequential network round-trips.
+        rows, posted = await asyncio.gather(
+            self.select(
+                "campaign_applications",
+                columns="campaign_id,status",
+                filters={"campaign_id": campaign_ids},
+            ),
+            self.fetch_posted_counts(campaign_ids),
         )
 
         counts: dict[str, dict] = {}
@@ -202,7 +209,6 @@ class CampaignRepository(BaseRepository):
             if row["status"] == "accepted":
                 entry["accepted_count"] += 1
 
-        posted = await self.fetch_posted_counts(campaign_ids)
         for cid, posted_count in posted.items():
             entry = counts.setdefault(
                 cid, {"applicant_count": 0, "accepted_count": 0, "posted_count": 0, "pending_applicant_count": 0}

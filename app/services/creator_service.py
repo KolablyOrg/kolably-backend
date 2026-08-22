@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
-from app.core.crypto import decrypt_token, encrypt_token
+from app.core.crypto import decrypt_token, decrypt_token_if_encrypted, encrypt_token
 from app.core.enums import UserRole
 from app.core.exceptions import ExternalServiceError
 from app.models.campaign import Campaign
@@ -844,7 +844,7 @@ async def save_payout_details(
         update_data["upi_id"] = data.upi_id.strip()
 
     if data.pan_number:
-        update_data["pan_number"] = data.pan_number.upper().strip()
+        update_data["pan_number"] = encrypt_token(data.pan_number.upper().strip())
     if data.has_gst and data.gst_number:
         update_data["gst_number"] = data.gst_number.upper().strip()
 
@@ -862,7 +862,7 @@ async def save_payout_details(
         "ifsc_code": updated.ifsc_code,
         "bank_name": updated.bank_name,
         "upi_id": updated.upi_id,
-        "pan_number": updated.pan_number,
+        "pan_number": decrypt_token_if_encrypted(updated.pan_number),
         "has_gst": updated.has_gst,
         "gst_number": updated.gst_number,
         "payout_verified": updated.payout_verified,
@@ -889,7 +889,7 @@ async def get_payout_details(
         "ifsc_code": creator.ifsc_code,
         "bank_name": creator.bank_name,
         "upi_id": creator.upi_id,
-        "pan_number": creator.pan_number,
+        "pan_number": decrypt_token_if_encrypted(creator.pan_number),
         "has_gst": creator.has_gst,
         "gst_number": creator.gst_number,
         "payout_verified": creator.payout_verified,
@@ -913,7 +913,7 @@ async def submit_identity_verification(
 
     now = datetime.now(UTC)
     update_data = {
-        "pan_number": data.pan_number.upper().strip(),
+        "pan_number": encrypt_token(data.pan_number.upper().strip()),
         "identity_status": "pending",
         "identity_document_url": data.document_url,
         "identity_submitted_at": now.isoformat(),
