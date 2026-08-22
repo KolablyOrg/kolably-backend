@@ -19,6 +19,13 @@ class CreatorRepository(BaseRepository):
         )
         return Creator.from_row(row) if row else None
 
+    async def get_by_ids(self, creator_ids: list[str]) -> list[Creator]:
+        if not creator_ids:
+            return []
+        rows = await self.select("creators", columns="*", filters={"id": creator_ids})
+        return [Creator.from_row(row) for row in rows]
+
+
     async def get_by_profile_id(self, profile_id: str) -> Creator | None:
         row = await self.select_one(
             "creators",

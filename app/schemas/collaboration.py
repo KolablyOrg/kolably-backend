@@ -116,6 +116,12 @@ class CollaborationCampaignInfo(BaseModel):
     free_product_description: str | None = None
 
 
+
+class CollaborationCreatorInfo(BaseModel):
+    id: str
+    name: str
+    profile_photo_url: str | None = None
+
 class CollaborationBusinessInfo(BaseModel):
     id: str
     business_name: str
@@ -154,6 +160,7 @@ class CollaborationResponse(BaseModel):
     brand_logo: str | None = None
     campaign: CollaborationCampaignInfo | None = None
     business: CollaborationBusinessInfo | None = None
+    creator: CollaborationCreatorInfo | None = None
 
 
 class CollaborationSummary(BaseModel):

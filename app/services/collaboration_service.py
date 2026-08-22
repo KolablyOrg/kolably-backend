@@ -13,6 +13,7 @@ from app.core.enums import (
 )
 from app.models.business import Business
 from app.models.campaign import Campaign
+from app.models.creator import Creator
 from app.models.collaboration import Collaboration
 from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
@@ -315,6 +316,7 @@ def _collaboration_to_response(
     *,
     campaign: Campaign | None = None,
     business: Business | None = None,
+    creator: Creator | None = None,
     revision_history: list[dict] | None = None,
 ) -> dict:
     """Convert a Collaboration model to a response dict.
@@ -346,6 +348,7 @@ def _collaboration_to_response(
         "brand_logo": business.logo_url if business else None,
         "campaign": None,
         "business": None,
+        "creator": None,
     }
     if campaign:
         resp["campaign"] = {
@@ -376,14 +379,20 @@ async def _fetch_joins(
     *,
     campaign_repo: CampaignRepository,
     business_repo: BusinessRepository,
-) -> tuple[dict[str, Campaign], dict[str, Business]]:
+    creator_repo: CreatorRepository | None = None,
+) -> tuple[dict[str, Campaign], dict[str, Business], dict[str, Creator]]:
     campaign_ids = list({c.campaign_id for c in collabs if c.campaign_id})
     business_ids = list({c.business_id for c in collabs if c.business_id})
+    creator_ids = list({c.creator_id for c in collabs if c.creator_id})
+    
     campaigns = await campaign_repo.get_by_ids(campaign_ids)
     businesses = await business_repo.get_by_ids(business_ids)
+    creators = await creator_repo.get_by_ids(creator_ids) if creator_repo else []
+    
     return (
         {c.id: c for c in campaigns},
         {b.id: b for b in businesses},
+        {c.id: c for c in creators},
     )
 
 
@@ -423,14 +432,16 @@ async def list_collaborations(
     else:
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
-    campaign_map, business_map = await _fetch_joins(
-        collabs, campaign_repo=campaign_repo, business_repo=business_repo
+    creator_repo = creator_repo or CreatorRepository()
+    campaign_map, business_map, creator_map = await _fetch_joins(
+        collabs, campaign_repo=campaign_repo, business_repo=business_repo, creator_repo=creator_repo
     )
     items = [
         _collaboration_to_response(
             c,
             campaign=campaign_map.get(c.campaign_id),
             business=business_map.get(c.business_id),
+            creator=creator_map.get(c.creator_id),
         )
         for c in collabs
     ]
@@ -495,7 +506,8 @@ async def get_collaboration(
 
     campaign = await campaign_repo.get_by_id(collab.campaign_id)
     business = await business_repo.get_by_id(collab.business_id)
-    resp = _collaboration_to_response(collab, campaign=campaign, business=business)
+    creator = await creator_repo.get_by_id(collab.creator_id) if creator_repo else None
+    resp = _collaboration_to_response(collab, campaign=campaign, business=business, creator=creator)
     resp["content_submissions"] = submissions
     resp["revision_history"] = revision_history
     return resp
