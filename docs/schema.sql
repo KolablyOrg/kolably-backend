@@ -344,9 +344,17 @@ create table if not exists messages (
   conversation_id  uuid not null references conversations(id) on delete cascade,
   sender_id        uuid not null references profiles(id) on delete cascade,
   content          text not null,
-  created_at       timestamptz not null default now()
+  created_at       timestamptz not null default now(),
+  -- 'text' = typed; 'event' = campaign-lifecycle system row
+  kind             text not null default 'text',
+  metadata         jsonb
 );
 create index if not exists idx_messages_conversation_id_created_at on messages(conversation_id, created_at);
+
+-- Realtime: AFTER INSERT broadcasts to private topic conversation:{id}.
+-- Participants join via RLS on realtime.messages, joining
+-- conversation_participants.profile_id -> profiles.id where
+-- profiles.auth_id = auth.uid(). See 20260822100000_chat_realtime_broadcast.sql.
 
 create table if not exists conversation_reads (
   conversation_id  uuid not null references conversations(id) on delete cascade,
