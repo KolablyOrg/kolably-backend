@@ -81,6 +81,7 @@ class FakeGoTrue:
         self._error = error
         self.last_credentials = None
         self.last_reset_password_call = None
+        self.last_resend_call = None
 
     async def sign_in_with_id_token(self, credentials):
         self.last_credentials = credentials
@@ -102,6 +103,11 @@ class FakeGoTrue:
 
     async def reset_password_email(self, email, options=None):
         self.last_reset_password_call = (email, options)
+        if self._error:
+            raise self._error
+
+    async def resend(self, params):
+        self.last_resend_call = params
         if self._error:
             raise self._error
 
@@ -538,6 +544,119 @@ async def test_signup_business_returns_tokens_when_email_confirmed(monkeypatch):
 
     assert result["access_token"] == "access-token"
     assert result["refresh_token"] == "refresh-token"
+
+
+# ── signup_creator / signup_business: confirmation-link redirect_to ───
+#
+# Regression: the confirmation email's link always pointed at the web app
+# regardless of which platform someone signed up on — a mobile signup whose
+# link opened a browser instead of returning to the app, with no way back
+# except stumbling onto "forgot password" on the web login page. Mirrors the
+# same web/mobile allow-list forgot_password already has.
+
+async def test_signup_creator_defaults_to_web_redirect_when_none_given(monkeypatch):
+    from app.core.config import settings
+
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    gotrue = FakeGoTrue(response=FakeAuthResponse(user, FakeSession()))
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.signup_creator(
+        CREATOR_SIGNUP_DATA,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+    )
+
+    assert gotrue.last_credentials["options"]["email_redirect_to"] == settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL
+
+
+async def test_signup_creator_uses_mobile_redirect_when_requested(monkeypatch):
+    from app.core.config import settings
+
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    gotrue = FakeGoTrue(response=FakeAuthResponse(user, FakeSession()))
+    _patch_supabase(monkeypatch, gotrue)
+
+    mobile_signup = CREATOR_SIGNUP_DATA.model_copy(
+        update={"redirect_to": settings.MOBILE_SIGNUP_CONFIRM_REDIRECT_URL}
+    )
+    await auth_service.signup_creator(
+        mobile_signup,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+    )
+
+    assert gotrue.last_credentials["options"]["email_redirect_to"] == settings.MOBILE_SIGNUP_CONFIRM_REDIRECT_URL
+
+
+async def test_signup_creator_ignores_unrecognized_redirect_to(monkeypatch):
+    """An arbitrary caller-supplied redirect_to must never be forwarded as-is
+    — otherwise signup becomes an open redirect for the confirmation link."""
+    from app.core.config import settings
+
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    gotrue = FakeGoTrue(response=FakeAuthResponse(user, FakeSession()))
+    _patch_supabase(monkeypatch, gotrue)
+
+    phishy_signup = CREATOR_SIGNUP_DATA.model_copy(
+        update={"redirect_to": "https://evil.example.com/phish"}
+    )
+    await auth_service.signup_creator(
+        phishy_signup,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
+        creator_repo=FakeCreatorRepo(),
+    )
+
+    assert gotrue.last_credentials["options"]["email_redirect_to"] == settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL
+
+
+async def test_signup_business_uses_mobile_redirect_when_requested(monkeypatch):
+    from app.core.config import settings
+
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    gotrue = FakeGoTrue(response=FakeAuthResponse(user, FakeSession()))
+    _patch_supabase(monkeypatch, gotrue)
+
+    mobile_signup = BUSINESS_SIGNUP_DATA.model_copy(
+        update={"redirect_to": settings.MOBILE_SIGNUP_CONFIRM_REDIRECT_URL}
+    )
+    await auth_service.signup_business(
+        mobile_signup,
+        profile_repo=FakeProfileRepo({**PROFILE, "role": "business"}),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert gotrue.last_credentials["options"]["email_redirect_to"] == settings.MOBILE_SIGNUP_CONFIRM_REDIRECT_URL
+
+
+async def test_resend_verification_email_uses_mobile_redirect_when_requested(monkeypatch):
+    from app.core.config import settings
+
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.resend_verification_email(
+        "alice@example.com", redirect_to=settings.MOBILE_SIGNUP_CONFIRM_REDIRECT_URL
+    )
+
+    assert gotrue.last_resend_call == (
+        {
+            "type": "signup",
+            "email": "alice@example.com",
+            "options": {"email_redirect_to": settings.MOBILE_SIGNUP_CONFIRM_REDIRECT_URL},
+        }
+    )
+
+
+async def test_resend_verification_email_defaults_to_web_redirect(monkeypatch):
+    from app.core.config import settings
+
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.resend_verification_email("alice@example.com")
+
+    assert gotrue.last_resend_call["options"]["email_redirect_to"] == settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL
 
 
 # ── signup_creator / signup_business: duplicate-signup guard ──────────

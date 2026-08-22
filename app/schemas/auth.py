@@ -21,12 +21,18 @@ class CreatorSignupRequest(BaseModel):
     city: str
     niche: str
     profile_photo_url: str | None = None
+    # Which client the signup-confirmation link should return to if someone
+    # clicks it instead of typing the code — validated against a fixed
+    # allow-list in auth_service.signup_creator. Optional so existing
+    # callers that don't send it still get the web fallback.
+    redirect_to: str | None = None
 
 
 class BusinessSignupRequest(BaseModel):
     name: str  # owner's full name
     email: EmailStr
     password: str = Field(..., min_length=8)
+    redirect_to: str | None = None
 
 
 # ── Login ─────────────────────────────────────────────
@@ -99,6 +105,7 @@ class ResendVerificationRequest(BaseModel):
     email for an account stuck in the unconfirmed state."""
 
     email: EmailStr
+    redirect_to: str | None = None
 
 
 class VerifySignupOtpRequest(BaseModel):

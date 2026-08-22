@@ -268,7 +268,7 @@ async def verify_2fa_login(data: TwoFactorVerifyLoginRequest):
 async def resend_verification(data: ResendVerificationRequest):
     """Re-send the signup confirmation email — for the 'check your email'
     screen a creator/business lands on right after signup."""
-    return await auth_service.resend_verification_email(data.email)
+    return await auth_service.resend_verification_email(data.email, data.redirect_to)
 
 
 @router.post("/verify-signup-otp", response_model=AuthTokenResponse)

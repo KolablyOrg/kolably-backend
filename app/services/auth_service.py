@@ -29,6 +29,24 @@ logger = logging.getLogger(__name__)
 # first sign-in for an auth.users row; a small tolerance absorbs clock/DB skew.
 _NEW_USER_SIGN_IN_TOLERANCE_SECONDS = 5
 
+_ALLOWED_SIGNUP_CONFIRM_REDIRECTS = {
+    settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL,
+    settings.MOBILE_SIGNUP_CONFIRM_REDIRECT_URL,
+}
+
+
+def _signup_confirm_redirect(redirect_to: str | None) -> str:
+    """Only ever forward a redirect_to we recognize — an arbitrary
+    client-supplied URL here would otherwise let anyone turn signup into an
+    open redirect for the confirmation link. Falls back to the web URL,
+    which works whether or not the caller has the mobile app installed.
+    Same reasoning as forgot_password's allow-list."""
+    return (
+        redirect_to
+        if redirect_to in _ALLOWED_SIGNUP_CONFIRM_REDIRECTS
+        else settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL
+    )
+
 
 async def _record_login_event(profile_id: str, ip_address: str | None, user_agent: str | None) -> None:
     """Best-effort — a logging failure must never block a real login."""
@@ -117,8 +135,9 @@ async def signup_creator(
                 "options": {
                     "data": {"role": "creator"},
                     # Only matters if someone clicks the link instead of
-                    # using the code — see WEB_SIGNUP_CONFIRM_REDIRECT_URL.
-                    "email_redirect_to": settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL,
+                    # using the code — see WEB_SIGNUP_CONFIRM_REDIRECT_URL /
+                    # MOBILE_SIGNUP_CONFIRM_REDIRECT_URL.
+                    "email_redirect_to": _signup_confirm_redirect(data.redirect_to),
                 },
             }
         )
@@ -223,7 +242,7 @@ async def signup_business(
                 "password": data.password,
                 "options": {
                     "data": {"role": "business"},
-                    "email_redirect_to": settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL,
+                    "email_redirect_to": _signup_confirm_redirect(data.redirect_to),
                 },
             }
         )
@@ -732,7 +751,7 @@ async def forgot_password(email: str, redirect_to: str | None = None) -> dict:
     return {"message": "Password reset link sent to your email"}
 
 
-async def resend_verification_email(email: str) -> dict:
+async def resend_verification_email(email: str, redirect_to: str | None = None) -> dict:
     """Re-sends the signup confirmation email — for the account created but
     never confirmed case (see signup_creator/signup_business: a `session` of
     `None` means Supabase is waiting on this exact email to be confirmed
@@ -746,7 +765,7 @@ async def resend_verification_email(email: str) -> dict:
         await supabase.auth.resend({
             "type": "signup",
             "email": email,
-            "options": {"email_redirect_to": settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL},
+            "options": {"email_redirect_to": _signup_confirm_redirect(redirect_to)},
         })
     except AuthApiError as e:
         raise HTTPException(

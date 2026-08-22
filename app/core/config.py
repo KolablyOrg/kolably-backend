@@ -39,16 +39,20 @@ class Settings(BaseSettings):
     WEB_TEAM_INVITE_REDIRECT_URL: str = "https://kolably.com/auth/accept-invite"
     # Signup-confirmation emails are OTP-first (see verify_signup_otp) — the
     # code is what the app actually uses. This redirect only matters for
-    # someone who clicks the link in the email instead: without it, Supabase
-    # fell back to the dashboard's default Site URL, which happened to be
-    # the password-reset page, so a signup confirmation link was landing
-    # people on "Reset your password". Deliberately one web URL regardless
-    # of platform — email links always open in a browser first, so there's
-    # no mobile-deep-link case to pick between the way password reset has.
-    # VerifyEmail.tsx reads the access_token Supabase appends here and logs
-    # the person in directly. Must also be added to Supabase's Redirect
-    # URLs allow list, same requirement as the URLs above.
+    # someone who clicks the link in the email instead of typing the code:
+    # without it, Supabase fell back to the dashboard's default Site URL,
+    # which happened to be the password-reset page, so a signup confirmation
+    # link was landing people on "Reset your password". Both web and mobile
+    # clients ask for their own via signup_creator/signup_business's
+    # redirect_to param (same split as password reset above) — a mobile
+    # signup whose link opened a browser instead of the app, with no way
+    # back except stumbling onto "forgot password", was exactly the bug this
+    # split fixes. VerifyEmail.tsx (web) / verify-email.tsx (mobile) both
+    # read the access_token appended here and log the person in directly.
+    # Both URLs must be added to Supabase's Redirect URLs allow list, same
+    # requirement as the URLs above.
     WEB_SIGNUP_CONFIRM_REDIRECT_URL: str = "https://kolably.com/auth/verify-email"
+    MOBILE_SIGNUP_CONFIRM_REDIRECT_URL: str = "mobile://verify-email"
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
