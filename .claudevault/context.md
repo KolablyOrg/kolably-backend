@@ -70,6 +70,7 @@ See [[knowledge/people-and-teams/overview]]
 - [[knowledge/references/concurrent-sessions-shared-repo]] — **read before any git commit/push here**: multiple Claude Code sessions share this working directory/remote; never `git add -A`, always commit by explicit pathspec
 - [[knowledge/references/kolably-ui-vercel-deploy-gap]] — **don't assume a push = live**: kolably_ui's Vercel deploy can lag/fail behind `main`; verify via curl+grep on the production bundle before telling the user a live bug is fixed
 - [[knowledge/references/kolably-ui-ci-no-typecheck]] — **kolably_ui CI does not typecheck or build**, only lint+test; run `tsc --noEmit` yourself before trusting a push is safe
+- [[knowledge/references/kolably-ui-e2e-ci-missing-secret]] — kolably_ui's e2e-regression CI job fails on a missing `BACKEND_REPO_TOKEN` secret; the visible error is a misleading downstream symptom
 
 ## Raw Intake
 _[[raw/]] — unprocessed material awaiting classification_
