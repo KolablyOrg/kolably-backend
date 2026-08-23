@@ -32,7 +32,17 @@ class Settings(BaseSettings):
     # Supabase's Redirect URLs allow list (Authentication → URL
     # Configuration) or GoTrue rejects them outright.
     WEB_PASSWORD_RESET_REDIRECT_URL: str = "https://kolably.com/auth/reset-password"
-    MOBILE_PASSWORD_RESET_REDIRECT_URL: str = "mobile://reset-password"
+    # Points at the web app's mobile-redirect bridge page, not a raw
+    # mobile:// URL — a server-issued redirect (from Supabase's own
+    # /auth/v1/verify) straight to a custom scheme unreliably drops the
+    # #access_token fragment during the OS app-handoff (confirmed in the
+    # wild: one user got a blank page, another had the app open with no
+    # token to enter). A normal https redirect never has that problem, so
+    # GoTrue lands here first; MobileRedirect.tsx reads the fragment with
+    # plain browser JS (100% reliable) and re-launches into the app with the
+    # tokens as query params instead, which survive the handoff and which
+    # reset-password.tsx / verify-email.tsx already check before the hash.
+    MOBILE_PASSWORD_RESET_REDIRECT_URL: str = "https://kolably.com/auth/mobile-redirect"
     # Team-invite emails (POST /businesses/me/team/invite) land here to set a
     # password — must also be added to Supabase's Redirect URLs allow list,
     # same requirement as the password-reset URLs above.
@@ -52,7 +62,11 @@ class Settings(BaseSettings):
     # Both URLs must be added to Supabase's Redirect URLs allow list, same
     # requirement as the URLs above.
     WEB_SIGNUP_CONFIRM_REDIRECT_URL: str = "https://kolably.com/auth/verify-email"
-    MOBILE_SIGNUP_CONFIRM_REDIRECT_URL: str = "mobile://verify-email"
+    # Same mobile-redirect bridge page as MOBILE_PASSWORD_RESET_REDIRECT_URL,
+    # and for the same reason — see the comment there. MobileRedirect.tsx
+    # branches on the `type` GoTrue includes in the fragment (signup vs
+    # recovery) to send the app-relaunch to the right screen.
+    MOBILE_SIGNUP_CONFIRM_REDIRECT_URL: str = "https://kolably.com/auth/mobile-redirect"
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
