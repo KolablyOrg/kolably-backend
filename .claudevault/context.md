@@ -67,6 +67,7 @@ See [[knowledge/people-and-teams/overview]]
 - [[knowledge/references/testing-automation-plan]]
 - [[knowledge/references/notification-architecture]] — notifications are CRUD/polling-only today; chat has Supabase Realtime, notifications don't
 - [[knowledge/references/supabase-mcp-project-mismatch]] — **check before any Supabase MCP write**: the connected MCP project may not be this repo's actual Supabase project (`uxngcuyrdmajydkqpiyi` per `.env`)
+- [[knowledge/references/concurrent-sessions-shared-repo]] — **read before any git commit/push here**: multiple Claude Code sessions share this working directory/remote; never `git add -A`, always commit by explicit pathspec
 
 ## Raw Intake
 _[[raw/]] — unprocessed material awaiting classification_
