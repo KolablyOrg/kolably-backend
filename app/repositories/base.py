@@ -23,10 +23,10 @@ import logging
 from typing import Any
 
 from postgrest.exceptions import APIError
-from supabase import AsyncClient
 
 from app.core.exceptions import DatabaseError
 from app.core.supabase import get_supabase_admin_client
+from supabase import AsyncClient
 
 logger = logging.getLogger(__name__)
 

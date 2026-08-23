@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio ruff
+          pip install pytest pytest-asyncio ruff==0.16.4
 
       - name: Lint (ruff)
         run: ruff check .
