@@ -460,28 +460,34 @@ async def google_auth(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="role ('creator' or 'business') is required for first-time Google sign-in",
             )
-
-        metadata = auth_user.user_metadata or {}
-        display_name = metadata.get("full_name") or metadata.get("name") or profile.email.split("@")[0]
-        avatar_url = metadata.get("avatar_url") or metadata.get("picture")
-
         if profile.role != data.role:
             profile = await profile_repo.update_role(profile.id, data.role) or profile
 
-        if data.role == "creator":
-            creator_repo = creator_repo or CreatorRepository()
-            await creator_repo.insert_creator({
-                "profile_id": profile.id,
-                "name": display_name,
-                "profile_photo_url": avatar_url,
-            })
-        else:
-            business_repo = business_repo or BusinessRepository()
-            await business_repo.insert_business({
-                "profile_id": profile.id,
-                "business_name": display_name,
-                "logo_url": avatar_url,
-            })
+    # `is_new_user` is only a timestamp-diff heuristic, so it can miss a
+    # first-time sign-in whose creator/business row never got created (e.g.
+    # the client dropped the connection on the first attempt, then retried
+    # after the tolerance window closed). Re-check for a missing row on
+    # every Google sign-in instead of gating creation on the heuristic, so a
+    # retry self-heals rather than permanently 404ing on every
+    # creator/business-scoped endpoint afterward.
+    creator_repo = creator_repo or CreatorRepository()
+    business_repo = business_repo or BusinessRepository()
+    metadata = auth_user.user_metadata or {}
+    display_name = metadata.get("full_name") or metadata.get("name") or profile.email.split("@")[0]
+    avatar_url = metadata.get("avatar_url") or metadata.get("picture")
+
+    if profile.role == "creator" and not await creator_repo.get_by_profile_id(profile.id):
+        await creator_repo.insert_creator({
+            "profile_id": profile.id,
+            "name": display_name,
+            "profile_photo_url": avatar_url,
+        })
+    elif profile.role == "business" and not await business_repo.get_by_profile_id(profile.id):
+        await business_repo.insert_business({
+            "profile_id": profile.id,
+            "business_name": display_name,
+            "logo_url": avatar_url,
+        })
 
     session = auth_response.session
     await _record_login_event(profile.id, ip_address, user_agent)

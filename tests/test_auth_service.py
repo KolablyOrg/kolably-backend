@@ -173,7 +173,8 @@ async def test_google_auth_returning_user_logs_in(monkeypatch):
     user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
     _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
     profile_repo = FakeProfileRepo(dict(PROFILE))
-    creator_repo = FakeCreatorRepo()
+    # A genuinely returning user already has their creator row from signup.
+    creator_repo = FakeCreatorRepo(creator={"id": "creator-1", "profile_id": "profile-1"})
     business_repo = FakeBusinessRepo()
 
     result = await auth_service.google_auth(
@@ -188,6 +189,34 @@ async def test_google_auth_returning_user_logs_in(monkeypatch):
     assert result["user"]["id"] == "profile-1"
     assert profile_repo.update_role_calls == []
     assert creator_repo.inserted is None
+    assert business_repo.inserted is None
+
+
+async def test_google_auth_returning_user_self_heals_missing_creator_row(monkeypatch):
+    """Regression test: if a first attempt got far enough to create the
+    profile/role but was interrupted before the creator row was written
+    (e.g. the client dropped the connection), `is_new_user`'s timestamp-diff
+    heuristic can read False on the retry — the row must still get created
+    rather than leaving the account permanently 404ing as creator-not-found."""
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+    profile_repo = FakeProfileRepo(dict(PROFILE))
+    creator_repo = FakeCreatorRepo()  # no existing row — simulates the interrupted first attempt
+    business_repo = FakeBusinessRepo()
+
+    result = await auth_service.google_auth(
+        GoogleAuthRequest(id_token="tok"),
+        profile_repo=profile_repo,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+    )
+
+    assert result["is_new_user"] is False
+    assert creator_repo.inserted == {
+        "profile_id": "profile-1",
+        "name": "alice",
+        "profile_photo_url": None,
+    }
     assert business_repo.inserted is None
 
 
