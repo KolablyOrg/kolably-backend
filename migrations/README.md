@@ -99,7 +99,8 @@ When making schema changes:
 | 025 | Create business_shortlists for persisted creator tags, notes, and comparison |
 | 026 | Add view_count to portfolio_items (Instagram video insights) |
 | 027 | Add views_count to creators (real aggregate for Engagement "Total views") |
-| 028 | Chat Realtime: broadcast-on-insert trigger + participant RLS on realtime.messages | |
+| 028 | Chat Realtime: broadcast-on-insert trigger + participant RLS on realtime.messages |
+| 029 | Notifications Realtime: broadcast-on-insert trigger + owner RLS on realtime.messages |
 
 ## Notes
 

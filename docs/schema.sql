@@ -49,6 +49,7 @@ create table if not exists profiles (
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
+drop trigger if exists trg_profiles_updated_at on profiles;
 create trigger trg_profiles_updated_at
   before update on profiles
   for each row execute function set_updated_at();
@@ -82,6 +83,7 @@ create table if not exists creators (
   profile_id                    uuid not null unique references profiles(id) on delete cascade,
 
   name                          text not null,
+  username                      text,              -- self-chosen handle, not enforced unique
   bio                           text,
   niche                         text,              -- matches campaigns.creator_category
   city                          text,
@@ -108,6 +110,7 @@ create index if not exists idx_creators_niche on creators(niche);
 create index if not exists idx_creators_city on creators(city);
 create index if not exists idx_creators_follower_count on creators(follower_count);
 
+drop trigger if exists trg_creators_updated_at on creators;
 create trigger trg_creators_updated_at
   before update on creators
   for each row execute function set_updated_at();
@@ -133,9 +136,13 @@ create table if not exists businesses (
   id             uuid primary key default gen_random_uuid(),
   profile_id     uuid not null unique references profiles(id) on delete cascade,
 
+  owner_name     text not null default '',          -- owner's full name, captured at signup
   business_name  text not null,
   logo_url       text,                              -- Supabase Storage `avatars`
-  industry       text,
+  industry       text,                              -- superseded by `category`; left as-is, unused by app/
+  category       text,
+  address        text,
+  instagram_handle text,
   website        text,
   description    text,
   is_verified    boolean not null default false,    -- manual, superadmin-only
@@ -145,6 +152,7 @@ create table if not exists businesses (
 );
 create index if not exists idx_businesses_is_verified on businesses(is_verified);
 
+drop trigger if exists trg_businesses_updated_at on businesses;
 create trigger trg_businesses_updated_at
   before update on businesses
   for each row execute function set_updated_at();
@@ -214,6 +222,7 @@ create index if not exists idx_campaigns_created_at on campaigns(created_at desc
 create extension if not exists pg_trgm;
 create index if not exists idx_campaigns_title_trgm on campaigns using gin (title gin_trgm_ops);
 
+drop trigger if exists trg_campaigns_updated_at on campaigns;
 create trigger trg_campaigns_updated_at
   before update on campaigns
   for each row execute function set_updated_at();
@@ -255,6 +264,7 @@ create index if not exists idx_campaign_applications_campaign_id on campaign_app
 create index if not exists idx_campaign_applications_creator_id on campaign_applications(creator_id);
 create index if not exists idx_campaign_applications_status on campaign_applications(status);
 
+drop trigger if exists trg_campaign_applications_updated_at on campaign_applications;
 create trigger trg_campaign_applications_updated_at
   before update on campaign_applications
   for each row execute function set_updated_at();
@@ -372,7 +382,9 @@ create table if not exists notifications (
   type         text not null check (type in (
                  'application_received', 'application_accepted', 'application_rejected',
                  'revision_requested', 'application_resubmitted', 'campaign_invite_received',
-                 'new_message', 'collaboration_completed'
+                 'new_message', 'collaboration_completed', 'invoice_received',
+                 'collaboration_content_submitted', 'collaboration_draft_approved',
+                 'collaboration_live_verified'
                )),
   title        text not null,
   body         text not null,
@@ -382,6 +394,45 @@ create table if not exists notifications (
 );
 create index if not exists idx_notifications_profile_unread on notifications(profile_id, is_read);
 create index if not exists idx_notifications_created_at on notifications(created_at desc);
+
+-- Realtime: AFTER INSERT broadcasts to private topic notifications:{profile_id}.
+-- Only the owning profile can subscribe, via RLS on realtime.messages joining
+-- profiles.id -> profiles.auth_id = auth.uid(). See
+-- 20260823150000_notifications_realtime_broadcast.sql.
+
+-- ────────────────────────────────────────────────────────────────────────
+-- 8. GRANTS — a genuinely fresh Supabase project (self-hosted, CLI-managed,
+--    or any cloud project created after Supabase's "auto_expose_new_tables"
+--    default flipped off) does NOT expose newly created tables to
+--    PostgREST's anon/authenticated/service_role roles automatically —
+--    confirmed by running this schema against a truly empty local
+--    instance, which failed with "permission denied for table profiles"
+--    on the backend's own service-role client. The real Kolably project
+--    has almost certainly never hit this because it was created before
+--    that default changed and inherited the legacy auto-expose behavior,
+--    so this gap only surfaces when bootstrapping anywhere new.
+--
+--    RLS (enabled on every table — see the RLS migrations) still governs
+--    per-row access for anon/authenticated regardless of these grants;
+--    service_role's queries all go through the backend's Python-enforced
+--    authorization (see app/core/supabase.py), not RLS.
+-- ────────────────────────────────────────────────────────────────────────
+grant usage on schema public to anon, authenticated, service_role;
+
+grant all on all tables in schema public to service_role;
+grant all on all sequences in schema public to service_role;
+grant all on all routines in schema public to service_role;
+alter default privileges in schema public grant all on tables to service_role;
+alter default privileges in schema public grant all on sequences to service_role;
+alter default privileges in schema public grant all on routines to service_role;
+
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
+alter default privileges in schema public grant usage, select on sequences to authenticated;
+
+grant select on all tables in schema public to anon;
+alter default privileges in schema public grant select on tables to anon;
 
 -- ════════════════════════════════════════════════════════════════════════
 -- End of schema

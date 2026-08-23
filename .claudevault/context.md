@@ -40,7 +40,8 @@ for public launch (security, testing, staging).
 | Businesses | ❌ Not implemented (route/schema stubs only) |
 | Applications | ❌ Not implemented |
 | Collaborations | ❌ Not implemented |
-| Chat | ❌ Not implemented (though a Realtime broadcast migration for chat messages was added 2026-08-22 — recheck actual status) |
+| Chat | ✅ Implemented (Supabase Realtime broadcast wired 2026-08-22 — confirmed via code sweep, see [[knowledge/references/notification-architecture]]; `docs/PROJECT_STATUS.md` is stale here) |
+| Notifications | ✅ CRUD/polling + live Realtime broadcast, fully shipped 2026-08-23 (migration applied to live Supabase, webapp subscription code wired into `NotificationBell`) — see [[decisions/002-notifications-realtime-via-supabase]] |
 
 ## Related repo: testing automation plan
 A cross-repo testing automation plan exists at
@@ -57,12 +58,15 @@ See [[knowledge/people-and-teams/overview]]
 
 ## Decisions
 - [[decisions/001-constitution-ratified]] — project constitution v1.0.0 ratified via spec-kit
+- [[decisions/002-notifications-realtime-via-supabase]] — live notifications via Supabase Realtime broadcast (mirroring chat), not webhooks
 
 ## Session Logs
 - [[logs/2026-08-23]]
 
 ## Knowledge
 - [[knowledge/references/testing-automation-plan]]
+- [[knowledge/references/notification-architecture]] — notifications are CRUD/polling-only today; chat has Supabase Realtime, notifications don't
+- [[knowledge/references/supabase-mcp-project-mismatch]] — **check before any Supabase MCP write**: the connected MCP project may not be this repo's actual Supabase project (`uxngcuyrdmajydkqpiyi` per `.env`)
 
 ## Raw Intake
 _[[raw/]] — unprocessed material awaiting classification_
