@@ -4,6 +4,7 @@ from datetime import datetime
 
 from fastapi import HTTPException, status
 
+from app.core.chat_message_cache import chat_message_cache
 from app.core.enums import NotificationType
 from app.models.chat import Conversation, Message
 from app.repositories.business_repo import BusinessRepository
@@ -15,6 +16,36 @@ from app.repositories.profile_repo import ProfileRepository
 from app.services import notification_service
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MESSAGE_LIMIT = 100
+
+
+async def _resolve_last_message(conversation_id: str, *, repo: ChatRepository) -> Message | None:
+    cached = await chat_message_cache.get_last_message(conversation_id)
+    if cached is not None:
+        return cached
+    last = await repo.get_last_message(conversation_id)
+    if last is not None:
+        await chat_message_cache.append(conversation_id, last)
+    return last
+
+
+async def _load_messages(
+    conversation_id: str,
+    *,
+    repo: ChatRepository,
+    after_id: str | None = None,
+    limit: int = DEFAULT_MESSAGE_LIMIT,
+) -> list[Message]:
+    if after_id:
+        cached_delta = await chat_message_cache.list_after(conversation_id, after_id)
+        if cached_delta:
+            return cached_delta[:limit]
+
+    messages = await repo.list_messages(conversation_id, after_id=after_id, limit=limit)
+    if not after_id and messages:
+        await chat_message_cache.hydrate_tail(conversation_id, messages)
+    return messages
 
 
 def _parse_dt(value) -> datetime | None:
@@ -138,7 +169,7 @@ async def _conversation_to_response(
         _resolve_participant_summary(
             other_id, profile_repo=profile_repo, creator_repo=creator_repo, business_repo=business_repo
         ),
-        repo.get_last_message(conv.id),
+        _resolve_last_message(conv.id, repo=repo),
         repo.count_unread(conv.id, profile_id),
         _resolve_collaboration_context(
             conv.collaboration_id, collab_repo=collab_repo, campaign_repo=campaign_repo
@@ -200,6 +231,8 @@ async def get_conversation(
     conversation_id: str,
     profile_id: str,
     *,
+    after_id: str | None = None,
+    limit: int = DEFAULT_MESSAGE_LIMIT,
     repo: ChatRepository | None = None,
     profile_repo: ProfileRepository | None = None,
     creator_repo: CreatorRepository | None = None,
@@ -228,7 +261,9 @@ async def get_conversation(
             detail="You are not a participant in this conversation",
         )
 
-    messages = await repo.list_messages(conversation_id)
+    messages = await _load_messages(
+        conversation_id, repo=repo, after_id=after_id, limit=limit,
+    )
     await repo.upsert_read(conversation_id, profile_id)
 
     other_id = next((pid for pid in participant_ids if pid != profile_id), None)
@@ -239,6 +274,7 @@ async def get_conversation(
         creator_repo=creator_repo, business_repo=business_repo,
         collab_repo=collab_repo, campaign_repo=campaign_repo,
     )
+    resp["other_last_read_at"] = other_last_read_at
     resp["messages"] = [
         _message_to_response(m, seen=_is_seen_by_other(m, profile_id, other_last_read_at))
         for m in messages
@@ -279,6 +315,8 @@ async def send_message(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to send message",
         )
+
+    await chat_message_cache.append(conversation_id, message)
 
     # Sending a message counts as having read up to this point, for the sender.
     await repo.upsert_read(conversation_id, sender_id)
@@ -346,6 +384,8 @@ async def post_collaboration_event(
                 **(extra or {}),
             },
         })
+        if message:
+            await chat_message_cache.append(conversation.id, message)
         return _message_to_response(message) if message else None
     except Exception:
         # Logging an event is never worth failing the caller's real work,

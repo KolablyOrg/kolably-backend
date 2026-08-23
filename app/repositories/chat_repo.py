@@ -86,16 +86,66 @@ class ChatRepository(BaseRepository):
         rows = await self.insert("conversations", {"collaboration_id": collaboration_id})
         return Conversation.from_row(rows[0]) if rows else None
 
-    async def list_messages(self, conversation_id: str) -> list[Message]:
+    async def get_message(self, conversation_id: str, message_id: str) -> Message | None:
+        row = await self.select_one(
+            "messages",
+            columns="*",
+            filters={"id": message_id, "conversation_id": conversation_id},
+        )
+        return Message.from_row(row) if row else None
+
+    async def list_messages(
+        self,
+        conversation_id: str,
+        *,
+        after_id: str | None = None,
+        limit: int = 100,
+    ) -> list[Message]:
+        limit = max(1, min(limit, 100))
+
+        if after_id:
+            after_msg = await self.get_message(conversation_id, after_id)
+            if after_msg is None:
+                after_id = None
+            else:
+                query = (
+                    (await self._table("messages"))
+                    .select("*")
+                    .eq("conversation_id", conversation_id)
+                    .gte("created_at", after_msg.created_at)
+                    .order("created_at", desc=False)
+                )
+                result = await self._execute(query)
+                rows = result.data or []
+                messages = []
+                for row in rows:
+                    msg = Message.from_row(row)
+                    if self._is_strictly_after(msg, after_msg):
+                        messages.append(msg)
+                return messages[:limit]
+
         query = (
             (await self._table("messages"))
             .select("*")
             .eq("conversation_id", conversation_id)
-            .order("created_at", desc=False)
+            .order("created_at", desc=True)
+            .limit(limit)
         )
         result = await self._execute(query)
         rows = result.data or []
-        return [Message.from_row(row) for row in rows]
+        return [Message.from_row(row) for row in reversed(rows)]
+
+    @staticmethod
+    def _is_strictly_after(msg: Message, cursor: Message) -> bool:
+        if msg.created_at > cursor.created_at:
+            return True
+        if msg.created_at == cursor.created_at and str(msg.id) != str(cursor.id):
+            return str(msg.id) > str(cursor.id)
+        return False
+
+    async def list_messages_legacy(self, conversation_id: str) -> list[Message]:
+        """Unbounded fetch — kept for tests/fakes; prefer list_messages with limit."""
+        return await self.list_messages(conversation_id, limit=100)
 
     async def get_last_message(self, conversation_id: str) -> Message | None:
         query = (

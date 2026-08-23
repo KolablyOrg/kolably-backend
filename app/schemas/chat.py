@@ -77,6 +77,9 @@ class ConversationResponse(BaseModel):
     last_message_sender_id: str | None = None
     unread_count: int = 0
     created_at: datetime
+    # Other participant's last read timestamp — lets clients recompute seen
+    # ticks on cached messages without refetching the full thread.
+    other_last_read_at: datetime | None = None
     # Only populated by GET /chat/conversations/{id} — the list endpoint
     # doesn't fetch messages, so this defaults to empty there.
     messages: list[MessageResponse] = []
