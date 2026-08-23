@@ -3,6 +3,8 @@ name: Deploy Backend
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -25,11 +27,45 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
-      - name: Run tests
+      - name: Run unit tests
         run: pytest tests/ -v
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Spins up local Postgres + GoTrue + Storage in Docker and applies
+      # migrations/ (symlinked at supabase/migrations) — hermetic, thrown
+      # away at the end of the job. See tests_integration/README.md.
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Export local Supabase env vars
+        run: |
+          supabase status -o env | sed 's/"//g' > /tmp/supabase_status.env
+          # shellcheck disable=SC2013
+          for pair in \
+            "API_URL=SUPABASE_URL" \
+            "ANON_KEY=SUPABASE_KEY" \
+            "SERVICE_ROLE_KEY=SUPABASE_SERVICE_ROLE_KEY" \
+            "JWT_SECRET=SUPABASE_JWT_SECRET"; do
+            src="${pair%%=*}"
+            dst="${pair##*=}"
+            value="$(grep "^${src}=" /tmp/supabase_status.env | cut -d= -f2-)"
+            echo "${dst}=${value}" >> "$GITHUB_ENV"
+          done
+
+      - name: Run integration tests
+        run: pytest tests_integration/ -v
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop
 
   deploy:
     needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
