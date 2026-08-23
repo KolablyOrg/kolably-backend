@@ -361,7 +361,13 @@ def _collaboration_to_response(
     if business:
         resp["business"] = {
             "id": business.id,
-            "business_name": business.business_name,
+            # Falls back like application_service's equivalent mapping —
+            # business_name is optional (migration 20260804120000 dropped
+            # its NOT NULL so lightweight signup can defer it), but
+            # CollaborationBusinessInfo.business_name is a required str;
+            # passing None through crashed response validation with a 500
+            # for any business that hasn't set it yet.
+            "business_name": business.business_name or "",
             "logo_url": business.logo_url,
             "gst_number": business.gst_number,
             # profile_id is the profile's id (see business_service's

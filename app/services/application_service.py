@@ -132,7 +132,13 @@ async def list_my_applications(
 
         business_summary = BusinessSummary(
             id=business_data.get("id", ""),
-            business_name=business_data.get("business_name", ""),
+            # `.get(key, "")` only falls back when the key is *missing* —
+            # business_name is a real nullable column (lightweight signup
+            # defers it), so a fetched row has the key present with value
+            # None, which .get()'s default never catches. That was crashing
+            # this endpoint with a pydantic ValidationError for any business
+            # that hasn't set business_name yet.
+            business_name=business_data.get("business_name") or "",
             logo_url=business_data.get("logo_url"),
         )
 
