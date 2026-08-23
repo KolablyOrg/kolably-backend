@@ -49,7 +49,21 @@ are concurrently mutating the same working directory and remote.** Concretely:
    changes here — rebase would rewrite commit history that other sessions
    may already have fetched/be working atop.
 
+## Confirmed risk, not just theoretical
+Within the same session, a concurrent commit (`kolably_ui` `5ce87b3`, "Add
+local chat thread cache and delta sync") introduced a one-character logic
+bug (`||` flipped to `&&` in a JSX render guard) that broke the Inbox page
+in production — `Something went wrong. Please refresh the page.` — silently
+enough that `tsc --noEmit` and `vite build` both stayed green before and
+after (it's a boolean-logic bug, not a type error). **Lesson: after merging
+in another concurrent session's changes, don't just typecheck/build — those
+only catch a subset of regressions.** If the user reports something broken
+shortly after a push that included a merge, check what the *other* side of
+that merge actually changed (`git show <their-commit>`) before assuming the
+bug is in your own work.
+
 ## Used in
 - [[decisions/002-notifications-realtime-via-supabase]] — the push this
-  procedure was worked out for.
+  procedure was worked out for, and where the confirmed-risk incident
+  (Inbox crash) happened.
 - [[logs/2026-08-23]]
