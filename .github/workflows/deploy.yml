@@ -61,7 +61,7 @@ jobs:
 
       - name: Stop local Supabase
         if: always()
-        run: supabase stop
+        run: command -v supabase >/dev/null 2>&1 && supabase stop --no-backup || true
 
   deploy:
     needs: test
