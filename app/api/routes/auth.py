@@ -34,6 +34,7 @@ from app.schemas.auth import (
     TwoFactorStatusResponse,
     TwoFactorVerifyLoginRequest,
     UpdateProfileRequest,
+    VerifyResetOtpRequest,
     VerifySignupOtpRequest,
 )
 from app.schemas.user import UserInToken
@@ -237,6 +238,16 @@ async def forgot_password(data: ForgotPasswordRequest, request: Request):
 async def reset_password(data: ResetPasswordRequest, request: Request):
     """Reset user password with valid reset token."""
     return await auth_service.reset_password(data.access_token, data.new_password)
+
+
+@router.post("/verify-reset-otp", response_model=AuthTokenResponse)
+async def verify_reset_otp(data: VerifyResetOtpRequest):
+    """Confirm a password-reset request with the 6-digit code emailed at
+    forgot-password time — the OTP counterpart to clicking the recovery
+    link (see auth_service.verify_reset_otp). Doesn't log the caller in;
+    the client immediately follows up with POST /auth/reset-password using
+    the returned access_token."""
+    return await auth_service.verify_reset_otp(data.email, data.token)
 
 
 @router.post("/2fa/setup", response_model=TwoFactorSetupResponse)

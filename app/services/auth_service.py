@@ -776,6 +776,44 @@ async def resend_verification_email(email: str, redirect_to: str | None = None) 
     return {"message": "Confirmation email sent"}
 
 
+async def verify_reset_otp(email: str, token: str) -> dict:
+    """Confirm a password-reset request with the 6-digit code emailed at
+    forgot-password time — the OTP counterpart to clicking the recovery
+    link, same reasoning as verify_signup_otp (works identically regardless
+    of platform). Deliberately doesn't attach a user profile the way
+    verify_signup_otp does: this step doesn't log the person into the app,
+    it only hands back an access_token for one immediate follow-up call to
+    reset_password — mirroring the link-click path, which has never logged
+    anyone in either (see ResetPassword.tsx / reset-password.tsx).
+    """
+    supabase = await get_supabase_client()
+
+    try:
+        auth_response = await supabase.auth.verify_otp({
+            "email": email,
+            "token": token,
+            "type": "recovery",
+        })
+    except AuthApiError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    if not auth_response.session:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired code",
+        )
+
+    session = auth_response.session
+    return {
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+        "token_type": "bearer",
+    }
+
+
 async def verify_signup_otp(
     email: str,
     token: str,

@@ -885,3 +885,64 @@ async def test_verify_signup_otp_no_session_raises_400(monkeypatch):
         await auth_service.verify_signup_otp("alice@example.com", "123456")
 
     assert exc_info.value.status_code == 400
+
+
+# ── verify_reset_otp ──────────────────────────────────────────────────
+#
+# The password-reset counterpart to the signup OTP tests above — same
+# reasoning (OTP works identically regardless of platform), but this step
+# deliberately doesn't log anyone in: it only hands back an access_token for
+# one immediate follow-up call to POST /auth/reset-password.
+
+
+async def test_verify_reset_otp_success_returns_tokens(monkeypatch):
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+
+    result = await auth_service.verify_reset_otp("alice@example.com", "123456")
+
+    assert result["access_token"] == "access-token"
+    assert result["refresh_token"] == "refresh-token"
+    assert "user" not in result
+
+
+async def test_verify_reset_otp_forwards_email_and_type(monkeypatch):
+    """Regression: type must be 'recovery' — verify_otp also handles
+    'signup'/'email_change' etc., and sending the wrong type rejects a
+    perfectly valid code."""
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    gotrue = FakeGoTrue(response=FakeAuthResponse(user, FakeSession()))
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.verify_reset_otp("alice@example.com", "123456")
+
+    assert gotrue.last_credentials == {
+        "email": "alice@example.com",
+        "token": "123456",
+        "type": "recovery",
+    }
+
+
+async def test_verify_reset_otp_invalid_code_raises_400(monkeypatch):
+    _patch_supabase(
+        monkeypatch,
+        FakeGoTrue(error=AuthApiError("Token has expired or is invalid", 403, None)),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.verify_reset_otp("alice@example.com", "000000")
+
+    assert exc_info.value.status_code == 400
+
+
+async def test_verify_reset_otp_no_session_raises_400(monkeypatch):
+    """Defensive: verify_otp succeeding with no session would be an
+    unexpected Supabase response shape, not something to silently pass
+    through."""
+    user = FakeUser(created_at=NOW, last_sign_in_at=NOW, email_confirmed_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, None)))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.verify_reset_otp("alice@example.com", "123456")
+
+    assert exc_info.value.status_code == 400

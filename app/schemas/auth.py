@@ -112,6 +112,17 @@ class ResendVerificationRequest(BaseModel):
     redirect_to: str | None = None
 
 
+class VerifyResetOtpRequest(BaseModel):
+    """POST /auth/verify-reset-otp — confirms a password-reset request with
+    the 6-digit code emailed at forgot-password time, in place of clicking
+    the link. Mirrors VerifySignupOtpRequest; the returned access_token is
+    for one immediate follow-up call to POST /auth/reset-password, not a
+    real login — see auth_service.verify_reset_otp."""
+
+    email: EmailStr
+    token: str = Field(..., min_length=1)
+
+
 class VerifySignupOtpRequest(BaseModel):
     """POST /auth/verify-signup-otp — confirms a signup with the 6-digit
     code emailed at signup time, in place of clicking a link. Works
