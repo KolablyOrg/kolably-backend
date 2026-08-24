@@ -247,6 +247,48 @@ async def test_list_conversations_resolves_other_participant_and_last_message():
     assert conv["unread_count"] == 1  # from business, never read by creator
 
 
+async def test_list_conversations_omits_empty_non_collaboration_conversation():
+    """Regression (#24): get_or_create_conversation makes a real, visible
+    row the instant someone taps "Message" — before they've sent anything.
+    If they never follow through, the other person shouldn't see an empty,
+    un-actionable thread show up in their inbox."""
+    repo = FakeChatRepo(messages=(), collaboration_id=None)
+
+    result = await chat_service.list_conversations("p-creator", repo=repo, **_repos())
+
+    assert result == []
+
+
+async def test_list_conversations_keeps_empty_collaboration_conversation():
+    """A collaboration-linked conversation is the one legitimate exception
+    — those are meant to exist as a standing thread from the moment the
+    collaboration starts, message or not."""
+    collab_repo = FakeCollaborationRepo({
+        "collab1": Collaboration.from_row({
+            "id": "collab1", "campaign_id": "camp1", "creator_id": "c1",
+            "business_id": "b1", "status": "active",
+            "created_at": "2024-01-01T00:00:00+00:00",
+        }),
+    })
+    campaign_repo = FakeCampaignRepo({
+        "camp1": Campaign.from_row({
+            "id": "camp1", "business_id": "b1", "title": "Summer Drop",
+            "objective": "brand_awareness", "description": "...",
+            "compensation_type": "cash", "cash_amount_min": 5000, "cash_amount_max": 12000,
+            "deadline": "2026-09-01T00:00:00+00:00", "status": "active",
+            "created_at": "2024-01-01T00:00:00+00:00",
+        }),
+    })
+    repo = FakeChatRepo(messages=(), collaboration_id="collab1")
+
+    result = await chat_service.list_conversations(
+        "p-creator", repo=repo, **_repos(collab_repo=collab_repo, campaign_repo=campaign_repo)
+    )
+
+    assert len(result) == 1
+    assert result[0]["last_message"] is None
+
+
 async def test_get_conversation_includes_collaboration_context_and_verified_badge():
     """The chat thread's banner needs the campaign title/compensation/
     deadline for whatever collaboration the conversation is scoped to, and
@@ -297,7 +339,13 @@ async def test_list_conversations_omits_business_id_when_other_participant_is_a_
     creator participant. The Pydantic response schema fills in None for the
     HTTP response (see test_conversation_response_schema_round_trips_messages
     for that layer)."""
-    repo = FakeChatRepo(participants=("p-business", "p-creator"))
+    repo = FakeChatRepo(
+        participants=("p-business", "p-creator"),
+        messages=[Message.from_row({
+            "id": "m1", "conversation_id": "conv1", "sender_id": "p-creator",
+            "content": "Hi!", "created_at": "2024-01-01T12:00:00+00:00",
+        })],
+    )
 
     result = await chat_service.list_conversations("p-business", repo=repo, **_repos())
 

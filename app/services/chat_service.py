@@ -223,6 +223,16 @@ async def list_conversations(
             for c in conversations
         )
     )
+    # get_or_create_conversation creates a real, visible row the instant
+    # someone taps "Message" — before they've actually sent anything. If
+    # they never follow through (changed their mind, got blocked by some
+    # other check, just navigated away), the other person otherwise sees an
+    # empty, un-actionable thread in their inbox with nothing to respond
+    # to. A collaboration-linked conversation is the one legitimate
+    # exception — those are meant to exist as a standing thread from the
+    # moment the collaboration starts, message or not.
+    items = [c for c in items if c["last_message"] is not None or c["collaboration_id"]]
+
     items.sort(key=lambda c: c["last_message_at"] or c["created_at"], reverse=True)
     return items
 
