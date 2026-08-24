@@ -40,6 +40,15 @@ container went live (this workflow's `deploy` job runs sequentially after
 `test`, and does a real `docker run` replace at the end — a green run
 genuinely means new code is serving, not just "checks passed").
 
+**`gh run watch <id> --exit-status` is not reliable on its own** — confirmed
+2026-08-24: the watch session lost its connection mid-run ("failed to get
+jobs... connection reset by peer") and still printed `[exited with code
+0]`, which would read as success even though it never actually observed
+the run's real conclusion. Don't trust a watch session's exit code by
+itself for anything that matters — always follow up with a direct `gh run
+view <id> --json status,conclusion` to get the real, current answer
+regardless of how the watch session behaved.
+
 ## Relevance to this project
 **Before concluding a backend fix "isn't working" from a user report, check
 `gh run list` for that commit's `Deploy Backend` conclusion before

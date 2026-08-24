@@ -59,6 +59,7 @@ See [[knowledge/people-and-teams/overview]]
 ## Decisions
 - [[decisions/001-constitution-ratified]] — project constitution v1.0.0 ratified via spec-kit
 - [[decisions/002-notifications-realtime-via-supabase]] — live notifications via Supabase Realtime broadcast (mirroring chat), not webhooks
+- [[decisions/003-explicit-deactivation-error-over-enumeration-protection]] — password reset explicitly 403s a deactivated account (role-aware message) rather than silently no-oping behind a generic success response; **`resend_verification_email` still uses the silent pattern, deliberately not touched by this decision** — read before changing either
 
 ## Session Logs
 - [[logs/2026-08-23]]
