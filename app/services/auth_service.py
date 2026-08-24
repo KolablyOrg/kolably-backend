@@ -733,7 +733,23 @@ _ALLOWED_PASSWORD_RESET_REDIRECTS = {
 }
 
 
-async def forgot_password(email: str, redirect_to: str | None = None) -> dict:
+async def forgot_password(
+    email: str,
+    redirect_to: str | None = None,
+    *,
+    profile_repo: ProfileRepository | None = None,
+) -> dict:
+    # Deactivated accounts must not be able to self-reinstate access via a
+    # recovery email. Checked *before* calling Supabase, and — same
+    # non-leaking shape as the rest of this module (see
+    # resend_verification_email) — returns the identical generic success
+    # message either way, so a deactivated-but-existing account can't be
+    # distinguished from a nonexistent one by response alone.
+    profile_repo = profile_repo or ProfileRepository()
+    profile = await profile_repo.get_by_email(email)
+    if profile and not profile.is_active:
+        return {"message": "Password reset link sent to your email"}
+
     supabase = await get_supabase_client()
 
     # Only ever forward a redirect_to we recognize — an arbitrary

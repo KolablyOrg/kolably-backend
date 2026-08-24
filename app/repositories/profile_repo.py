@@ -19,6 +19,14 @@ class ProfileRepository(BaseRepository):
         )
         return UserProfile.from_row(row) if row else None
 
+    async def get_by_email(self, email: str) -> UserProfile | None:
+        row = await self.select_one(
+            "profiles",
+            columns="*",
+            filters={"email": email},
+        )
+        return UserProfile.from_row(row) if row else None
+
     async def update_role(self, profile_id: str, role: str) -> UserProfile | None:
         rows = await self.update("profiles", {"role": role}, {"id": profile_id})
         return UserProfile.from_row(rows[0]) if rows else None

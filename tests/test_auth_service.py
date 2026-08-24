@@ -123,7 +123,10 @@ class FakeProfileRepo:
         self.update_role_calls = []
 
     async def get_by_auth_id(self, auth_id):
-        return _make_profile(self._profile)
+        return _make_profile(self._profile) if self._profile else None
+
+    async def get_by_email(self, email):
+        return _make_profile(self._profile) if self._profile else None
 
     async def update_role(self, profile_id, role):
         self.update_role_calls.append((profile_id, role))
@@ -416,7 +419,9 @@ async def test_forgot_password_defaults_to_web_redirect_when_none_given(monkeypa
     gotrue = FakeGoTrue()
     _patch_supabase(monkeypatch, gotrue)
 
-    result = await auth_service.forgot_password("alice@example.com")
+    result = await auth_service.forgot_password(
+        "alice@example.com", profile_repo=FakeProfileRepo(dict(PROFILE))
+    )
 
     assert result == {"message": "Password reset link sent to your email"}
     assert gotrue.last_reset_password_call == (
@@ -432,7 +437,9 @@ async def test_forgot_password_uses_mobile_redirect_when_requested(monkeypatch):
     _patch_supabase(monkeypatch, gotrue)
 
     await auth_service.forgot_password(
-        "alice@example.com", redirect_to=settings.MOBILE_PASSWORD_RESET_REDIRECT_URL
+        "alice@example.com",
+        redirect_to=settings.MOBILE_PASSWORD_RESET_REDIRECT_URL,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
     )
 
     assert gotrue.last_reset_password_call == (
@@ -451,7 +458,9 @@ async def test_forgot_password_ignores_unrecognized_redirect_to(monkeypatch):
     _patch_supabase(monkeypatch, gotrue)
 
     await auth_service.forgot_password(
-        "alice@example.com", redirect_to="https://evil.example.com/phish"
+        "alice@example.com",
+        redirect_to="https://evil.example.com/phish",
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
     )
 
     assert gotrue.last_reset_password_call == (
@@ -465,9 +474,47 @@ async def test_forgot_password_raises_400_on_auth_api_error(monkeypatch):
     _patch_supabase(monkeypatch, gotrue)
 
     with pytest.raises(HTTPException) as exc_info:
-        await auth_service.forgot_password("alice@example.com")
+        await auth_service.forgot_password(
+            "alice@example.com", profile_repo=FakeProfileRepo(dict(PROFILE))
+        )
 
     assert exc_info.value.status_code == 400
+
+
+async def test_forgot_password_skips_deactivated_account_but_looks_identical(monkeypatch):
+    """Must not let a deactivated account reinstate its own access via a
+    recovery email — but the response has to stay indistinguishable from
+    the normal success case, or this becomes an account-enumeration
+    side-channel (same reasoning as resend_verification_email)."""
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    result = await auth_service.forgot_password(
+        "alice@example.com",
+        profile_repo=FakeProfileRepo({**PROFILE, "is_active": False}),
+    )
+
+    assert result == {"message": "Password reset link sent to your email"}
+    assert gotrue.last_reset_password_call is None
+
+
+async def test_forgot_password_proceeds_when_no_profile_matches_email(monkeypatch):
+    """An email with no account at all must behave exactly like a normal
+    active account — this is the actual anti-enumeration case."""
+    from app.core.config import settings
+
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    result = await auth_service.forgot_password(
+        "nobody@example.com", profile_repo=FakeProfileRepo(None)
+    )
+
+    assert result == {"message": "Password reset link sent to your email"}
+    assert gotrue.last_reset_password_call == (
+        "nobody@example.com",
+        {"redirect_to": settings.WEB_PASSWORD_RESET_REDIRECT_URL},
+    )
 
 
 # ── signup_creator / signup_business: email confirmation gate ─────────
