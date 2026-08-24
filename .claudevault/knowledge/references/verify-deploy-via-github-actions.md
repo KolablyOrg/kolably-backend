@@ -49,6 +49,30 @@ itself for anything that matters — always follow up with a direct `gh run
 view <id> --json status,conclusion` to get the real, current answer
 regardless of how the watch session behaved.
 
+## Bonus: the `Fetch Prod Logs` workflow gives real production error visibility
+A second workflow (`.github/workflows/fetch_logs.yml`) SSHes into EC2 and
+runs `docker logs kolably-backend-prod --tail 100` on every push — a
+genuinely different, valuable signal from either deploy status or the
+manually-filed issue tracker: actual runtime errors (tracebacks, 5xx
+responses) that nobody may have reported yet. To scan several runs at once
+for real problems:
+```sh
+gh run list --repo KolablyOrg/kolably-backend --workflow "Fetch Prod Logs" \
+  --limit 15 --json databaseId,createdAt
+
+for id in <ids...>; do gh run view "$id" --repo KolablyOrg/kolably-backend --log; done \
+  | grep -E "HTTP/[12](\.[01])? (4|5)[0-9]{2}|ERROR|Traceback|Exception"
+```
+**Gotcha**: don't filter by step name (`grep "Fetch Docker Logs"`) — the
+step label in `gh run view --log`'s output is inconsistently `Fetch Docker
+Logs` or `UNKNOWN STEP` depending on the run, for reasons not investigated.
+Grep the log *content* directly (status codes, `ERROR`, `Traceback`)
+instead of the step label. Checked 2026-08-24 across ~10 runs spanning two
+days: only normal, expected 400s (wrong password, expired refresh token) —
+no hidden 500s or unhandled exceptions as of that check. This is a
+point-in-time result, not a standing guarantee — re-check rather than
+citing this as still-true later.
+
 ## Relevance to this project
 **Before concluding a backend fix "isn't working" from a user report, check
 `gh run list` for that commit's `Deploy Backend` conclusion before
