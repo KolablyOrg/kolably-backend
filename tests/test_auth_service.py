@@ -521,21 +521,39 @@ async def test_forgot_password_raises_400_on_auth_api_error(monkeypatch):
     assert exc_info.value.status_code == 400
 
 
-async def test_forgot_password_skips_deactivated_account_but_looks_identical(monkeypatch):
-    """Must not let a deactivated account reinstate its own access via a
-    recovery email — but the response has to stay indistinguishable from
-    the normal success case, or this becomes an account-enumeration
-    side-channel (same reasoning as resend_verification_email)."""
+async def test_forgot_password_rejects_deactivated_creator_account(monkeypatch):
+    """Regression: an earlier version of this check silently skipped the
+    send but returned the same generic success message, which let the
+    client fall through to the OTP entry screen with no code ever actually
+    sent — a dead end with no explanation. Explicit rejection instead,
+    naming the role the same way login/google_auth's deactivation check
+    does."""
     gotrue = FakeGoTrue()
     _patch_supabase(monkeypatch, gotrue)
 
-    result = await auth_service.forgot_password(
-        "alice@example.com",
-        profile_repo=FakeProfileRepo({**PROFILE, "is_active": False}),
-    )
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.forgot_password(
+            "alice@example.com",
+            profile_repo=FakeProfileRepo({**PROFILE, "is_active": False}),
+        )
 
-    assert result == {"message": "Password reset link sent to your email"}
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "This Creator account has been deactivated"
     assert gotrue.last_reset_password_call is None
+
+
+async def test_forgot_password_rejects_deactivated_business_account(monkeypatch):
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.forgot_password(
+            "alice@example.com",
+            profile_repo=FakeProfileRepo({**PROFILE, "role": "business", "is_active": False}),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "This Brand account has been deactivated"
 
 
 async def test_forgot_password_proceeds_when_no_profile_matches_email(monkeypatch):

@@ -765,19 +765,28 @@ async def forgot_password(
         else settings.WEB_PASSWORD_RESET_REDIRECT_URL
     )
 
-    # A deactivated account has no business getting a working reset link —
-    # skip the actual send, but still return the same generic message below
-    # either way, same as a nonexistent email: this endpoint must not let a
-    # caller distinguish "deactivated" from "doesn't exist" from "sent".
+    # A deactivated account has no business getting a working reset link.
+    # Explicitly rejected (not silently skipped) — an earlier version of
+    # this check stayed silent and let the client fall through to the OTP
+    # entry screen with no code ever actually sent, which just traded a
+    # narrow account-enumeration side-channel for a dead-end the person has
+    # no way to understand. Same role-aware message as login/google_auth's
+    # deactivation check, for the same reason: says which portal too.
     profile = await profile_repo.get_by_email(email)
-    if not profile or profile.is_active:
-        try:
-            await supabase.auth.reset_password_email(email, {"redirect_to": target})
-        except AuthApiError as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e),
-            )
+    if profile and not profile.is_active:
+        role_label = "Brand" if profile.role == UserRole.BUSINESS else "Creator"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"This {role_label} account has been deactivated",
+        )
+
+    try:
+        await supabase.auth.reset_password_email(email, {"redirect_to": target})
+    except AuthApiError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
 
     return {"message": "Password reset link sent to your email"}
 
