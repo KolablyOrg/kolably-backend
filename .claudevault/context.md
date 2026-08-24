@@ -62,6 +62,7 @@ See [[knowledge/people-and-teams/overview]]
 
 ## Session Logs
 - [[logs/2026-08-23]]
+- [[logs/2026-08-24]]
 
 ## Knowledge
 - [[knowledge/references/testing-automation-plan]]
@@ -71,6 +72,7 @@ See [[knowledge/people-and-teams/overview]]
 - [[knowledge/references/kolably-ui-vercel-deploy-gap]] — **don't assume a push = live**: kolably_ui's Vercel deploy can lag/fail behind `main`; verify via curl+grep on the production bundle before telling the user a live bug is fixed
 - [[knowledge/references/kolably-ui-ci-no-typecheck]] — **kolably_ui CI does not typecheck or build**, only lint+test; run `tsc --noEmit` yourself before trusting a push is safe
 - [[knowledge/references/kolably-ui-e2e-ci-missing-secret]] — kolably_ui's e2e-regression CI job fails on a missing `BACKEND_REPO_TOKEN` secret; the visible error is a misleading downstream symptom
+- [[knowledge/references/kolably-ui-missing-supabase-env-vars]] — **all Realtime (notifications + chat) was silently dead in production** due to two stacked bugs: missing `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` in Vercel, then a CSP `connect-src` block on the Supabase WebSocket. Both now fixed.
 
 ## Raw Intake
 _[[raw/]] — unprocessed material awaiting classification_
