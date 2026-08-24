@@ -557,6 +557,15 @@ async def complete_collaboration(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot complete a cancelled collaboration",
         )
+    # Same precondition confirm_payment already enforces — this endpoint is
+    # a second path to the same COMPLETED state, and without this check it
+    # let a business skip draft approval and live-post submission entirely
+    # by calling /complete directly instead of going through that flow.
+    if collab.status != CollaborationStatus.LIVE_SUBMITTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirm the live post before marking this collaboration as completed",
+        )
 
     updated = await repo.update_status(collaboration_id, {
         "status": CollaborationStatus.COMPLETED.value,

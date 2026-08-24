@@ -191,7 +191,7 @@ def _stub_notifications(monkeypatch):
 
 
 async def test_complete_collaboration_transitions_status_and_notifies_creator(_stub_notifications):
-    repo = FakeCollaborationRepo()
+    repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "live_submitted"})
 
     result = await collaboration_service.complete_collaboration(
         collaboration_id="collab1",
@@ -207,12 +207,27 @@ async def test_complete_collaboration_transitions_status_and_notifies_creator(_s
     assert _stub_notifications[0]["profile_id"] == "p-creator"
 
 
+async def test_complete_collaboration_rejects_before_live_post_submitted():
+    """Regression: /complete is a second path to COMPLETED alongside
+    confirm_payment, and without this same precondition it let a business
+    skip draft approval and live-post submission entirely."""
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.complete_collaboration(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "approved"}),
+            business_repo=FakeBusinessRepo(),
+            creator_repo=FakeCreatorRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
 async def test_complete_collaboration_rejects_non_owning_business():
     with pytest.raises(HTTPException) as exc:
         await collaboration_service.complete_collaboration(
             collaboration_id="collab1",
             profile_id="p-other-business",
-            repo=FakeCollaborationRepo(),
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "live_submitted"}),
             business_repo=FakeBusinessRepo(business_id="b-other"),
             creator_repo=FakeCreatorRepo(),
         )

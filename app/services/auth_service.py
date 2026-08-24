@@ -6,6 +6,7 @@ from supabase_auth.errors import AuthApiError
 
 from app.core.config import settings
 from app.core.crypto import encrypt_token
+from app.core.enums import UserRole
 from app.core.supabase import get_supabase_admin_client, get_supabase_client
 from app.models.user import UserProfile
 from app.repositories.business_repo import BusinessRepository
@@ -361,9 +362,17 @@ async def login(
         )
 
     if not profile.is_active:
+        # Naming the account's actual role here matters specifically for a
+        # deactivated-and-wrong-portal account: this check fires before the
+        # frontend's own role check ever gets a response to look at (see
+        # UserLogin.tsx/BrandLogin.tsx's completeLogin), so a generic
+        # "Account is deactivated" on, say, the Creator form for a
+        # deactivated Brand account never told anyone it was even the wrong
+        # portal to begin with.
+        role_label = "Brand" if profile.role == UserRole.BUSINESS else "Creator"
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is deactivated",
+            detail=f"This {role_label} account has been deactivated",
         )
 
     session = auth_response.session
@@ -449,9 +458,13 @@ async def google_auth(
         )
 
     if not profile.is_active:
+        # See the matching comment in login() — naming the role here is what
+        # actually surfaces a deactivated-and-wrong-portal account, since
+        # this fires before the frontend's own role check ever runs.
+        role_label = "Brand" if profile.role == UserRole.BUSINESS else "Creator"
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is deactivated",
+            detail=f"This {role_label} account has been deactivated",
         )
 
     if is_new_user:
@@ -727,8 +740,14 @@ _ALLOWED_PASSWORD_RESET_REDIRECTS = {
 }
 
 
-async def forgot_password(email: str, redirect_to: str | None = None) -> dict:
+async def forgot_password(
+    email: str,
+    redirect_to: str | None = None,
+    *,
+    profile_repo: ProfileRepository | None = None,
+) -> dict:
     supabase = await get_supabase_client()
+    profile_repo = profile_repo or ProfileRepository()
 
     # Only ever forward a redirect_to we recognize — an arbitrary
     # client-supplied URL here would otherwise let anyone turn this endpoint
@@ -740,13 +759,19 @@ async def forgot_password(email: str, redirect_to: str | None = None) -> dict:
         else settings.WEB_PASSWORD_RESET_REDIRECT_URL
     )
 
-    try:
-        await supabase.auth.reset_password_email(email, {"redirect_to": target})
-    except AuthApiError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+    # A deactivated account has no business getting a working reset link —
+    # skip the actual send, but still return the same generic message below
+    # either way, same as a nonexistent email: this endpoint must not let a
+    # caller distinguish "deactivated" from "doesn't exist" from "sent".
+    profile = await profile_repo.get_by_email(email)
+    if not profile or profile.is_active:
+        try:
+            await supabase.auth.reset_password_email(email, {"redirect_to": target})
+        except AuthApiError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
 
     return {"message": "Password reset link sent to your email"}
 

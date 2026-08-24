@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from supabase_auth.errors import AuthApiError
 
 from app.models.user import UserProfile
-from app.schemas.auth import BusinessSignupRequest, CreatorSignupRequest, GoogleAuthRequest
+from app.schemas.auth import BusinessSignupRequest, CreatorSignupRequest, GoogleAuthRequest, LoginRequest
 from app.services import auth_service
 
 NOW = datetime(2026, 7, 26, 12, 0, 0, tzinfo=UTC)
@@ -89,6 +89,12 @@ class FakeGoTrue:
             raise self._error
         return self._response
 
+    async def sign_in_with_password(self, credentials):
+        self.last_credentials = credentials
+        if self._error:
+            raise self._error
+        return self._response
+
     async def sign_up(self, credentials):
         self.last_credentials = credentials
         if self._error:
@@ -124,6 +130,9 @@ class FakeProfileRepo:
 
     async def get_by_auth_id(self, auth_id):
         return _make_profile(self._profile)
+
+    async def get_by_email(self, email):
+        return _make_profile(self._profile) if self._profile else None
 
     async def update_role(self, profile_id, role):
         self.update_role_calls.append((profile_id, role))
@@ -280,6 +289,40 @@ async def test_google_auth_deactivated_account(monkeypatch):
     assert exc_info.value.status_code == 403
 
 
+async def test_login_deactivated_creator_account_names_role(monkeypatch):
+    """Regression: a bare "Account is deactivated" on the Creator login form
+    for a deactivated Brand account (or vice versa) never told anyone it
+    was even the wrong portal — this check fires before the frontend's own
+    post-login role check ever gets a response to look at."""
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+    profile_repo = FakeProfileRepo({**PROFILE, "is_active": False})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.login(
+            LoginRequest(email="alice@example.com", password="hunter2"),
+            profile_repo=profile_repo,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "This Creator account has been deactivated"
+
+
+async def test_login_deactivated_business_account_names_role(monkeypatch):
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+    profile_repo = FakeProfileRepo({**PROFILE, "role": "business", "is_active": False})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.login(
+            LoginRequest(email="alice@example.com", password="hunter2"),
+            profile_repo=profile_repo,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "This Brand account has been deactivated"
+
+
 async def test_google_auth_invalid_token_raises_401(monkeypatch):
     _patch_supabase(
         monkeypatch,
@@ -387,7 +430,9 @@ async def test_forgot_password_defaults_to_web_redirect_when_none_given(monkeypa
     gotrue = FakeGoTrue()
     _patch_supabase(monkeypatch, gotrue)
 
-    result = await auth_service.forgot_password("alice@example.com")
+    result = await auth_service.forgot_password(
+        "alice@example.com", profile_repo=FakeProfileRepo(dict(PROFILE))
+    )
 
     assert result == {"message": "Password reset link sent to your email"}
     assert gotrue.last_reset_password_call == (
@@ -403,7 +448,9 @@ async def test_forgot_password_uses_mobile_redirect_when_requested(monkeypatch):
     _patch_supabase(monkeypatch, gotrue)
 
     await auth_service.forgot_password(
-        "alice@example.com", redirect_to=settings.MOBILE_PASSWORD_RESET_REDIRECT_URL
+        "alice@example.com",
+        redirect_to=settings.MOBILE_PASSWORD_RESET_REDIRECT_URL,
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
     )
 
     assert gotrue.last_reset_password_call == (
@@ -422,11 +469,49 @@ async def test_forgot_password_ignores_unrecognized_redirect_to(monkeypatch):
     _patch_supabase(monkeypatch, gotrue)
 
     await auth_service.forgot_password(
-        "alice@example.com", redirect_to="https://evil.example.com/phish"
+        "alice@example.com",
+        redirect_to="https://evil.example.com/phish",
+        profile_repo=FakeProfileRepo(dict(PROFILE)),
     )
 
     assert gotrue.last_reset_password_call == (
         "alice@example.com",
+        {"redirect_to": settings.WEB_PASSWORD_RESET_REDIRECT_URL},
+    )
+
+
+async def test_forgot_password_skips_send_for_deactivated_account(monkeypatch):
+    """A deactivated account must not get a working reset link — but the
+    response has to stay identical either way, or this endpoint becomes a
+    way to probe which emails are deactivated vs. just nonexistent."""
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    result = await auth_service.forgot_password(
+        "alice@example.com",
+        profile_repo=FakeProfileRepo({**PROFILE, "is_active": False}),
+    )
+
+    assert result == {"message": "Password reset link sent to your email"}
+    assert gotrue.last_reset_password_call is None
+
+
+async def test_forgot_password_still_sends_for_unknown_email(monkeypatch):
+    """No matching profile (a nonexistent email, or a probe) still goes
+    through the normal Supabase call — only a *found and deactivated*
+    profile skips it. Supabase's own response is what stays non-leaking for
+    the nonexistent-email case."""
+    from app.core.config import settings
+
+    gotrue = FakeGoTrue()
+    _patch_supabase(monkeypatch, gotrue)
+
+    await auth_service.forgot_password(
+        "nobody@example.com", profile_repo=FakeProfileRepo(None)
+    )
+
+    assert gotrue.last_reset_password_call == (
+        "nobody@example.com",
         {"redirect_to": settings.WEB_PASSWORD_RESET_REDIRECT_URL},
     )
 
@@ -436,7 +521,9 @@ async def test_forgot_password_raises_400_on_auth_api_error(monkeypatch):
     _patch_supabase(monkeypatch, gotrue)
 
     with pytest.raises(HTTPException) as exc_info:
-        await auth_service.forgot_password("alice@example.com")
+        await auth_service.forgot_password(
+            "alice@example.com", profile_repo=FakeProfileRepo(dict(PROFILE))
+        )
 
     assert exc_info.value.status_code == 400
 
