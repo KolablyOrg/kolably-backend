@@ -31,15 +31,15 @@ Ship a working MVP marketplace: auth → creator/business profiles → campaign
 lifecycle → applications → collaborations → chat → notifications, then harden
 for public launch (security, testing, staging).
 
-## Module status (per `docs/PROJECT_STATUS.md`, last refreshed 2026-07-28 in that doc — verify against code before trusting for anything recent)
+## Module status (per `docs/PROJECT_STATUS.md`, last refreshed 2026-07-28 in that doc — that doc is now confirmed stale in multiple places, see corrections below; verify against code before trusting it for anything recent)
 | Module | Status |
 |---|---|
 | Auth | ✅ Fully implemented |
 | Creators | ✅ Fully implemented |
 | Campaigns | ✅ Fully implemented |
-| Businesses | ❌ Not implemented (route/schema stubs only) |
-| Applications | ❌ Not implemented |
-| Collaborations | ❌ Not implemented |
+| Businesses | ✅ Fully implemented — **correction 2026-08-24**: `docs/PROJECT_STATUS.md` says "not implemented (stubs only)"; that's stale. Real, working auth/profile/settings flows exist. |
+| Applications | ✅ Fully implemented — same correction; campaign applications are a real, working feature. |
+| Collaborations | ✅ Fully implemented — same correction; `collaboration_service.py` is a full state machine (draft submit → review → approve → live-post submit → verify → payment confirm → complete, ~1150 lines) with real, reproducible bugs found and fixed this session (see [[logs/2026-08-24]]'s "issue-tracker bug-fixing pass" section) — bugs that only make sense against a fully built feature. `docs/PROJECT_STATUS.md` itself still needs a refresh, not just this note. |
 | Chat | ✅ Implemented (Supabase Realtime broadcast wired 2026-08-22 — confirmed via code sweep, see [[knowledge/references/notification-architecture]]; `docs/PROJECT_STATUS.md` is stale here) |
 | Notifications | ✅ CRUD/polling + live Realtime broadcast, fully shipped 2026-08-23 (migration applied to live Supabase, webapp subscription code wired into `NotificationBell`) — see [[decisions/002-notifications-realtime-via-supabase]] |
 
