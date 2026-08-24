@@ -9,6 +9,7 @@ so these tests exercise the service's in-memory joining of that data.
 import pytest
 from fastapi import HTTPException
 
+from app.core.chat_message_cache import chat_message_cache
 from app.models.business import Business
 from app.models.campaign import Campaign
 from app.models.chat import Conversation, Message
@@ -145,8 +146,24 @@ class FakeChatRepo:
         self.inserted_conversations.append(new_id)
         return conv
 
-    async def list_messages(self, conversation_id: str):
-        return list(self.messages.get(conversation_id, []))
+    async def get_message(self, conversation_id: str, message_id: str):
+        for msg in self.messages.get(conversation_id, []):
+            if msg.id == message_id:
+                return msg
+        return None
+
+    async def list_messages(self, conversation_id: str, *, after_id: str | None = None, limit: int = 100):
+        msgs = list(self.messages.get(conversation_id, []))
+        if after_id:
+            cursor = await self.get_message(conversation_id, after_id)
+            if cursor is None:
+                after_id = None
+            else:
+                from app.repositories.chat_repo import ChatRepository
+                filtered = [m for m in msgs if ChatRepository._is_strictly_after(m, cursor)]
+                return filtered[:limit]
+        if not after_id:
+            return msgs[-limit:] if len(msgs) > limit else msgs
 
     async def get_last_message(self, conversation_id: str):
         msgs = self.messages.get(conversation_id, [])
@@ -203,6 +220,13 @@ def _repos(collab_repo=None, campaign_repo=None):
         collab_repo=collab_repo or FakeCollaborationRepo(),
         campaign_repo=campaign_repo or FakeCampaignRepo(),
     )
+
+
+@pytest.fixture(autouse=True)
+async def _clear_chat_cache():
+    await chat_message_cache.clear_all()
+    yield
+    await chat_message_cache.clear_all()
 
 
 async def test_list_conversations_resolves_other_participant_and_last_message():
@@ -359,6 +383,69 @@ def test_conversation_response_schema_round_trips_messages():
     assert dumped["messages"][0]["content"] == "hi"
     assert dumped["other_participant"]["business_id"] is None
     assert dumped["messages"][0]["seen"] is True
+
+
+async def test_get_conversation_returns_other_last_read_at():
+    repo = FakeChatRepo(messages=[Message.from_row({
+        "id": "m1", "conversation_id": "conv1", "sender_id": "p-creator",
+        "content": "Hey!", "created_at": "2024-01-01T12:00:00+00:00",
+    })])
+    repo.reads[("conv1", "p-business")] = "2024-01-01T12:30:00+00:00"
+
+    result = await chat_service.get_conversation("conv1", "p-creator", repo=repo, **_repos())
+
+    assert result["other_last_read_at"] == "2024-01-01T12:30:00+00:00"
+
+
+async def test_get_conversation_after_returns_only_newer_messages():
+    repo = FakeChatRepo(messages=[
+        Message.from_row({
+            "id": "m1", "conversation_id": "conv1", "sender_id": "p-business",
+            "content": "Hello", "created_at": "2024-01-01T12:00:00+00:00",
+        }),
+        Message.from_row({
+            "id": "m2", "conversation_id": "conv1", "sender_id": "p-creator",
+            "content": "Hi", "created_at": "2024-01-01T13:00:00+00:00",
+        }),
+    ])
+
+    result = await chat_service.get_conversation(
+        "conv1", "p-creator", after_id="m1", repo=repo, **_repos(),
+    )
+
+    assert [m["id"] for m in result["messages"]] == ["m2"]
+
+
+async def test_get_conversation_unknown_after_falls_back_to_bounded_latest():
+    repo = FakeChatRepo(messages=[
+        Message.from_row({
+            "id": f"m{i}", "conversation_id": "conv1", "sender_id": "p-business",
+            "content": f"msg{i}", "created_at": f"2024-01-01T{10 + i:02d}:00:00+00:00",
+        })
+        for i in range(3)
+    ])
+
+    result = await chat_service.get_conversation(
+        "conv1", "p-creator", after_id="missing", repo=repo, **_repos(),
+    )
+
+    assert len(result["messages"]) == 3
+
+
+async def test_send_message_updates_last_message_cache(monkeypatch):
+    from app.core.chat_message_cache import chat_message_cache
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service.notification_service, "create_notification", _noop)
+
+    repo = FakeChatRepo()
+    await chat_service.send_message("conv1", "p-creator", "Cached!", repo=repo)
+
+    cached = await chat_message_cache.get_last_message("conv1")
+    assert cached is not None
+    assert cached.content == "Cached!"
 
 
 async def test_get_conversation_rejects_non_participant():

@@ -129,7 +129,7 @@ class FakeProfileRepo:
         self.update_role_calls = []
 
     async def get_by_auth_id(self, auth_id):
-        return _make_profile(self._profile)
+        return _make_profile(self._profile) if self._profile else None
 
     async def get_by_email(self, email):
         return _make_profile(self._profile) if self._profile else None
@@ -182,7 +182,8 @@ async def test_google_auth_returning_user_logs_in(monkeypatch):
     user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
     _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
     profile_repo = FakeProfileRepo(dict(PROFILE))
-    creator_repo = FakeCreatorRepo()
+    # A genuinely returning user already has their creator row from signup.
+    creator_repo = FakeCreatorRepo(creator={"id": "creator-1", "profile_id": "profile-1"})
     business_repo = FakeBusinessRepo()
 
     result = await auth_service.google_auth(
@@ -197,6 +198,34 @@ async def test_google_auth_returning_user_logs_in(monkeypatch):
     assert result["user"]["id"] == "profile-1"
     assert profile_repo.update_role_calls == []
     assert creator_repo.inserted is None
+    assert business_repo.inserted is None
+
+
+async def test_google_auth_returning_user_self_heals_missing_creator_row(monkeypatch):
+    """Regression test: if a first attempt got far enough to create the
+    profile/role but was interrupted before the creator row was written
+    (e.g. the client dropped the connection), `is_new_user`'s timestamp-diff
+    heuristic can read False on the retry — the row must still get created
+    rather than leaving the account permanently 404ing as creator-not-found."""
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+    profile_repo = FakeProfileRepo(dict(PROFILE))
+    creator_repo = FakeCreatorRepo()  # no existing row — simulates the interrupted first attempt
+    business_repo = FakeBusinessRepo()
+
+    result = await auth_service.google_auth(
+        GoogleAuthRequest(id_token="tok"),
+        profile_repo=profile_repo,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+    )
+
+    assert result["is_new_user"] is False
+    assert creator_repo.inserted == {
+        "profile_id": "profile-1",
+        "name": "alice",
+        "profile_photo_url": None,
+    }
     assert business_repo.inserted is None
 
 
@@ -480,10 +509,23 @@ async def test_forgot_password_ignores_unrecognized_redirect_to(monkeypatch):
     )
 
 
-async def test_forgot_password_skips_send_for_deactivated_account(monkeypatch):
-    """A deactivated account must not get a working reset link — but the
-    response has to stay identical either way, or this endpoint becomes a
-    way to probe which emails are deactivated vs. just nonexistent."""
+async def test_forgot_password_raises_400_on_auth_api_error(monkeypatch):
+    gotrue = FakeGoTrue(error=AuthApiError("rate limited", 429, None))
+    _patch_supabase(monkeypatch, gotrue)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.forgot_password(
+            "alice@example.com", profile_repo=FakeProfileRepo(dict(PROFILE))
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+async def test_forgot_password_skips_deactivated_account_but_looks_identical(monkeypatch):
+    """Must not let a deactivated account reinstate its own access via a
+    recovery email — but the response has to stay indistinguishable from
+    the normal success case, or this becomes an account-enumeration
+    side-channel (same reasoning as resend_verification_email)."""
     gotrue = FakeGoTrue()
     _patch_supabase(monkeypatch, gotrue)
 
@@ -496,36 +538,23 @@ async def test_forgot_password_skips_send_for_deactivated_account(monkeypatch):
     assert gotrue.last_reset_password_call is None
 
 
-async def test_forgot_password_still_sends_for_unknown_email(monkeypatch):
-    """No matching profile (a nonexistent email, or a probe) still goes
-    through the normal Supabase call — only a *found and deactivated*
-    profile skips it. Supabase's own response is what stays non-leaking for
-    the nonexistent-email case."""
+async def test_forgot_password_proceeds_when_no_profile_matches_email(monkeypatch):
+    """An email with no account at all must behave exactly like a normal
+    active account — this is the actual anti-enumeration case."""
     from app.core.config import settings
 
     gotrue = FakeGoTrue()
     _patch_supabase(monkeypatch, gotrue)
 
-    await auth_service.forgot_password(
+    result = await auth_service.forgot_password(
         "nobody@example.com", profile_repo=FakeProfileRepo(None)
     )
 
+    assert result == {"message": "Password reset link sent to your email"}
     assert gotrue.last_reset_password_call == (
         "nobody@example.com",
         {"redirect_to": settings.WEB_PASSWORD_RESET_REDIRECT_URL},
     )
-
-
-async def test_forgot_password_raises_400_on_auth_api_error(monkeypatch):
-    gotrue = FakeGoTrue(error=AuthApiError("rate limited", 429, None))
-    _patch_supabase(monkeypatch, gotrue)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await auth_service.forgot_password(
-            "alice@example.com", profile_repo=FakeProfileRepo(dict(PROFILE))
-        )
-
-    assert exc_info.value.status_code == 400
 
 
 # ── signup_creator / signup_business: email confirmation gate ─────────

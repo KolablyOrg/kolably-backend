@@ -16,9 +16,8 @@ clients bind to the event loop that created them, and a shared client breaks
 under pytest/TestClient (and is unsafe across loops in general).
 """
 
-from supabase import AsyncClient, AsyncClientOptions, create_async_client
-
 from app.core.config import settings
+from supabase import AsyncClient, AsyncClientOptions, create_async_client
 
 
 def _static_key_options(key: str) -> AsyncClientOptions:

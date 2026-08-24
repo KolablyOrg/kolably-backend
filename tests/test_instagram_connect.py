@@ -188,8 +188,15 @@ async def test_get_instagram_auth_url_uses_fixed_relay_not_client_uri():
 
 
 def test_decode_app_redirect_rejects_tampered_state():
+    """Flaky as originally written (~1/64 runs): the token is freshly
+    Fernet-encrypted with a random IV each call, so its last base64
+    character is effectively random too — `real_state[:-1] + "x"` is a
+    silent no-op whenever that character already happens to be "x", which
+    intermittently failed this exact assertion in CI. Picking a character
+    guaranteed to differ makes the tampering actually happen every time."""
     real_state = instagram_service.encode_app_redirect("mobile://auth/instagram/callback")
-    assert instagram_service.decode_app_redirect(real_state[:-1] + "x") is None
+    tampered_char = "y" if real_state[-1] == "x" else "x"
+    assert instagram_service.decode_app_redirect(real_state[:-1] + tampered_char) is None
 
 
 async def test_connect_instagram_prefills_profile(monkeypatch):

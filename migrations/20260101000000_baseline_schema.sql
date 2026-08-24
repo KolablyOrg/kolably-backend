@@ -1,4 +1,29 @@
--- ════════════════════════════════════════════════════════════════════════
+-- Migration: 000 - Baseline schema (create-from-scratch bootstrap)
+-- Description: Every table every later migration in this directory assumes
+-- already exists (profiles, creators, businesses, campaigns, ...). Without
+-- this file, replaying migrations/ against a genuinely fresh database fails
+-- immediately — 20260726150100_alter_profiles.sql ALTERs a `profiles` table
+-- that nothing before it ever created. Production and every existing
+-- Supabase project were bootstrapped by hand from docs/schema.sql (see that
+-- file's own header: "this is the CLEAN, FULL definition"), so this gap
+-- only ever showed up when trying to spin up a brand-new instance —
+-- confirmed by running `supabase start` against an empty local Postgres.
+--
+-- This file was docs/schema.sql verbatim at the time it was written, given
+-- the earliest possible timestamp so the Supabase CLI (and any other tool
+-- that just runs migrations/*.sql in order) applies it first. Like every
+-- other file in this directory, treat it as immutable once merged — future
+-- schema changes (including any more drift discovered between docs/
+-- schema.sql and the real database) belong in new, later-timestamped
+-- migration files, not edits here.
+--
+-- Verified: docs/schema.sql followed by every existing migration file, in
+-- timestamp order, applies cleanly to an empty database with zero errors
+-- (docs/schema.sql itself already lags a few recent migrations — e.g.
+-- business_shortlists, kyb fields, view/views_count columns — which are
+-- exactly what the later migration files in this directory then add).
+-- Applied: 2026-08-23
+
 -- Kolably — Complete MVP Database Design
 -- ════════════════════════════════════════════════════════════════════════
 -- Target schema derived from API_REQUIREMENTS.md (all 8 domains) + the
@@ -83,7 +108,6 @@ create table if not exists creators (
   profile_id                    uuid not null unique references profiles(id) on delete cascade,
 
   name                          text not null,
-  username                      text,              -- self-chosen handle, not enforced unique
   bio                           text,
   niche                         text,              -- matches campaigns.creator_category
   city                          text,
@@ -136,13 +160,9 @@ create table if not exists businesses (
   id             uuid primary key default gen_random_uuid(),
   profile_id     uuid not null unique references profiles(id) on delete cascade,
 
-  owner_name     text not null default '',          -- owner's full name, captured at signup
   business_name  text not null,
   logo_url       text,                              -- Supabase Storage `avatars`
-  industry       text,                              -- superseded by `category`; left as-is, unused by app/
-  category       text,
-  address        text,
-  instagram_handle text,
+  industry       text,
   website        text,
   description    text,
   is_verified    boolean not null default false,    -- manual, superadmin-only

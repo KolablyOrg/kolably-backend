@@ -53,10 +53,17 @@ async def get_unread_count(
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(
     conversation_id: str,
+    after: str | None = None,
+    limit: int = 100,
     user: UserInToken = Depends(get_current_user),
 ):
-    """Get messages in a conversation."""
-    return await chat_service.get_conversation(conversation_id, user.id)
+    """Get messages in a conversation. Use ?after=<message_id> for delta sync."""
+    return await chat_service.get_conversation(
+        conversation_id,
+        user.id,
+        after_id=after,
+        limit=min(max(limit, 1), 100),
+    )
 
 
 @router.post(
