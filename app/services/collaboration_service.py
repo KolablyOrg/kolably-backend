@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 
@@ -29,6 +29,24 @@ from app.schemas.collaboration import (
 from app.services import business_access, chat_service, instagram_service, notification_service
 
 logger = logging.getLogger(__name__)
+
+# How long a creator has to confirm they received payment before the daily
+# sweep closes the collaboration for them. Without a ceiling, a creator who
+# stops responding (deleted the app, abandoned the account) would leave the
+# business permanently unable to close the collaboration — and unable to
+# collect a review, since review_service requires COMPLETED.
+_CREATOR_CONFIRMATION_GRACE_DAYS = 7
+
+# States where the collaboration is over, or the money has already moved and
+# the work is settled — no new drafts, live posts, revisions or cancellation.
+# PAYMENT_CONFIRMED belongs here even though it isn't terminal: the business
+# has paid, so reopening the work at that point isn't something either side
+# should be able to do unilaterally.
+_SETTLED_STATUSES = (
+    CollaborationStatus.PAYMENT_CONFIRMED,
+    CollaborationStatus.COMPLETED,
+    CollaborationStatus.CANCELLED,
+)
 
 
 def _deliverable_slot_count(deliverables: list | None) -> int:
@@ -128,11 +146,7 @@ async def _assert_can_review_draft(
     repo: CollaborationRepository,
     campaign_repo: CampaignRepository,
 ) -> Collaboration:
-    if collab.status in (
-        CollaborationStatus.COMPLETED,
-        CollaborationStatus.CANCELLED,
-        CollaborationStatus.LIVE_SUBMITTED,
-    ):
+    if collab.status in (*_SETTLED_STATUSES, CollaborationStatus.LIVE_SUBMITTED):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot review drafts for a {collab.status.value} collaboration",
@@ -343,6 +357,7 @@ def _collaboration_to_response(
         "revision_history": revision_history or [],
         "payment_confirmed_at": collab.payment_confirmed_at,
         "payment_confirmed_by": collab.payment_confirmed_by,
+        "creator_confirmed_at": collab.creator_confirmed_at,
         "campaign_title": campaign.title if campaign else None,
         "business_name": business.business_name if business else None,
         "brand_logo": business.logo_url if business else None,
@@ -558,6 +573,19 @@ async def complete_collaboration(
     creator_repo: CreatorRepository | None = None,
     member_repo: BusinessMemberRepository | None = None,
 ) -> dict:
+    """Superadmin-only support override that force-closes a collaboration.
+
+    This is NOT the normal completion path and is no longer reachable by a
+    business role (see the route's `require_role`). Completion happens
+    through confirm_payment → confirm_completion, so that a collaboration
+    can only close once the business has paid AND the creator has confirmed
+    receiving it.
+
+    Kept as an override purely for support cases the handshake can't
+    resolve on its own — e.g. the creator deleted their account before
+    confirming and the 7-day auto-confirm window is impractical to wait
+    out. Every use is a manual, human decision.
+    """
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
     creator_repo = creator_repo or CreatorRepository()
@@ -575,11 +603,14 @@ async def complete_collaboration(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot complete a cancelled collaboration",
         )
-    # Same precondition confirm_payment already enforces — this endpoint is
-    # a second path to the same COMPLETED state, and without this check it
-    # let a business skip draft approval and live-post submission entirely
-    # by calling /complete directly instead of going through that flow.
-    if collab.status != CollaborationStatus.LIVE_SUBMITTED:
+    # The live post still has to exist, and the money still has to have been
+    # marked sent — an override skips the creator's confirmation, not the
+    # rest of the workflow. Overriding straight from `active` would close a
+    # collaboration where nothing was delivered and nothing was paid.
+    if collab.status not in (
+        CollaborationStatus.LIVE_SUBMITTED,
+        CollaborationStatus.PAYMENT_CONFIRMED,
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Confirm the live post before marking this collaboration as completed",
@@ -628,6 +659,14 @@ async def cancel_collaboration(
     collab = await _get_owned_collaboration(
         collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
+    if collab.status == CollaborationStatus.PAYMENT_CONFIRMED:
+        # The money has already been sent. Cancelling here would strand the
+        # creator: collaboration closed as cancelled, payment gone, and no
+        # completed record to invoice or review against.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment has already been sent — this collaboration can no longer be cancelled",
+        )
     if collab.status in (CollaborationStatus.COMPLETED, CollaborationStatus.CANCELLED):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -689,7 +728,7 @@ async def submit_content(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not own this collaboration",
         )
-    if collab.status in (CollaborationStatus.COMPLETED, CollaborationStatus.CANCELLED):
+    if collab.status in _SETTLED_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot submit content for a {collab.status.value} collaboration",
@@ -720,8 +759,7 @@ async def submit_content(
         if collab.status in (
             CollaborationStatus.APPROVED,
             CollaborationStatus.LIVE_SUBMITTED,
-            CollaborationStatus.COMPLETED,
-            CollaborationStatus.CANCELLED,
+            *_SETTLED_STATUSES,
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1124,9 +1162,15 @@ async def confirm_payment(
 ) -> dict:
     """Business confirms they paid the creator directly (Kolably never
     moves the money itself — see `BizMarkPaid` in the design and the
-    product's consistent "pay directly" framing elsewhere). Completes the
-    collaboration in the same step, reusing `complete_collaboration`'s
-    notify-creator behavior rather than duplicating it.
+    product's consistent "pay directly" framing elsewhere).
+
+    This does NOT complete the collaboration. It moves it to
+    `payment_confirmed` and hands the next step to the creator, who has to
+    confirm they actually received the money via `confirm_completion`.
+    Before 2026-08-25 this wrote `completed` directly, which meant a
+    business could close out a collaboration permanently on nothing but its
+    own say-so — the creator had no say and, since Kolably never touches the
+    funds, no part of the system had any evidence the payment happened.
     """
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
@@ -1146,8 +1190,8 @@ async def confirm_payment(
     updated = await repo.update_status(collaboration_id, {
         "payment_confirmed_at": now,
         "payment_confirmed_by": profile_id,
-        "status": CollaborationStatus.COMPLETED.value,
-        "completed_at": now,
+        # Deliberately NOT completed_at / COMPLETED — the creator closes it.
+        "status": CollaborationStatus.PAYMENT_CONFIRMED.value,
     })
     if not updated:
         raise HTTPException(
@@ -1169,9 +1213,13 @@ async def confirm_payment(
     if creator:
         await notification_service.create_notification(
             profile_id=creator.profile_id,
-            type=NotificationType.COLLABORATION_COMPLETED,
-            title="Payment confirmed",
-            body="The business confirmed they've paid you and marked this collaboration complete.",
+            type=NotificationType.COLLABORATION_PAYMENT_CONFIRMED,
+            title="Payment sent — please confirm",
+            body=(
+                f"The business marked your payment as sent. Confirm you've received it to close "
+                f"this collaboration. If you don't respond within {_CREATOR_CONFIRMATION_GRACE_DAYS} "
+                f"days it closes automatically."
+            ),
             related_id=collaboration_id,
         )
 
@@ -1179,7 +1227,181 @@ async def confirm_payment(
         collaboration_id,
         profile_id,
         "payment_confirmed",
-        "Confirmed payment. This collaboration is complete.",
+        "Confirmed payment sent. Waiting for the creator to confirm they received it.",
     )
 
     return _collaboration_to_response(updated)
+
+
+async def confirm_completion(
+    collaboration_id: str,
+    profile_id: str,
+    *,
+    repo: CollaborationRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> dict:
+    """Creator confirms they received the payment — the step that actually
+    completes the collaboration.
+
+    This is the second half of the handshake `confirm_payment` starts. It is
+    creator-only on purpose: the whole point is that the party who is owed
+    the money is the one who says it arrived. A business cannot call this
+    for them, and `complete_collaboration` is no longer reachable by a
+    business role either (superadmin support override only).
+    """
+    repo = repo or CollaborationRepository()
+    creator_repo = creator_repo or CreatorRepository()
+    business_repo = business_repo or BusinessRepository()
+
+    creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
+
+    collab = await repo.get_by_id(collaboration_id)
+    if not collab:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Collaboration not found",
+        )
+    if collab.creator_id != creator_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not own this collaboration",
+        )
+    if collab.status == CollaborationStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Collaboration is already completed",
+        )
+    if collab.status == CollaborationStatus.CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot complete a cancelled collaboration",
+        )
+    if collab.status != CollaborationStatus.PAYMENT_CONFIRMED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The business hasn't marked your payment as sent yet",
+        )
+
+    now = datetime.now(UTC).isoformat()
+    updated = await repo.update_status(collaboration_id, {
+        "creator_confirmed_at": now,
+        "status": CollaborationStatus.COMPLETED.value,
+        "completed_at": now,
+    })
+    if not updated:
+        logger.error(
+            "confirm_completion: update_status returned no row for collaboration_id=%s "
+            "(profile_id=%s) after status checks passed",
+            collaboration_id,
+            profile_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not close the collaboration due to a server error",
+        )
+
+    business = await business_repo.get_by_id(collab.business_id)
+    if business:
+        await notification_service.create_notification(
+            profile_id=business.profile_id,
+            type=NotificationType.COLLABORATION_COMPLETED,
+            title="Creator confirmed payment",
+            body="The creator confirmed they received payment. This collaboration is now complete.",
+            related_id=collaboration_id,
+        )
+
+    await chat_service.post_collaboration_event(
+        collaboration_id,
+        profile_id,
+        "collaboration_completed",
+        "Confirmed payment received. This collaboration is complete.",
+    )
+
+    return _collaboration_to_response(updated)
+
+
+async def auto_confirm_stale_collaborations(
+    *,
+    repo: CollaborationRepository | None = None,
+    creator_repo: CreatorRepository | None = None,
+    business_repo: BusinessRepository | None = None,
+) -> dict:
+    """Close collaborations the creator never confirmed, past the grace
+    window. Run daily by `app.core.scheduler`.
+
+    Without this a non-responsive creator leaves the collaboration stuck in
+    `payment_confirmed` forever — and because `review_service` and
+    `invoice_service` both gate on COMPLETED, that would also block the
+    business from ever reviewing and the creator from ever invoicing.
+
+    Deliberately per-row error handling rather than one big transaction: one
+    collaboration with a missing creator/business row must not stop the rest
+    of the sweep, and a job that crashes halfway leaves an arbitrary subset
+    processed with no record of which.
+    """
+    repo = repo or CollaborationRepository()
+    creator_repo = creator_repo or CreatorRepository()
+    business_repo = business_repo or BusinessRepository()
+
+    cutoff = datetime.now(UTC) - timedelta(days=_CREATOR_CONFIRMATION_GRACE_DAYS)
+    stale = await repo.list_awaiting_creator_confirmation_before(cutoff)
+
+    confirmed = 0
+    failed = 0
+    for collab in stale:
+        try:
+            now = datetime.now(UTC).isoformat()
+            updated = await repo.update_status(collab.id, {
+                # Left NULL on purpose — the creator never actually
+                # confirmed anything, and recording a confirmation they
+                # didn't give would misrepresent the record. `completed_at`
+                # with a NULL `creator_confirmed_at` is precisely the
+                # signature of an auto-closed collaboration.
+                "status": CollaborationStatus.COMPLETED.value,
+                "completed_at": now,
+            })
+            if not updated:
+                failed += 1
+                logger.error(
+                    "auto_confirm: update_status returned no row for collaboration_id=%s",
+                    collab.id,
+                )
+                continue
+
+            creator = await creator_repo.get_by_id(collab.creator_id)
+            if creator:
+                await notification_service.create_notification(
+                    profile_id=creator.profile_id,
+                    type=NotificationType.COLLABORATION_COMPLETED,
+                    title="Collaboration closed automatically",
+                    body=(
+                        f"You didn't confirm payment within "
+                        f"{_CREATOR_CONFIRMATION_GRACE_DAYS} days, so this collaboration was "
+                        f"closed. If you never received payment, contact the business or support."
+                    ),
+                    related_id=collab.id,
+                )
+
+            business = await business_repo.get_by_id(collab.business_id)
+            if business:
+                await notification_service.create_notification(
+                    profile_id=business.profile_id,
+                    type=NotificationType.COLLABORATION_COMPLETED,
+                    title="Collaboration closed automatically",
+                    body=(
+                        f"The creator didn't confirm payment within "
+                        f"{_CREATOR_CONFIRMATION_GRACE_DAYS} days, so this collaboration was "
+                        f"closed automatically."
+                    ),
+                    related_id=collab.id,
+                )
+
+            confirmed += 1
+        except Exception:
+            failed += 1
+            logger.exception(
+                "auto_confirm: failed to close collaboration_id=%s", collab.id
+            )
+
+    return {"candidates": len(stale), "closed": confirmed, "failed": failed}

@@ -67,6 +67,12 @@ class CollaborationStatus(StrEnum):
     REVISION_REQUESTED = "revision_requested"
     APPROVED = "approved"
     LIVE_SUBMITTED = "live_submitted"
+    # Business says they've paid; creator hasn't confirmed receipt yet. NOT
+    # a terminal state — see migration 20260825170000. Anything that used to
+    # check `== COMPLETED` to mean "this collaboration is over" must NOT
+    # treat this as over, and anything that checks "still in progress" must
+    # NOT allow new content/revisions here.
+    PAYMENT_CONFIRMED = "payment_confirmed"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
 
@@ -95,6 +101,10 @@ class NotificationType(StrEnum):
     COLLABORATION_CONTENT_SUBMITTED = "collaboration_content_submitted"
     COLLABORATION_DRAFT_APPROVED = "collaboration_draft_approved"
     COLLABORATION_LIVE_VERIFIED = "collaboration_live_verified"
+    # Business says the money is sent; the creator still has to confirm they
+    # received it. Distinct from COLLABORATION_COMPLETED on purpose — this
+    # one asks the creator to act, that one just reports an outcome.
+    COLLABORATION_PAYMENT_CONFIRMED = "collaboration_payment_confirmed"
 
 
 class InvoiceStatus(StrEnum):

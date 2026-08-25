@@ -2,6 +2,8 @@
 Unit tests for collaboration_service — repositories injected as fakes, no Supabase.
 """
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi import HTTPException
 
@@ -54,6 +56,9 @@ class FakeCollaborationRepo:
         self.inserted_submissions = []
         self.updated_submissions = []
         self.revision_history = []
+        # Only used by the auto-confirm sweep tests.
+        self.stale_rows = []
+        self.cutoffs_requested = []
 
     async def get_by_id(self, collaboration_id: str):
         return Collaboration.from_row(self._row) if self._row else None
@@ -88,6 +93,20 @@ class FakeCollaborationRepo:
                 sub.update(data)
                 return sub
         return None
+
+    async def list_awaiting_creator_confirmation_before(self, cutoff):
+        """Mirrors the real repo's filter (status + payment_confirmed_at <
+        cutoff) rather than returning everything — otherwise a test would
+        pass even if the service asked for the wrong cutoff."""
+        self.cutoffs_requested.append(cutoff)
+        out = []
+        for row in self.stale_rows:
+            if row.get("status") != "payment_confirmed":
+                continue
+            confirmed_at = row.get("payment_confirmed_at")
+            if confirmed_at and datetime.fromisoformat(confirmed_at) < cutoff:
+                out.append(Collaboration.from_row(row))
+        return out
 
     async def list_revision_history(self, collaboration_id: str):
         return self.revision_history
@@ -760,7 +779,14 @@ async def test_verify_live_post_rejects_when_not_live_submitted():
 
 
 # ── confirm_payment ──────────────────────────────────────────────────
-async def test_confirm_payment_completes_collaboration(_stub_notifications):
+async def test_confirm_payment_does_not_complete_collaboration(_stub_notifications):
+    """The business paying is only half the handshake.
+
+    This used to write `completed` directly, which is what let a brand close
+    a collaboration out permanently on its own say-so — the creator had no
+    say and nothing evidenced the money actually arrived. It must now stop
+    at `payment_confirmed` and leave `completed_at` unset.
+    """
     repo = FakeCollaborationRepo(row={**COLLAB_ROW, "status": "live_submitted"})
 
     result = await collaboration_service.confirm_payment(
@@ -772,9 +798,111 @@ async def test_confirm_payment_completes_collaboration(_stub_notifications):
         invoice_repo=FakeInvoiceRepo(),
     )
 
-    assert result["status"] == "completed"
+    assert result["status"] == "payment_confirmed"
     assert result["payment_confirmed_at"] is not None
+    assert result["completed_at"] is None
+    assert result["creator_confirmed_at"] is None
+    # The creator is asked to act, so this must be the ask-the-creator type,
+    # not the generic "it's done" one.
     assert len(_stub_notifications) == 1
+    assert _stub_notifications[0]["type"].value == "collaboration_payment_confirmed"
+    assert _stub_notifications[0]["profile_id"] == "p-creator"
+
+
+# ── confirm_completion (creator side) ─────────────────────────────────
+async def test_confirm_completion_closes_collaboration(_stub_notifications):
+    repo = FakeCollaborationRepo(
+        row={
+            **COLLAB_ROW,
+            "status": "payment_confirmed",
+            "payment_confirmed_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+
+    result = await collaboration_service.confirm_completion(
+        collaboration_id="collab1",
+        profile_id="p-creator",
+        repo=repo,
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result["status"] == "completed"
+    assert result["creator_confirmed_at"] is not None
+    assert result["completed_at"] is not None
+    # The business is the one told about it — the creator just did it.
+    assert len(_stub_notifications) == 1
+    assert _stub_notifications[0]["profile_id"] == "p-business"
+
+
+async def test_confirm_completion_rejects_before_payment_confirmed():
+    """A creator can't close a collaboration the brand hasn't paid for —
+    otherwise the handshake could be short-circuited from the other side."""
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.confirm_completion(
+            collaboration_id="collab1",
+            profile_id="p-creator",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "live_submitted"}),
+            creator_repo=FakeCreatorRepo(),
+            business_repo=FakeBusinessRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
+async def test_confirm_completion_rejects_non_owning_creator():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.confirm_completion(
+            collaboration_id="collab1",
+            profile_id="p-other-creator",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "payment_confirmed"}),
+            creator_repo=FakeCreatorRepo(creator_id="c-other"),
+            business_repo=FakeBusinessRepo(),
+        )
+    assert exc.value.status_code == 403
+
+
+async def test_confirm_completion_rejects_already_completed():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.confirm_completion(
+            collaboration_id="collab1",
+            profile_id="p-creator",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "completed"}),
+            creator_repo=FakeCreatorRepo(),
+            business_repo=FakeBusinessRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
+# ── payment_confirmed is not an open collaboration ────────────────────
+async def test_cancel_rejected_once_payment_confirmed():
+    """Cancelling after payment would strand the creator: closed as
+    cancelled, money already sent, and no completed record to invoice or
+    review against."""
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.cancel_collaboration(
+            collaboration_id="collab1",
+            profile_id="p-business",
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "payment_confirmed"}),
+            business_repo=FakeBusinessRepo(),
+        )
+    assert exc.value.status_code == 400
+
+
+async def test_submit_content_rejected_once_payment_confirmed():
+    with pytest.raises(HTTPException) as exc:
+        await collaboration_service.submit_content(
+            collaboration_id="collab1",
+            profile_id="p-creator",
+            data=ContentSubmitRequest(
+                content_url="https://instagram.com/p/late",
+                platform=Platform.INSTAGRAM,
+            ),
+            repo=FakeCollaborationRepo(row={**COLLAB_ROW, "status": "payment_confirmed"}),
+            creator_repo=FakeCreatorRepo(),
+            business_repo=FakeBusinessRepo(),
+            campaign_repo=FakeCampaignRepo(campaigns=[]),
+        )
+    assert exc.value.status_code == 400
 
 
 async def test_confirm_payment_marks_existing_invoice_paid(_stub_notifications):
@@ -874,11 +1002,28 @@ async def test_collaboration_lifecycle_runs_from_draft_to_payment(_stub_notifica
         invoice_repo=invoice_repo,
     )
 
-    assert [draft["status"], approved["status"], live["status"], verified["status"], paid["status"]] == [
+    confirmed = await collaboration_service.confirm_completion(
+        collaboration_id="collab1",
+        profile_id="p-creator",
+        repo=repo,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+    )
+
+    assert [
+        draft["status"],
+        approved["status"],
+        live["status"],
+        verified["status"],
+        paid["status"],
+        confirmed["status"],
+    ] == [
         "content_submitted",
         "approved",
         "live_submitted",
         "live_submitted",
+        # Paying no longer ends it — the creator's confirmation does.
+        "payment_confirmed",
         "completed",
     ]
     assert [notification["type"].value for notification in _stub_notifications] == [
@@ -886,6 +1031,7 @@ async def test_collaboration_lifecycle_runs_from_draft_to_payment(_stub_notifica
         "collaboration_draft_approved",
         "collaboration_content_submitted",
         "collaboration_live_verified",
+        "collaboration_payment_confirmed",
         "collaboration_completed",
     ]
 
@@ -923,3 +1069,91 @@ async def test_confirm_payment_surfaces_invoice_sync_failure():
             ),
         )
     assert exc.value.status_code == 500
+
+
+# ── auto-confirm sweep ────────────────────────────────────────────────
+def _stale_row(collab_id: str, days_ago: float):
+    return {
+        **COLLAB_ROW,
+        "id": collab_id,
+        "status": "payment_confirmed",
+        "payment_confirmed_at": (datetime.now(UTC) - timedelta(days=days_ago)).isoformat(),
+    }
+
+
+async def test_auto_confirm_closes_collaborations_past_the_grace_window(_stub_notifications):
+    repo = FakeCollaborationRepo()
+    repo.stale_rows = [_stale_row("collab-stale", days_ago=8)]
+
+    result = await collaboration_service.auto_confirm_stale_collaborations(
+        repo=repo,
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result == {"candidates": 1, "closed": 1, "failed": 0}
+    _, update = repo.updates[0]
+    assert update["status"] == "completed"
+    assert update["completed_at"] is not None
+    # creator_confirmed_at must stay unset: nobody actually confirmed, and
+    # writing a confirmation the creator never gave would misrepresent it.
+    assert "creator_confirmed_at" not in update
+    # Both sides are told, so neither is surprised by a closed collaboration.
+    assert {n["profile_id"] for n in _stub_notifications} == {"p-creator", "p-business"}
+
+
+async def test_auto_confirm_leaves_collaborations_inside_the_grace_window():
+    repo = FakeCollaborationRepo()
+    repo.stale_rows = [_stale_row("collab-fresh", days_ago=3)]
+
+    result = await collaboration_service.auto_confirm_stale_collaborations(
+        repo=repo,
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result == {"candidates": 0, "closed": 0, "failed": 0}
+    assert repo.updates == []
+
+
+async def test_auto_confirm_uses_a_seven_day_cutoff():
+    """Pins the window itself. A silent change to the constant would
+    otherwise close collaborations earlier than the copy shown to creators
+    in the confirm-payment notification promises."""
+    repo = FakeCollaborationRepo()
+
+    await collaboration_service.auto_confirm_stale_collaborations(
+        repo=repo,
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    requested = repo.cutoffs_requested[0]
+    expected = datetime.now(UTC) - timedelta(days=7)
+    assert abs((requested - expected).total_seconds()) < 60
+
+
+async def test_auto_confirm_keeps_going_when_one_row_fails(_stub_notifications):
+    """One bad row must not abort the sweep — otherwise a single broken
+    collaboration blocks every other one from ever being closed."""
+
+    class PartiallyFailingRepo(FakeCollaborationRepo):
+        async def update_status(self, collaboration_id, data):
+            if collaboration_id == "collab-bad":
+                raise RuntimeError("row is wedged")
+            return await super().update_status(collaboration_id, data)
+
+    repo = PartiallyFailingRepo()
+    repo.stale_rows = [
+        _stale_row("collab-bad", days_ago=9),
+        _stale_row("collab-good", days_ago=9),
+    ]
+
+    result = await collaboration_service.auto_confirm_stale_collaborations(
+        repo=repo,
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result == {"candidates": 2, "closed": 1, "failed": 1}
+    assert [collab_id for collab_id, _ in repo.updates] == ["collab-good"]

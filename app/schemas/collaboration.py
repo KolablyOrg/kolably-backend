@@ -146,6 +146,11 @@ class CollaborationResponse(BaseModel):
     revision_history: list[RevisionHistoryResponse] = []
     payment_confirmed_at: datetime | None = None
     payment_confirmed_by: str | None = None
+    # Set when the creator confirms they actually received the payment —
+    # that confirmation, not payment_confirmed_at, is what completes the
+    # collaboration. Clients use the gap between the two to render the
+    # "waiting on the creator" / "confirm you were paid" states.
+    creator_confirmed_at: datetime | None = None
     # Joined so mobile can render brand/campaign context without a second
     # round trip — previously absent entirely, which left collab-detail.tsx
     # and collab-submit.tsx rendering blank brand name/logo/payout/deadline.

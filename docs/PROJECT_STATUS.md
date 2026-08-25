@@ -174,7 +174,12 @@ only the handler + service logic is missing.
 - `GET /` — list for current user (role-filtered)
 - `GET /{collaboration_id}`
 - `POST /{collaboration_id}/submit` — creator submits content
-- `PATCH /{collaboration_id}/complete`, `PATCH /{collaboration_id}/cancel`
+- `POST /{collaboration_id}/confirm-payment` — business marks payment sent
+  (→ `payment_confirmed`; does NOT complete)
+- `POST /{collaboration_id}/confirm-completion` — creator confirms receipt
+  (→ `completed`; this is the only normal way a collaboration closes)
+- `PATCH /{collaboration_id}/complete` — superadmin support override only,
+  `PATCH /{collaboration_id}/cancel` (rejected once payment is confirmed)
 - Planned but not started: affiliate URL generation & tracking (per TODO comment in `collaboration_service.py`)
 
 **Chat** (`/api/v1/chat`, schema: [`app/schemas/chat.py`](../app/schemas/chat.py))

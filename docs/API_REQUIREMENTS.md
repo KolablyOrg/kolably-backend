@@ -491,8 +491,30 @@ Authorization:
 | ✅ | GET | `/collaborations/{collaboration_id}` |
 | 🧩 | POST | `/collaborations/{collaboration_id}/submit` |
 | 🧩 | POST | `/collaborations/{collaboration_id}/content-submissions/{submission_id}/sync` |
-| ✅ | PATCH | `/collaborations/{collaboration_id}/complete` |
+| ✅ | POST | `/collaborations/{collaboration_id}/confirm-payment` |
+| ✅ | POST | `/collaborations/{collaboration_id}/confirm-completion` |
+| ✅ | PATCH | `/collaborations/{collaboration_id}/complete` (superadmin override only) |
 | ✅ | PATCH | `/collaborations/{collaboration_id}/cancel` |
+
+Completing a collaboration is a **two-sided handshake** (since 2026-08-25,
+migration `20260825170000`). Neither side can close it alone:
+
+1. Business calls `confirm-payment` → status becomes `payment_confirmed`.
+   This records that they say they've sent the money. It does **not**
+   complete the collaboration.
+2. Creator calls `confirm-completion` → status becomes `completed`. Since
+   Kolably never holds or moves the funds, the creator confirming *receipt*
+   is the only evidence the system has that payment actually happened.
+
+If the creator never responds, a daily job (04:00 UTC,
+`app/core/scheduler.py`) closes the collaboration 7 days after
+`payment_confirmed_at`, leaving `creator_confirmed_at` NULL — that
+combination of `completed_at` set and `creator_confirmed_at` NULL is the
+signature of an auto-closed collaboration. `PATCH /complete` is a superadmin
+support override for cases the handshake can't resolve (e.g. the creator
+deleted their account); it was reachable by business accounts until
+2026-08-25, which is what allowed a brand to close a collaboration without
+paying.
 
 A campaign can require multiple deliverables, so a collaboration can have
 multiple content submissions — `submit` appends, it doesn't replace.

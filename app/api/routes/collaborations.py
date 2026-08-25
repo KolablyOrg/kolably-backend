@@ -56,13 +56,21 @@ async def get_collaboration(
 @router.patch(
     "/{collaboration_id}/complete",
     response_model=CollaborationResponse,
-    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+    dependencies=[Depends(require_role(UserRole.SUPERADMIN))],
 )
 async def complete_collaboration(
     collaboration_id: str,
     user: UserInToken = Depends(get_current_user),
 ):
-    """Mark a collaboration as completed (business owner only)."""
+    """Force-close a collaboration — superadmin support override only.
+
+    BUSINESS was deliberately removed from this guard on 2026-08-25. A
+    business closing a collaboration on its own say-so is exactly the bug
+    this endpoint used to enable: the creator had no way to dispute it and
+    nothing in the system evidenced that payment actually happened. The
+    supported path is POST /confirm-payment (business) followed by
+    POST /confirm-completion (creator).
+    """
     return await collaboration_service.complete_collaboration(
         collaboration_id=collaboration_id,
         profile_id=user.id,
@@ -165,9 +173,35 @@ async def confirm_payment(
     collaboration_id: str,
     user: UserInToken = Depends(get_current_user),
 ):
-    """Business confirms they paid the creator directly, completing the
-    collaboration (business owner only)."""
+    """Business confirms they paid the creator directly (business owner only).
+
+    Moves the collaboration to `payment_confirmed` — it does NOT complete
+    it. The creator closes it by confirming receipt via
+    POST /{id}/confirm-completion, or the daily sweep closes it after 7 days
+    of no response.
+    """
     return await collaboration_service.confirm_payment(
+        collaboration_id=collaboration_id,
+        profile_id=user.id,
+    )
+
+
+@router.post(
+    "/{collaboration_id}/confirm-completion",
+    response_model=CollaborationResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
+async def confirm_completion(
+    collaboration_id: str,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Creator confirms they received payment, completing the collaboration.
+
+    Creator-only by design — the party owed the money is the one who
+    confirms it arrived. Requires the collaboration to be in
+    `payment_confirmed`.
+    """
+    return await collaboration_service.confirm_completion(
         collaboration_id=collaboration_id,
         profile_id=user.id,
     )

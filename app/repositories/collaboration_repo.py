@@ -1,3 +1,4 @@
+from app.core.enums import CollaborationStatus
 from app.models.collaboration import Collaboration
 from app.repositories.base import BaseRepository
 
@@ -116,6 +117,27 @@ class CollaborationRepository(BaseRepository):
     ) -> Collaboration | None:
         rows = await self.update("collaborations", data, {"id": collaboration_id})
         return Collaboration.from_row(rows[0]) if rows else None
+
+    async def list_awaiting_creator_confirmation_before(
+        self, cutoff
+    ) -> list[Collaboration]:
+        """Collaborations the business marked paid but the creator never
+        confirmed, past the grace window — candidates for the daily
+        auto-confirm sweep (see collaboration_service.
+        auto_confirm_stale_collaborations).
+
+        `.lt()` isn't one of BaseRepository's generic eq/in_ filters, so this
+        is built directly here, matching ProfileRepository.
+        list_deactivated_before's documented pattern for the same reason.
+        """
+        query = (
+            (await self._table("collaborations"))
+            .select("*")
+            .eq("status", CollaborationStatus.PAYMENT_CONFIRMED.value)
+            .lt("payment_confirmed_at", cutoff.isoformat())
+        )
+        result = await self._execute(query)
+        return [Collaboration.from_row(row) for row in (result.data or [])]
 
     async def list_revision_history(self, collaboration_id: str) -> list[dict]:
         return await self.select(
