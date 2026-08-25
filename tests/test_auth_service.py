@@ -334,7 +334,10 @@ async def test_login_deactivated_creator_account_names_role(monkeypatch):
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "This Creator account has been deactivated"
+    assert exc_info.value.detail == (
+        "This Creator account has been deactivated. "
+        "Contact support@kolably.com if you'd like to reactivate it."
+    )
 
 
 async def test_login_deactivated_business_account_names_role(monkeypatch):
@@ -349,7 +352,10 @@ async def test_login_deactivated_business_account_names_role(monkeypatch):
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "This Brand account has been deactivated"
+    assert exc_info.value.detail == (
+        "This Brand account has been deactivated. "
+        "Contact support@kolably.com if you'd like to reactivate it."
+    )
 
 
 async def test_google_auth_invalid_token_raises_401(monkeypatch):
@@ -538,7 +544,10 @@ async def test_forgot_password_rejects_deactivated_creator_account(monkeypatch):
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "This Creator account has been deactivated"
+    assert exc_info.value.detail == (
+        "This Creator account has been deactivated. "
+        "Contact support@kolably.com if you'd like to reactivate it."
+    )
     assert gotrue.last_reset_password_call is None
 
 
@@ -553,7 +562,10 @@ async def test_forgot_password_rejects_deactivated_business_account(monkeypatch)
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "This Brand account has been deactivated"
+    assert exc_info.value.detail == (
+        "This Brand account has been deactivated. "
+        "Contact support@kolably.com if you'd like to reactivate it."
+    )
 
 
 async def test_forgot_password_proceeds_when_no_profile_matches_email(monkeypatch):

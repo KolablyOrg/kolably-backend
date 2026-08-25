@@ -97,7 +97,26 @@ def _is_repeated_signup(auth_response) -> bool:
     return identities is not None and len(identities) == 0
 
 
-_ACCOUNT_EXISTS_DETAIL = "An account with this email already exists. Try signing in instead."
+# There's no self-service account reactivation flow — a deactivated
+# account is a dead end without this (see #29: "no way to reactivate... a
+# basic help or contact should be visible"). Mentioned in both messages
+# below rather than building reactivation itself, which is a real feature
+# decision (should it be self-service? what's the security model for
+# re-verifying identity?) not a bug fix.
+_SUPPORT_EMAIL = "support@kolably.com"
+
+_ACCOUNT_EXISTS_DETAIL = (
+    f"An account with this email already exists. Try signing in instead, or "
+    f"contact {_SUPPORT_EMAIL} if you can't access it."
+)
+
+
+def _deactivated_account_detail(role: UserRole) -> str:
+    role_label = "Brand" if role == UserRole.BUSINESS else "Creator"
+    return (
+        f"This {role_label} account has been deactivated. "
+        f"Contact {_SUPPORT_EMAIL} if you'd like to reactivate it."
+    )
 
 
 def _confirmed_session_tokens(auth_response) -> tuple[str | None, str | None]:
@@ -369,10 +388,9 @@ async def login(
         # "Account is deactivated" on, say, the Creator form for a
         # deactivated Brand account never told anyone it was even the wrong
         # portal to begin with.
-        role_label = "Brand" if profile.role == UserRole.BUSINESS else "Creator"
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"This {role_label} account has been deactivated",
+            detail=_deactivated_account_detail(profile.role),
         )
 
     session = auth_response.session
@@ -461,10 +479,9 @@ async def google_auth(
         # See the matching comment in login() — naming the role here is what
         # actually surfaces a deactivated-and-wrong-portal account, since
         # this fires before the frontend's own role check ever runs.
-        role_label = "Brand" if profile.role == UserRole.BUSINESS else "Creator"
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"This {role_label} account has been deactivated",
+            detail=_deactivated_account_detail(profile.role),
         )
 
     if is_new_user:
@@ -774,10 +791,9 @@ async def forgot_password(
     # deactivation check, for the same reason: says which portal too.
     profile = await profile_repo.get_by_email(email)
     if profile and not profile.is_active:
-        role_label = "Brand" if profile.role == UserRole.BUSINESS else "Creator"
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"This {role_label} account has been deactivated",
+            detail=_deactivated_account_detail(profile.role),
         )
 
     try:
