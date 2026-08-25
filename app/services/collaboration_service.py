@@ -14,6 +14,7 @@ from app.core.enums import (
 from app.models.business import Business
 from app.models.campaign import Campaign
 from app.models.collaboration import Collaboration
+from app.models.creator import Creator
 from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
@@ -315,6 +316,7 @@ def _collaboration_to_response(
     *,
     campaign: Campaign | None = None,
     business: Business | None = None,
+    creator: Creator | None = None,
     revision_history: list[dict] | None = None,
 ) -> dict:
     """Convert a Collaboration model to a response dict.
@@ -344,6 +346,8 @@ def _collaboration_to_response(
         "campaign_title": campaign.title if campaign else None,
         "business_name": business.business_name if business else None,
         "brand_logo": business.logo_url if business else None,
+        "creator_name": creator.name if creator else None,
+        "creator_profile_photo_url": creator.profile_photo_url if creator else None,
         "campaign": None,
         "business": None,
     }
@@ -382,14 +386,20 @@ async def _fetch_joins(
     *,
     campaign_repo: CampaignRepository,
     business_repo: BusinessRepository,
-) -> tuple[dict[str, Campaign], dict[str, Business]]:
+    creator_repo: CreatorRepository | None = None,
+) -> tuple[dict[str, Campaign], dict[str, Business], dict[str, Creator]]:
     campaign_ids = list({c.campaign_id for c in collabs if c.campaign_id})
     business_ids = list({c.business_id for c in collabs if c.business_id})
     campaigns = await campaign_repo.get_by_ids(campaign_ids)
     businesses = await business_repo.get_by_ids(business_ids)
+    creators: list[Creator] = []
+    if creator_repo:
+        creator_ids = list({c.creator_id for c in collabs if c.creator_id})
+        creators = await creator_repo.get_by_ids(creator_ids)
     return (
         {c.id: c for c in campaigns},
         {b.id: b for b in businesses},
+        {c.id: c for c in creators},
     )
 
 
@@ -409,6 +419,7 @@ async def list_collaborations(
     repo = repo or CollaborationRepository()
     business_repo = business_repo or BusinessRepository()
     campaign_repo = campaign_repo or CampaignRepository()
+    creator_repo = creator_repo or CreatorRepository()
 
     if role == "creator":
         creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
@@ -429,14 +440,15 @@ async def list_collaborations(
     else:
         return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
-    campaign_map, business_map = await _fetch_joins(
-        collabs, campaign_repo=campaign_repo, business_repo=business_repo
+    campaign_map, business_map, creator_map = await _fetch_joins(
+        collabs, campaign_repo=campaign_repo, business_repo=business_repo, creator_repo=creator_repo
     )
     items = [
         _collaboration_to_response(
             c,
             campaign=campaign_map.get(c.campaign_id),
             business=business_map.get(c.business_id),
+            creator=creator_map.get(c.creator_id),
         )
         for c in collabs
     ]
