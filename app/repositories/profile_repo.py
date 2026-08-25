@@ -47,3 +47,24 @@ class ProfileRepository(BaseRepository):
             "profiles", {"email": anonymized_email, "is_active": False}, {"id": profile_id}
         )
         return UserProfile.from_row(rows[0]) if rows else None
+
+    async def list_deactivated_before(self, cutoff) -> list[UserProfile]:
+        """Deactivated accounts whose reactivation window (see
+        auth_service._reactivate_or_reject) has closed — candidates for the
+        daily cleanup job. `.lt()` isn't one of BaseRepository's generic
+        eq/in_ filters, so built directly here per its own documented
+        pattern for anything more complex.
+
+        Excludes rows already anonymized (email already carries the
+        deleted-account marker) so a job that runs daily doesn't keep
+        re-processing the same already-scrubbed rows forever.
+        """
+        query = (
+            (await self._table("profiles"))
+            .select("*")
+            .eq("is_active", False)
+            .lt("deactivated_at", cutoff.isoformat())
+            .not_.like("email", "deleted-%@deleted.kolably.com")
+        )
+        result = await self._execute(query)
+        return [UserProfile.from_row(row) for row in (result.data or [])]

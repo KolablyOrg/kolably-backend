@@ -20,6 +20,10 @@ class UserProfile:
     avatar_url: str | None = None
     phone: str | None = None
     is_active: bool = True
+    # Set when is_active flips to False (DELETE /auth/me). Logging in within
+    # the 30-day reactivation window reactivates automatically; see
+    # auth_service._reactivate_or_reject.
+    deactivated_at: datetime | None = None
     email_confirmed_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime | None = None
@@ -37,6 +41,7 @@ class UserProfile:
             avatar_url=row.get("avatar_url"),
             phone=row.get("phone"),
             is_active=row.get("is_active", True),
+            deactivated_at=row.get("deactivated_at"),
             email_confirmed_at=row.get("email_confirmed_at"),
             created_at=row["created_at"],
             updated_at=row.get("updated_at"),

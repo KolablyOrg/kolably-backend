@@ -34,6 +34,7 @@ def _make_profile(data: dict) -> UserProfile:
         email=data["email"],
         role=UserRole(data["role"]),
         is_active=data.get("is_active", True),
+        deactivated_at=data.get("deactivated_at"),
         created_at=data.get("created_at", NOW),
     )
 
@@ -127,6 +128,7 @@ class FakeProfileRepo:
     def __init__(self, profile):
         self._profile = profile
         self.update_role_calls = []
+        self.update_calls = []
 
     async def get_by_auth_id(self, auth_id):
         return _make_profile(self._profile) if self._profile else None
@@ -137,6 +139,11 @@ class FakeProfileRepo:
     async def update_role(self, profile_id, role):
         self.update_role_calls.append((profile_id, role))
         self._profile = {**self._profile, "role": role}
+        return _make_profile(self._profile)
+
+    async def update(self, profile_id, data):
+        self.update_calls.append((profile_id, data))
+        self._profile = {**self._profile, **data}
         return _make_profile(self._profile)
 
 
@@ -302,10 +309,36 @@ async def test_google_auth_new_business_reassigns_role_and_creates_row(monkeypat
     assert creator_repo.inserted is None
 
 
-async def test_google_auth_deactivated_account(monkeypatch):
+async def test_google_auth_reactivates_deactivated_account_within_window(monkeypatch):
+    """#29: correct credentials for a deactivated account, within the
+    30-day window, reactivate it right here — that's the feature."""
     user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
     _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
-    profile_repo = FakeProfileRepo({**PROFILE, "is_active": False})
+    profile_repo = FakeProfileRepo({
+        **PROFILE, "is_active": False,
+        "deactivated_at": datetime.now(UTC) - timedelta(days=5),
+    })
+
+    result = await auth_service.google_auth(
+        GoogleAuthRequest(id_token="tok"),
+        profile_repo=profile_repo,
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+    )
+
+    assert result["reactivated"] is True
+    assert profile_repo.update_calls == [
+        ("profile-1", {"is_active": True, "deactivated_at": None})
+    ]
+
+
+async def test_google_auth_rejects_deactivated_account_past_window(monkeypatch):
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+    profile_repo = FakeProfileRepo({
+        **PROFILE, "is_active": False,
+        "deactivated_at": datetime.now(UTC) - timedelta(days=31),
+    })
 
     with pytest.raises(HTTPException) as exc_info:
         await auth_service.google_auth(
@@ -316,16 +349,44 @@ async def test_google_auth_deactivated_account(monkeypatch):
         )
 
     assert exc_info.value.status_code == 403
+    assert "permanently deleted" in exc_info.value.detail
 
 
-async def test_login_deactivated_creator_account_names_role(monkeypatch):
+async def test_login_reactivates_deactivated_account_within_window(monkeypatch):
+    """#29: logging in with the right credentials within 30 days of
+    deactivating reactivates the account automatically — no separate
+    reactivation flow needed."""
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+    profile_repo = FakeProfileRepo({
+        **PROFILE, "is_active": False,
+        "deactivated_at": datetime.now(UTC) - timedelta(days=5),
+    })
+
+    result = await auth_service.login(
+        LoginRequest(email="alice@example.com", password="hunter2"),
+        profile_repo=profile_repo,
+    )
+
+    assert result["reactivated"] is True
+    assert result["access_token"] == "access-token"
+    assert result["user"]["is_active"] is True
+    assert profile_repo.update_calls == [
+        ("profile-1", {"is_active": True, "deactivated_at": None})
+    ]
+
+
+async def test_login_deactivated_creator_account_past_window_names_role(monkeypatch):
     """Regression: a bare "Account is deactivated" on the Creator login form
     for a deactivated Brand account (or vice versa) never told anyone it
     was even the wrong portal — this check fires before the frontend's own
     post-login role check ever gets a response to look at."""
     user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
     _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
-    profile_repo = FakeProfileRepo({**PROFILE, "is_active": False})
+    profile_repo = FakeProfileRepo({
+        **PROFILE, "is_active": False,
+        "deactivated_at": datetime.now(UTC) - timedelta(days=31),
+    })
 
     with pytest.raises(HTTPException) as exc_info:
         await auth_service.login(
@@ -334,16 +395,16 @@ async def test_login_deactivated_creator_account_names_role(monkeypatch):
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == (
-        "This Creator account has been deactivated. "
-        "Contact support@kolably.com if you'd like to reactivate it."
-    )
+    assert "permanently deleted" in exc_info.value.detail
 
 
-async def test_login_deactivated_business_account_names_role(monkeypatch):
+async def test_login_deactivated_business_account_past_window(monkeypatch):
     user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
     _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
-    profile_repo = FakeProfileRepo({**PROFILE, "role": "business", "is_active": False})
+    profile_repo = FakeProfileRepo({
+        **PROFILE, "role": "business", "is_active": False,
+        "deactivated_at": datetime.now(UTC) - timedelta(days=31),
+    })
 
     with pytest.raises(HTTPException) as exc_info:
         await auth_service.login(
@@ -352,10 +413,75 @@ async def test_login_deactivated_business_account_names_role(monkeypatch):
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == (
-        "This Brand account has been deactivated. "
-        "Contact support@kolably.com if you'd like to reactivate it."
-    )
+    assert "permanently deleted" in exc_info.value.detail
+
+
+async def test_delete_user_account_sets_deactivated_at_and_explains_window():
+    profile_repo = FakeProfileRepo(dict(PROFILE))
+
+    result = await auth_service.delete_user_account("profile-1", profile_repo=profile_repo)
+
+    assert profile_repo.update_calls[0][0] == "profile-1"
+    update_data = profile_repo.update_calls[0][1]
+    assert update_data["is_active"] is False
+    assert "deactivated_at" in update_data
+    assert "30 days" in result["message"]
+    assert "permanently deleted" in result["message"]
+
+
+class FakeProfileRepoForCleanup:
+    """Separate from FakeProfileRepo (built around a single profile) —
+    cleanup_expired_deactivated_accounts operates on a batch."""
+
+    def __init__(self, profiles: list[dict]):
+        self._profiles = {p["id"]: dict(p) for p in profiles}
+        self.anonymize_calls: list[tuple[str, str]] = []
+        self.fail_ids: set[str] = set()
+
+    async def list_deactivated_before(self, cutoff):
+        return [UserProfile.from_row(p) for p in self._profiles.values()]
+
+    async def anonymize(self, profile_id, anonymized_email):
+        if profile_id in self.fail_ids:
+            raise RuntimeError("boom")
+        self.anonymize_calls.append((profile_id, anonymized_email))
+        if profile_id not in self._profiles:
+            return None
+        self._profiles[profile_id] = {
+            **self._profiles[profile_id], "email": anonymized_email, "is_active": False,
+        }
+        return UserProfile.from_row(self._profiles[profile_id])
+
+
+async def test_cleanup_expired_deactivated_accounts_anonymizes_each():
+    profile_repo = FakeProfileRepoForCleanup([
+        {**PROFILE, "id": "p1", "created_at": NOW},
+        {**PROFILE, "id": "p2", "email": "bob@example.com", "created_at": NOW},
+    ])
+
+    result = await auth_service.cleanup_expired_deactivated_accounts(profile_repo=profile_repo)
+
+    assert result == {"anonymized": 2, "failed": 0, "checked": 2}
+    assert profile_repo.anonymize_calls == [
+        ("p1", "deleted-p1@deleted.kolably.com"),
+        ("p2", "deleted-p2@deleted.kolably.com"),
+    ]
+
+
+async def test_cleanup_expired_deactivated_accounts_continues_after_one_failure():
+    """One bad row (a transient DB error, whatever) must not block the rest
+    of the batch — matches creator_service.refresh_all_instagram_stats'
+    same per-item resilience."""
+    profile_repo = FakeProfileRepoForCleanup([
+        {**PROFILE, "id": "p1", "created_at": NOW},
+        {**PROFILE, "id": "p2", "email": "bob@example.com", "created_at": NOW},
+    ])
+    profile_repo.fail_ids = {"p1"}
+
+    result = await auth_service.cleanup_expired_deactivated_accounts(profile_repo=profile_repo)
+
+    assert result == {"anonymized": 1, "failed": 1, "checked": 2}
+    assert profile_repo.anonymize_calls == [("p2", "deleted-p2@deleted.kolably.com")]
 
 
 async def test_google_auth_invalid_token_raises_401(monkeypatch):
@@ -545,8 +671,8 @@ async def test_forgot_password_rejects_deactivated_creator_account(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == (
-        "This Creator account has been deactivated. "
-        "Contact support@kolably.com if you'd like to reactivate it."
+        "This Creator account has been deactivated. Log in again within "
+        "30 days to reactivate it automatically."
     )
     assert gotrue.last_reset_password_call is None
 
@@ -563,8 +689,8 @@ async def test_forgot_password_rejects_deactivated_business_account(monkeypatch)
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == (
-        "This Brand account has been deactivated. "
-        "Contact support@kolably.com if you'd like to reactivate it."
+        "This Brand account has been deactivated. Log in again within "
+        "30 days to reactivate it automatically."
     )
 
 

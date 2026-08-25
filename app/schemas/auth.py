@@ -180,6 +180,11 @@ class AuthTokenResponse(BaseModel):
     # real tokens back. See app/services/twofa_service.py.
     mfa_required: bool = False
     mfa_token: str | None = None
+    # True when this login just reactivated a deactivated account (within
+    # its 30-day window) — lets the client show a distinct "welcome back,
+    # your account is reactivated" message instead of a generic one. See
+    # auth_service._reactivate_or_reject.
+    reactivated: bool = False
 
 
 class GoogleAuthResponse(AuthTokenResponse):

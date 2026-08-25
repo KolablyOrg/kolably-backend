@@ -20,13 +20,14 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.services import creator_service
+from app.services import auth_service, creator_service
 
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone="UTC")
 
-_JOB_ID = "daily_instagram_stats_refresh"
+_INSTAGRAM_JOB_ID = "daily_instagram_stats_refresh"
+_DEACTIVATED_CLEANUP_JOB_ID = "daily_deactivated_account_cleanup"
 
 
 async def _run_daily_instagram_refresh() -> None:
@@ -37,6 +38,14 @@ async def _run_daily_instagram_refresh() -> None:
         logger.exception("Daily Instagram stats refresh job crashed")
 
 
+async def _run_daily_deactivated_cleanup() -> None:
+    try:
+        result = await auth_service.cleanup_expired_deactivated_accounts()
+        logger.info("Daily deactivated-account cleanup complete: %s", result)
+    except Exception:
+        logger.exception("Daily deactivated-account cleanup job crashed")
+
+
 def start_scheduler() -> None:
     """Idempotent — safe to call more than once (e.g. test setup)."""
     if scheduler.running:
@@ -44,12 +53,22 @@ def start_scheduler() -> None:
     scheduler.add_job(
         _run_daily_instagram_refresh,
         CronTrigger(hour=3, minute=0),  # 03:00 UTC — low-traffic window
-        id=_JOB_ID,
+        id=_INSTAGRAM_JOB_ID,
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        _run_daily_deactivated_cleanup,
+        CronTrigger(hour=3, minute=30),  # staggered off the Instagram job
+        id=_DEACTIVATED_CLEANUP_JOB_ID,
         replace_existing=True,
         misfire_grace_time=3600,
     )
     scheduler.start()
-    logger.info("Scheduler started — daily Instagram stats refresh runs at 03:00 UTC")
+    logger.info(
+        "Scheduler started — Instagram stats refresh at 03:00 UTC, "
+        "deactivated-account cleanup at 03:30 UTC"
+    )
 
 
 def stop_scheduler() -> None:

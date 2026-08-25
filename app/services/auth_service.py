@@ -97,12 +97,6 @@ def _is_repeated_signup(auth_response) -> bool:
     return identities is not None and len(identities) == 0
 
 
-# There's no self-service account reactivation flow — a deactivated
-# account is a dead end without this (see #29: "no way to reactivate... a
-# basic help or contact should be visible"). Mentioned in both messages
-# below rather than building reactivation itself, which is a real feature
-# decision (should it be self-service? what's the security model for
-# re-verifying identity?) not a bug fix.
 _SUPPORT_EMAIL = "support@kolably.com"
 
 _ACCOUNT_EXISTS_DETAIL = (
@@ -110,13 +104,59 @@ _ACCOUNT_EXISTS_DETAIL = (
     f"contact {_SUPPORT_EMAIL} if you can't access it."
 )
 
+# #29: deactivating used to be a dead end with no way back in. A deactivated
+# account is now reactivated automatically just by logging in again within
+# this many days — see _reactivate_or_reject, called from both login() and
+# google_auth(). Past the window, the daily cleanup job
+# (app.core.scheduler) anonymizes the row; support can't reverse that, so
+# the "past window" message deliberately doesn't point at support the way
+# the still-reactivatable case does.
+_REACTIVATION_WINDOW_DAYS = 30
+
 
 def _deactivated_account_detail(role: UserRole) -> str:
     role_label = "Brand" if role == UserRole.BUSINESS else "Creator"
     return (
-        f"This {role_label} account has been deactivated. "
-        f"Contact {_SUPPORT_EMAIL} if you'd like to reactivate it."
+        f"This {role_label} account has been deactivated. Log in again within "
+        f"{_REACTIVATION_WINDOW_DAYS} days to reactivate it automatically."
     )
+
+
+_PERMANENTLY_DELETED_DETAIL = (
+    f"This account was deactivated more than {_REACTIVATION_WINDOW_DAYS} days "
+    f"ago and has been permanently deleted."
+)
+
+
+def _reactivation_window_closed(deactivated_at: datetime | None) -> bool:
+    """`deactivated_at` is only ever None for an active account (never
+    reaches this check) or, in principle, a data gap — treated as "still
+    within the window" rather than punishing someone for a missing
+    timestamp we can't attribute to them."""
+    if not deactivated_at:
+        return False
+    if deactivated_at.tzinfo is None:
+        deactivated_at = deactivated_at.replace(tzinfo=UTC)
+    return datetime.now(UTC) - deactivated_at > timedelta(days=_REACTIVATION_WINDOW_DAYS)
+
+
+async def _reactivate_or_reject(
+    profile: UserProfile, profile_repo: ProfileRepository
+) -> UserProfile:
+    """Called with a deactivated profile mid-login. Reactivates and returns
+    the updated profile if still within the window; otherwise raises."""
+    if _reactivation_window_closed(profile.deactivated_at):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_PERMANENTLY_DELETED_DETAIL,
+        )
+    updated = await profile_repo.update(profile.id, {"is_active": True, "deactivated_at": None})
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reactivate account",
+        )
+    return updated
 
 
 def _confirmed_session_tokens(auth_response) -> tuple[str | None, str | None]:
@@ -380,18 +420,16 @@ async def login(
             detail="User profile not found",
         )
 
+    # Correct credentials for a deactivated account, within the window,
+    # reactivate it right here — that's the whole feature (#29), not a
+    # separate flow. _reactivate_or_reject raises (naming the role, same
+    # reasoning as before: this fires before the frontend's own role check
+    # in UserLogin.tsx/BrandLogin.tsx's completeLogin ever gets a response
+    # to look at) if the account is gone for good instead.
+    reactivated = False
     if not profile.is_active:
-        # Naming the account's actual role here matters specifically for a
-        # deactivated-and-wrong-portal account: this check fires before the
-        # frontend's own role check ever gets a response to look at (see
-        # UserLogin.tsx/BrandLogin.tsx's completeLogin), so a generic
-        # "Account is deactivated" on, say, the Creator form for a
-        # deactivated Brand account never told anyone it was even the wrong
-        # portal to begin with.
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=_deactivated_account_detail(profile.role),
-        )
+        profile = await _reactivate_or_reject(profile, profile_repo)
+        reactivated = True
 
     session = auth_response.session
     await _record_login_event(profile.id, ip_address, user_agent)
@@ -405,12 +443,13 @@ async def login(
             access_token=session.access_token,
             refresh_token=session.refresh_token,
         )
-        return {"mfa_required": True, "mfa_token": mfa_token}
+        return {"mfa_required": True, "mfa_token": mfa_token, "reactivated": reactivated}
 
     return {
         "access_token": session.access_token,
         "refresh_token": session.refresh_token,
         "token_type": "bearer",
+        "reactivated": reactivated,
         "user": {
             "id": profile.id,
             "email": profile.email,
@@ -475,14 +514,12 @@ async def google_auth(
             detail="Profile creation trigger failed",
         )
 
+    # See the matching comment in login() — reactivates within the window
+    # instead of just rejecting, same reasoning throughout.
+    reactivated = False
     if not profile.is_active:
-        # See the matching comment in login() — naming the role here is what
-        # actually surfaces a deactivated-and-wrong-portal account, since
-        # this fires before the frontend's own role check ever runs.
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=_deactivated_account_detail(profile.role),
-        )
+        profile = await _reactivate_or_reject(profile, profile_repo)
+        reactivated = True
 
     if is_new_user:
         if data.role is None:
@@ -525,6 +562,7 @@ async def google_auth(
         "access_token": session.access_token,
         "refresh_token": session.refresh_token,
         "token_type": "bearer",
+        "reactivated": reactivated,
         "user": {
             "id": profile.id,
             "email": profile.email,
@@ -1101,12 +1139,67 @@ async def delete_user_account(
     *,
     profile_repo: ProfileRepository | None = None,
 ) -> dict:
-    """Deactivate user account and set is_active = False."""
+    """Deactivate user account and set is_active = False.
+
+    Starts the 30-day reactivation window (see _reactivate_or_reject) —
+    logging back in with the same credentials any time before it closes
+    reactivates automatically. Past it, the daily cleanup job
+    (app.core.scheduler) anonymizes the row.
+    """
     profile_repo = profile_repo or ProfileRepository()
-    updated = await profile_repo.update(profile_id, {"is_active": False})
+    updated = await profile_repo.update(
+        profile_id, {"is_active": False, "deactivated_at": datetime.now(UTC).isoformat()}
+    )
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile not found",
         )
-    return {"message": "Account deactivated successfully"}
+    return {
+        "message": (
+            f"Account deactivated. Log in again within {_REACTIVATION_WINDOW_DAYS} days "
+            f"to reactivate it — after that, it's permanently deleted."
+        )
+    }
+
+
+async def cleanup_expired_deactivated_accounts(
+    *, profile_repo: ProfileRepository | None = None
+) -> dict:
+    """Daily batch job: anonymize any account whose 30-day reactivation
+    window (see _reactivate_or_reject) has closed.
+
+    Anonymizes rather than hard-deletes, same reasoning and same mechanism
+    as Meta's Data Deletion Callback (meta_webhook_service) — keeps the row
+    to avoid FK/cascade uncertainty into collaborations/messages/campaigns
+    this person was ever part of, but scrubs the one PII field that
+    matters for "can anyone find/reach this person again": their email.
+    `deactivated_at` is deliberately left as-is afterward — it's what
+    keeps login() correctly rejecting the original credentials as
+    permanently gone even after this runs.
+
+    Per-account failures are caught and skipped so one bad row never blocks
+    the rest of the batch. See app/core/scheduler.py for what calls this.
+    """
+    profile_repo = profile_repo or ProfileRepository()
+    cutoff = datetime.now(UTC) - timedelta(days=_REACTIVATION_WINDOW_DAYS)
+    expired = await profile_repo.list_deactivated_before(cutoff)
+
+    anonymized = 0
+    failed = 0
+    for profile in expired:
+        try:
+            result = await profile_repo.anonymize(
+                profile.id, f"deleted-{profile.id}@deleted.kolably.com"
+            )
+            if result:
+                anonymized += 1
+            else:
+                failed += 1
+        except Exception:
+            logger.exception(
+                "Failed to anonymize expired deactivated profile_id=%s", profile.id
+            )
+            failed += 1
+
+    return {"anonymized": anonymized, "failed": failed, "checked": len(expired)}
