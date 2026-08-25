@@ -585,6 +585,7 @@ async def list_campaign_applications(
     business_repo: BusinessRepository | None = None,
     member_repo: BusinessMemberRepository | None = None,
     app_repo: ApplicationRepository | None = None,
+    collaboration_repo: CollaborationRepository | None = None,
 ) -> dict:
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
@@ -597,6 +598,13 @@ async def list_campaign_applications(
     applications, total = await app_repo.list_by_campaign(
         campaign_id, page=page, page_size=page_size
     )
+
+    # Single query for the whole page rather than one per accepted
+    # application — an accepted application always has exactly one
+    # collaboration (accept_application creates it), keyed by application_id.
+    collaboration_repo = collaboration_repo or CollaborationRepository()
+    collabs, _ = await collaboration_repo.list_by_campaign(campaign_id, page=1, page_size=1000)
+    collab_by_application_id = {c.application_id: c.id for c in collabs if c.application_id}
 
     items: list[ApplicationWithCreator] = []
     for app in applications:
@@ -622,6 +630,7 @@ async def list_campaign_applications(
                 status=app.status,
                 revision_reason=app.revision_reason,
                 created_at=app.created_at,
+                collaboration_id=collab_by_application_id.get(app.id),
                 creator=creator,
             )
         )

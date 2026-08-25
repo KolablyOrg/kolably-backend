@@ -33,6 +33,11 @@ class ApplicationResponse(BaseModel):
     # Only set on brand invites — drives the "Expires in N days" countdown
     # and is re-checked server-side when the creator accepts.
     expires_at: datetime | None = None
+    # Set once accept_application() creates the Collaboration this
+    # application resolved to — null for pending/rejected applications,
+    # which never get one. Lets the client route straight to the active
+    # Collaboration Workspace instead of a static creator profile.
+    collaboration_id: str | None = None
 
 
 class ApplicationWithCampaign(ApplicationResponse):

@@ -60,7 +60,9 @@ async def _get_business_id_for_user(
     return business_id
 
 
-def _application_to_response(app: CampaignApplication) -> ApplicationResponse:
+def _application_to_response(
+    app: CampaignApplication, *, collaboration_id: str | None = None
+) -> ApplicationResponse:
     """Convert a CampaignApplication model to ApplicationResponse schema."""
     return ApplicationResponse(
         id=app.id,
@@ -74,6 +76,7 @@ def _application_to_response(app: CampaignApplication) -> ApplicationResponse:
         revision_reason=app.revision_reason,
         created_at=app.created_at,
         expires_at=app.expires_at,
+        collaboration_id=collaboration_id,
     )
 
 
@@ -496,7 +499,9 @@ async def accept_application(
             related_id=collaboration.id if collaboration else application.id,
         )
 
-    return _application_to_response(updated)
+    return _application_to_response(
+        updated, collaboration_id=collaboration.id if collaboration else None
+    )
 
 
 async def reject_application(

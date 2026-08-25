@@ -294,6 +294,7 @@ async def test_accept_creator_applied_requires_business_role_and_creates_collabo
     )
 
     assert result.status.value == "accepted"
+    assert result.collaboration_id == "collab1"
     assert collab_repo.inserted["creator_id"] == "c1"
     assert collab_repo.inserted["business_id"] == "b1"
     assert collab_repo.inserted["status"] == "active"

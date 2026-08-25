@@ -154,6 +154,10 @@ class CollaborationResponse(BaseModel):
     brand_logo: str | None = None
     campaign: CollaborationCampaignInfo | None = None
     business: CollaborationBusinessInfo | None = None
+    # Joined so the brand's Collaborations list can render the creator's name
+    # and avatar without firing one getCreator(id) request per row.
+    creator_name: str | None = None
+    creator_profile_photo_url: str | None = None
 
 
 class CollaborationSummary(BaseModel):

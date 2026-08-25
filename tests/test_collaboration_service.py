@@ -140,6 +140,10 @@ class FakeCreatorRepo:
     async def get_id_by_profile_id(self, profile_id: str):
         return self._creator_id
 
+    async def get_by_ids(self, creator_ids):
+        creator = Creator.from_row(self._row) if self._row else None
+        return [creator] if creator and creator.id in creator_ids else []
+
 
 class FakeMemberRepo:
     async def get_active_by_profile_id(self, profile_id):
@@ -348,6 +352,7 @@ async def test_list_collaborations_batches_joins_across_items():
 
     assert result["items"][0]["campaign_title"] == "Brunch launch"
     assert result["items"][0]["business_name"] == "Acme Co"
+    assert result["items"][0]["creator_name"] == "Alice"
 
 
 # ── submit_content ──────────────────────────────────────────────────
