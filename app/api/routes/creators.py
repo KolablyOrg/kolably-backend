@@ -36,7 +36,11 @@ from app.services import creator_service, review_service
 router = APIRouter()
 
 
-@router.get("/me/stats", response_model=CreatorStatsResponse)
+@router.get(
+    "/me/stats",
+    response_model=CreatorStatsResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def get_creator_stats(
     days: int = Query(7, ge=1),
     user: UserInToken = Depends(get_current_user),
@@ -45,7 +49,11 @@ async def get_creator_stats(
     return await creator_service.get_creator_stats(profile_id=user.id, days=days)
 
 
-@router.get("/me/saved-campaigns", response_model=PaginatedResponse[CampaignResponse])
+@router.get(
+    "/me/saved-campaigns",
+    response_model=PaginatedResponse[CampaignResponse],
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def list_saved_campaigns(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),

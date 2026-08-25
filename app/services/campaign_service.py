@@ -832,7 +832,13 @@ async def invite_creator(
         "direction": ApplicationDirection.BUSINESS_INVITED.value,
         "message": message,
         "status": ApplicationStatus.PENDING.value,
-        "expires_at": expires_at,
+        # Every other datetime this codebase inserts is explicitly
+        # isoformat()'d first (see auth_service/business_service/
+        # creator_service/collaboration_service) — a raw datetime object
+        # here was the one place that broke that convention, and produced a
+        # real "Invite failed / something went wrong on our end" 500 on
+        # every invite.
+        "expires_at": expires_at.isoformat(),
     }
 
     application = await app_repo.insert_application(insert_data)
@@ -861,6 +867,7 @@ async def invite_creator(
         status=application.status,
         revision_reason=application.revision_reason,
         created_at=application.created_at,
+        expires_at=application.expires_at,
     )
 
 async def get_locations(

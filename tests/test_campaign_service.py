@@ -795,6 +795,17 @@ async def test_invite_creator_succeeds_on_active_campaign(_stub_notifications):
     assert result.status.value == "pending"
     assert app_repo.inserted["direction"] == "business_invited"
     assert len(_stub_notifications) == 1
+    # Regression: expires_at was inserted as a raw datetime object instead of
+    # an isoformat() string — every other timestamp this codebase inserts is
+    # explicitly stringified first, and a real (non-fake) Supabase insert
+    # can't serialize a bare datetime, which is what actually produced the
+    # "Invite failed / something went wrong on our end" 500 reported in the
+    # 19 Aug bug doc. FakeApplicationRepo just echoes whatever it's given
+    # back, so only an explicit type assertion here catches this — the fake
+    # never round-trips through real JSON serialization the way a live
+    # Supabase call would.
+    assert isinstance(app_repo.inserted["expires_at"], str)
+    assert result.expires_at is not None
 
 
 # ── close / complete lifecycle ────────────────────────
