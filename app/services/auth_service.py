@@ -128,13 +128,25 @@ _PERMANENTLY_DELETED_DETAIL = (
 )
 
 
-def _reactivation_window_closed(deactivated_at: datetime | None) -> bool:
+def _reactivation_window_closed(deactivated_at: datetime | str | None) -> bool:
     """`deactivated_at` is only ever None for an active account (never
     reaches this check) or, in principle, a data gap — treated as "still
     within the window" rather than punishing someone for a missing
-    timestamp we can't attribute to them."""
+    timestamp we can't attribute to them.
+
+    A real row from Supabase comes back as an ISO string, not a datetime —
+    UserProfile.from_row assigns it straight through with no parsing (same
+    as every other timestamp field on this model; see e.g.
+    campaign_service.invite_creator's deadline handling for the same
+    str-or-datetime split done explicitly). Calling .tzinfo on a plain
+    string here raised AttributeError -> 500 on every deactivated login,
+    which every test missed because they all constructed profiles with a
+    real datetime object directly, never a string.
+    """
     if not deactivated_at:
         return False
+    if isinstance(deactivated_at, str):
+        deactivated_at = datetime.fromisoformat(deactivated_at.replace("Z", "+00:00"))
     if deactivated_at.tzinfo is None:
         deactivated_at = deactivated_at.replace(tzinfo=UTC)
     return datetime.now(UTC) - deactivated_at > timedelta(days=_REACTIVATION_WINDOW_DAYS)

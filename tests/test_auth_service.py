@@ -376,6 +376,42 @@ async def test_login_reactivates_deactivated_account_within_window(monkeypatch):
     ]
 
 
+async def test_login_reactivates_when_deactivated_at_is_a_string(monkeypatch):
+    """Regression: a real Supabase row hands back deactivated_at as an ISO
+    string, not a datetime — UserProfile.from_row does no parsing (same as
+    every other timestamp field on this model). Calling .tzinfo on a plain
+    string raised AttributeError -> 500 on every deactivated login in
+    production; every other test here missed it by constructing profiles
+    with a real datetime object directly."""
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+    recent = (datetime.now(UTC) - timedelta(days=5)).isoformat()
+    profile_repo = FakeProfileRepo({**PROFILE, "is_active": False, "deactivated_at": recent})
+
+    result = await auth_service.login(
+        LoginRequest(email="alice@example.com", password="hunter2"),
+        profile_repo=profile_repo,
+    )
+
+    assert result["reactivated"] is True
+
+
+async def test_login_rejects_when_deactivated_at_is_a_string_past_window(monkeypatch):
+    user = FakeUser(created_at=NOW - timedelta(days=30), last_sign_in_at=NOW)
+    _patch_supabase(monkeypatch, FakeGoTrue(response=FakeAuthResponse(user, FakeSession())))
+    stale = (datetime.now(UTC) - timedelta(days=31)).isoformat()
+    profile_repo = FakeProfileRepo({**PROFILE, "is_active": False, "deactivated_at": stale})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_service.login(
+            LoginRequest(email="alice@example.com", password="hunter2"),
+            profile_repo=profile_repo,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert "permanently deleted" in exc_info.value.detail
+
+
 async def test_login_deactivated_creator_account_past_window_names_role(monkeypatch):
     """Regression: a bare "Account is deactivated" on the Creator login form
     for a deactivated Brand account (or vice versa) never told anyone it
