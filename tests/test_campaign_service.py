@@ -882,6 +882,7 @@ async def test_list_campaign_applications_returns_paginated_shape():
         campaign_repo=repo,
         business_repo=business_repo,
         app_repo=app_repo,
+        collaboration_repo=FakeCollaborationRepo(),
     )
 
     assert "items" in result
@@ -890,6 +891,51 @@ async def test_list_campaign_applications_returns_paginated_shape():
     assert result["page_size"] == 10
     assert len(result["items"]) == 1
     assert app_repo.list_kwargs == {"campaign_id": "camp1", "page": 1, "page_size": 10}
+    assert result["items"][0].collaboration_id is None
+
+
+async def test_list_campaign_applications_includes_collaboration_id_for_accepted():
+    """Regression for #34: the Roster tab links a card to the active
+    Collaboration Workspace using this field — it must resolve to the
+    collaboration created when the application was accepted."""
+    from app.models.application import CampaignApplication
+    from app.models.collaboration import Collaboration
+
+    app = CampaignApplication.from_row(
+        {
+            "id": "app1",
+            "campaign_id": "camp1",
+            "creator_id": "c1",
+            "direction": "creator_applied",
+            "status": "accepted",
+            "created_at": "2024-01-01T00:00:00+00:00",
+            "creators": {"id": "c1", "name": "Alice"},
+        }
+    )
+    collab = Collaboration.from_row(
+        {
+            "id": "collab1",
+            "application_id": "app1",
+            "campaign_id": "camp1",
+            "creator_id": "c1",
+            "business_id": "b1",
+            "status": "active",
+            "created_at": "2024-01-01T00:00:00+00:00",
+        }
+    )
+    app_repo = FakeApplicationRepo(applications=[app], total=1)
+    business_repo = FakeBusinessRepo(business_id="b1")
+
+    result = await campaign_service.list_campaign_applications(
+        "camp1",
+        "p-business",
+        campaign_repo=FakeCampaignRepo(),
+        business_repo=business_repo,
+        app_repo=app_repo,
+        collaboration_repo=FakeCollaborationRepo(collaborations=[collab]),
+    )
+
+    assert result["items"][0].collaboration_id == "collab1"
 
 
 async def test_list_campaign_applications_rejects_non_owner():
