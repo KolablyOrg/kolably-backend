@@ -270,6 +270,29 @@ async def delete_portfolio_item(
     await repo.delete_portfolio_item(item_id, creator_id)
 
 
+async def update_portfolio_item_visibility(
+    creator_id: str,
+    item_id: str,
+    profile_id: str,
+    role: UserRole,
+    is_visible: bool,
+    *,
+    repo: CreatorRepository | None = None,
+) -> dict:
+    repo = repo or CreatorRepository()
+    creator = await repo.get_by_id(creator_id)
+    _ensure_creator_access(creator, profile_id, role)
+
+    item = await repo.get_portfolio_item(item_id)
+    if not item or item.creator_id != creator_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Portfolio item not found",
+        )
+    updated = await repo.update_portfolio_item(item_id, {"is_visible": is_visible})
+    return _portfolio_item_to_response(updated)
+
+
 async def bulk_delete_portfolio_items(
     creator_id: str,
     item_ids: list[str],
@@ -338,35 +361,57 @@ async def get_creator_portfolio(
     page: int = 1,
     page_size: int = 20,
     *,
+    include_hidden: bool = False,
+    requesting_profile_id: str | None = None,
+    requesting_role: UserRole | None = None,
     repo: CreatorRepository | None = None,
 ) -> dict:
     repo = repo or CreatorRepository()
+
+    # `include_hidden` (the "Manage Videos" view) is only honored for the
+    # portfolio's owner or a superadmin — anyone else always gets the
+    # is_visible-filtered, public view, regardless of what they pass.
+    is_owner = False
+    creator = None
+    if include_hidden and requesting_profile_id is not None:
+        creator = await repo.get_by_id(creator_id)
+        is_owner = bool(
+            creator
+            and (requesting_role == UserRole.SUPERADMIN or creator.profile_id == requesting_profile_id)
+        )
+
     items, total = await repo.list_portfolio(
         creator_id=creator_id,
         media_type=media_type,
         page=page,
         page_size=page_size,
+        visible_only=not (include_hidden and is_owner),
     )
 
-    # Auto-repair legacy items that have raw .mp4 URLs instead of thumbnails
-    broken = [item for item in items if item.media_url and ".mp4" in item.media_url]
-    if broken:
+    # Instagram's media/thumbnail URLs are signed and expire after a few days,
+    # so a stored media_url silently starts 403'ing (rendering as a blank tile,
+    # whether it was a photo thumbnail or a raw video file) well before a
+    # creator removes the post from Instagram. Re-resolve every item's URL
+    # against a fresh media fetch whenever we have a live token, matching by
+    # permalink, and only write back the rows whose URL actually changed.
+    refreshable = [item for item in items if item.post_link]
+    if refreshable:
         try:
-            creator = await repo.get_by_id(creator_id)
+            creator = creator or await repo.get_by_id(creator_id)
             if creator and creator.instagram_access_token:
                 access_token = decrypt_token(creator.instagram_access_token)
                 ig_media = await instagram_service.fetch_media(access_token)
-                # Build a lookup: permalink -> thumbnail_url
-                permalink_to_thumb: dict[str, str] = {}
+                # Build a lookup: permalink -> current viewable URL
+                permalink_to_url: dict[str, str] = {}
                 for m in ig_media:
                     plink = m.get("permalink")
-                    thumb = instagram_service.get_media_url_or_thumbnail(m)
-                    if plink and thumb and ".mp4" not in thumb:
-                        permalink_to_thumb[plink] = thumb
+                    url = instagram_service.get_media_url_or_thumbnail(m)
+                    if plink and url:
+                        permalink_to_url[plink] = url
 
-                for item in broken:
-                    new_url = permalink_to_thumb.get(item.post_link) if item.post_link else None
-                    if new_url:
+                for item in refreshable:
+                    new_url = permalink_to_url.get(item.post_link)
+                    if new_url and new_url != item.media_url:
                         await repo.update_portfolio_item(str(item.id), {"media_url": new_url})
                         item.media_url = new_url
         except Exception:
