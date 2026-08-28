@@ -127,9 +127,6 @@ class FakeCreatorRepo:
         existing = next((r for r in self._existing_portfolio if r["id"] == item_id), None)
         return _make_portfolio_item({**existing, **data}) if existing else None
 
-    async def sum_portfolio_views(self, creator_id):
-        return sum(int(row.get("view_count") or 0) for row in self._existing_portfolio)
-
 
 def _patch_instagram_service(monkeypatch, refresh_calls=None):
     async def fake_exchange_code_for_token(code, redirect_uri):
@@ -149,8 +146,8 @@ def _patch_instagram_service(monkeypatch, refresh_calls=None):
     async def fake_fetch_media(access_token):
         return IG_MEDIA
 
-    async def fake_calculate_engagement_rate(access_token, media):
-        return 12.5
+    async def fake_calculate_engagement_and_views(access_token, media):
+        return 12.5, 0
 
     monkeypatch.setattr(creator_service.instagram_service, "exchange_code_for_token", fake_exchange_code_for_token)
     monkeypatch.setattr(
@@ -159,7 +156,9 @@ def _patch_instagram_service(monkeypatch, refresh_calls=None):
     monkeypatch.setattr(creator_service.instagram_service, "refresh_long_lived_token", fake_refresh_long_lived_token)
     monkeypatch.setattr(creator_service.instagram_service, "fetch_profile", fake_fetch_profile)
     monkeypatch.setattr(creator_service.instagram_service, "fetch_media", fake_fetch_media)
-    monkeypatch.setattr(creator_service.instagram_service, "calculate_engagement_rate", fake_calculate_engagement_rate)
+    monkeypatch.setattr(
+        creator_service.instagram_service, "calculate_engagement_and_views", fake_calculate_engagement_and_views
+    )
 
 
 async def test_get_instagram_auth_url_includes_redirect_and_scope():

@@ -57,9 +57,6 @@ class FakeBatchCreatorRepo:
     async def snapshot_all_creators(self):
         self.snapshot_called = True
 
-    async def sum_portfolio_views(self, creator_id):
-        return 0
-
 
 def _patch_instagram_service(monkeypatch):
     async def fake_refresh_long_lived_token(token):
@@ -71,13 +68,15 @@ def _patch_instagram_service(monkeypatch):
     async def fake_fetch_media(access_token):
         return [{"id": "m1", "media_type": "IMAGE"}]
 
-    async def fake_calculate_engagement_rate(access_token, media):
-        return 7.25
+    async def fake_calculate_engagement_and_views(access_token, media):
+        return 7.25, 1234
 
     monkeypatch.setattr(creator_service.instagram_service, "refresh_long_lived_token", fake_refresh_long_lived_token)
     monkeypatch.setattr(creator_service.instagram_service, "fetch_profile", fake_fetch_profile)
     monkeypatch.setattr(creator_service.instagram_service, "fetch_media", fake_fetch_media)
-    monkeypatch.setattr(creator_service.instagram_service, "calculate_engagement_rate", fake_calculate_engagement_rate)
+    monkeypatch.setattr(
+        creator_service.instagram_service, "calculate_engagement_and_views", fake_calculate_engagement_and_views
+    )
 
 
 async def test_refresh_all_instagram_stats_updates_every_connected_creator(monkeypatch):
@@ -92,6 +91,7 @@ async def test_refresh_all_instagram_stats_updates_every_connected_creator(monke
     assert repo.snapshot_called is True
     assert creators[0].engagement_rate == 7.25
     assert creators[0].follower_count == 500
+    assert creators[0].views_count == 1234
 
 
 async def test_refresh_all_instagram_stats_isolates_per_creator_failures(monkeypatch):

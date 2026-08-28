@@ -543,7 +543,7 @@ async def connect_instagram(
         )
 
     media = await instagram_service.fetch_media(access_token)
-    engagement_rate = await instagram_service.calculate_engagement_rate(access_token, media)
+    engagement_rate, views_count = await instagram_service.calculate_engagement_and_views(access_token, media)
     expires_at = datetime.now(UTC) + timedelta(seconds=long_lived.get("expires_in", _DEFAULT_TOKEN_LIFETIME_SECONDS))
     now = datetime.now(UTC).isoformat()
 
@@ -553,6 +553,7 @@ async def connect_instagram(
         "instagram_access_token": encrypt_token(access_token),
         "instagram_token_expires_at": expires_at.isoformat(),
         "instagram_synced_at": now,
+        "views_count": views_count,
         **instagram_service.build_profile_prefill(ig_profile, engagement_rate),
     })
 
@@ -586,13 +587,11 @@ async def _refresh_instagram_stats(creator: Creator, *, repo: CreatorRepository)
 
     ig_profile = await instagram_service.fetch_profile(access_token)
     media = await instagram_service.fetch_media(access_token)
-    engagement_rate = await instagram_service.calculate_engagement_rate(access_token, media)
-    # Sums whatever's already stored on portfolio_items (populated at
-    # import time — see import_instagram_portfolio) rather than re-fetching
-    # insights for every recent media item here, which would multiply this
-    # already-multi-call refresh across every connected creator in the daily
-    # batch job.
-    views_count = await repo.sum_portfolio_views(creator.id)
+    # One insights call per recent media item covers both engagement and
+    # views, so `views_count` reflects Instagram directly rather than
+    # whatever happens to be sitting in portfolio_items (which only gets
+    # populated for items the creator has explicitly imported).
+    engagement_rate, views_count = await instagram_service.calculate_engagement_and_views(access_token, media)
 
     updated = await repo.update_by_profile_id(creator.profile_id, {
         "follower_count": ig_profile.get("followers_count"),
