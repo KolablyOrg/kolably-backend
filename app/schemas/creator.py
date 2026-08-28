@@ -177,14 +177,7 @@ class PortfolioItemResponse(BaseModel):
     comment_count: int | None = None
     # Video-only — Instagram doesn't report views for photos.
     view_count: int | None = None
-    is_visible: bool = True
     created_at: datetime
-
-
-class PortfolioItemVisibilityUpdateRequest(BaseModel):
-    """Toggle whether an item shows in the creator's public portfolio, from
-    the "Manage Videos" screen — the item stays imported either way."""
-    is_visible: bool
 
 
 class CreatorStatsResponse(BaseModel):

@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.dependencies import (
     get_current_user,
-    get_optional_user,
     require_instagram_connected,
     require_role,
 )
@@ -29,7 +28,6 @@ from app.schemas.creator import (
     PayoutSetupRequest,
     PortfolioItemCreateRequest,
     PortfolioItemResponse,
-    PortfolioItemVisibilityUpdateRequest,
 )
 from app.schemas.review import RatingSummaryResponse
 from app.schemas.user import UserInToken
@@ -280,21 +278,13 @@ async def get_creator_portfolio(
     media_type: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    include_hidden: bool = Query(False, description="Owner/superadmin only — the 'Manage Videos' view."),
-    user: UserInToken | None = Depends(get_optional_user),
 ):
-    """Get portfolio items for a creator. By default only items the creator
-    has kept visible are returned (what brands and the creator's own public
-    profile see) — pass `include_hidden=true` as the owner to also get the
-    hidden ones, for the "Manage Videos" screen."""
+    """Get portfolio items for a creator."""
     return await creator_service.get_creator_portfolio(
         creator_id=creator_id,
         media_type=media_type,
         page=page,
         page_size=page_size,
-        include_hidden=include_hidden,
-        requesting_profile_id=user.id if user else None,
-        requesting_role=user.role if user else None,
     )
 
 
@@ -316,28 +306,6 @@ async def add_portfolio_item(
         profile_id=user.id,
         role=user.role,
         data=data,
-    )
-
-
-@router.patch(
-    "/{creator_id}/portfolio/{item_id}",
-    response_model=PortfolioItemResponse,
-    dependencies=[Depends(require_role(UserRole.CREATOR, UserRole.SUPERADMIN))],
-)
-async def update_portfolio_item_visibility(
-    creator_id: str,
-    item_id: str,
-    data: PortfolioItemVisibilityUpdateRequest,
-    user: UserInToken = Depends(get_current_user),
-):
-    """Show/hide a portfolio item from the public portfolio (owner or
-    superadmin only) — used by the "Manage Videos" screen."""
-    return await creator_service.update_portfolio_item_visibility(
-        creator_id=creator_id,
-        item_id=item_id,
-        profile_id=user.id,
-        role=user.role,
-        is_visible=data.is_visible,
     )
 
 

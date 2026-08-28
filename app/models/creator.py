@@ -21,7 +21,6 @@ class PortfolioItem:
     # Video-only — Instagram doesn't report views for photos (see
     # instagram_service.fetch_media_insights).
     view_count: int | None = None
-    is_visible: bool = True
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     @classmethod
@@ -36,7 +35,6 @@ class PortfolioItem:
             like_count=row.get("like_count"),
             comment_count=row.get("comment_count"),
             view_count=row.get("view_count"),
-            is_visible=row.get("is_visible", True),
             created_at=row["created_at"],
         )
 
@@ -51,7 +49,6 @@ class PortfolioItem:
             "like_count": self.like_count,
             "comment_count": self.comment_count,
             "view_count": self.view_count,
-            "is_visible": self.is_visible,
             "created_at": self.created_at,
         }
 

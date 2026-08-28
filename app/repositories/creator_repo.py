@@ -281,7 +281,6 @@ class CreatorRepository(BaseRepository):
         media_type: str | None = None,
         page: int = 1,
         page_size: int = 20,
-        visible_only: bool = False,
     ) -> tuple[list[PortfolioItem], int]:
         query = (
             (await self._table("portfolio_items"))
@@ -291,8 +290,6 @@ class CreatorRepository(BaseRepository):
 
         if media_type:
             query = query.eq("media_type", media_type)
-        if visible_only:
-            query = query.eq("is_visible", True)
 
         start = (page - 1) * page_size
         end = start + page_size - 1
