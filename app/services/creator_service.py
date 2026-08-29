@@ -58,7 +58,8 @@ def _creator_to_response(creator: Creator) -> CreatorResponse:
         show_rate_card=creator.show_rate_card,
         open_to=creator.open_to or [],
         is_discoverable=creator.is_discoverable,
-        notification_preferences=creator.notification_preferences or {
+        notification_preferences=creator.notification_preferences
+        or {
             "campaign_alerts": True,
             "brand_messages": True,
             "payout_updates": True,
@@ -237,10 +238,12 @@ async def add_portfolio_item(
     creator = await repo.get_by_id(creator_id)
     _ensure_creator_access(creator, profile_id, role)
 
-    item = await repo.insert_portfolio_item({
-        "creator_id": creator_id,
-        **data.model_dump(),
-    })
+    item = await repo.insert_portfolio_item(
+        {
+            "creator_id": creator_id,
+            **data.model_dump(),
+        }
+    )
     if not item:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -520,9 +523,7 @@ async def connect_instagram(
     if not creator:
         raise _no_creator_profile()
 
-    short_lived = await instagram_service.exchange_code_for_token(
-        code, instagram_service.relay_redirect_uri()
-    )
+    short_lived = await instagram_service.exchange_code_for_token(code, instagram_service.relay_redirect_uri())
     long_lived = await instagram_service.exchange_for_long_lived_token(short_lived["access_token"])
     access_token = long_lived["access_token"]
 
@@ -547,15 +548,18 @@ async def connect_instagram(
     expires_at = datetime.now(UTC) + timedelta(seconds=long_lived.get("expires_in", _DEFAULT_TOKEN_LIFETIME_SECONDS))
     now = datetime.now(UTC).isoformat()
 
-    updated = await repo.update_by_profile_id(profile_id, {
-        "instagram_handle": ig_profile["username"],
-        "instagram_user_id": instagram_user_id,
-        "instagram_access_token": encrypt_token(access_token),
-        "instagram_token_expires_at": expires_at.isoformat(),
-        "instagram_synced_at": now,
-        "views_count": views_count,
-        **instagram_service.build_profile_prefill(ig_profile, engagement_rate),
-    })
+    updated = await repo.update_by_profile_id(
+        profile_id,
+        {
+            "instagram_handle": ig_profile["username"],
+            "instagram_user_id": instagram_user_id,
+            "instagram_access_token": encrypt_token(access_token),
+            "instagram_token_expires_at": expires_at.isoformat(),
+            "instagram_synced_at": now,
+            "views_count": views_count,
+            **instagram_service.build_profile_prefill(ig_profile, engagement_rate),
+        },
+    )
 
     return _creator_to_response(updated)
 
@@ -581,9 +585,7 @@ async def _refresh_instagram_stats(creator: Creator, *, repo: CreatorRepository)
     if expires_at is None or expires_at - datetime.now(UTC) < _TOKEN_REFRESH_THRESHOLD:
         refreshed = await instagram_service.refresh_long_lived_token(access_token)
         access_token = refreshed["access_token"]
-        expires_at = datetime.now(UTC) + timedelta(
-            seconds=refreshed.get("expires_in", _DEFAULT_TOKEN_LIFETIME_SECONDS)
-        )
+        expires_at = datetime.now(UTC) + timedelta(seconds=refreshed.get("expires_in", _DEFAULT_TOKEN_LIFETIME_SECONDS))
 
     ig_profile = await instagram_service.fetch_profile(access_token)
     media = await instagram_service.fetch_media(access_token)
@@ -593,16 +595,19 @@ async def _refresh_instagram_stats(creator: Creator, *, repo: CreatorRepository)
     # populated for items the creator has explicitly imported).
     engagement_rate, views_count = await instagram_service.calculate_engagement_and_views(access_token, media)
 
-    updated = await repo.update_by_profile_id(creator.profile_id, {
-        "follower_count": ig_profile.get("followers_count"),
-        "following_count": ig_profile.get("follows_count"),
-        "profile_photo_url": ig_profile.get("profile_picture_url"),
-        "engagement_rate": engagement_rate,
-        "views_count": views_count,
-        "instagram_access_token": encrypt_token(access_token),
-        "instagram_token_expires_at": expires_at.isoformat(),
-        "instagram_synced_at": datetime.now(UTC).isoformat(),
-    })
+    updated = await repo.update_by_profile_id(
+        creator.profile_id,
+        {
+            "follower_count": ig_profile.get("followers_count"),
+            "following_count": ig_profile.get("follows_count"),
+            "profile_photo_url": ig_profile.get("profile_picture_url"),
+            "engagement_rate": engagement_rate,
+            "views_count": views_count,
+            "instagram_access_token": encrypt_token(access_token),
+            "instagram_token_expires_at": expires_at.isoformat(),
+            "instagram_synced_at": datetime.now(UTC).isoformat(),
+        },
+    )
     if updated is None:
         raise _not_connected()
     return updated
@@ -675,12 +680,15 @@ async def disconnect_instagram(
     if not creator:
         raise _no_creator_profile()
 
-    await repo.update_by_profile_id(profile_id, {
-        "instagram_user_id": None,
-        "instagram_access_token": None,
-        "instagram_token_expires_at": None,
-        "instagram_synced_at": None,
-    })
+    await repo.update_by_profile_id(
+        profile_id,
+        {
+            "instagram_user_id": None,
+            "instagram_access_token": None,
+            "instagram_token_expires_at": None,
+            "instagram_synced_at": None,
+        },
+    )
 
 
 async def preview_instagram_media(
@@ -761,16 +769,13 @@ async def import_instagram_portfolio(
                 access_token, media_item["id"], media_item["media_type"]
             )
         except ExternalServiceError:
-            logger.exception(
-                "Failed to fetch view-count insights for instagram media_id=%s", media_item.get("id")
-            )
+            logger.exception("Failed to fetch view-count insights for instagram media_id=%s", media_item.get("id"))
             continue
         built_item["view_count"] = insights.get("views")
 
     post_links = [item["post_link"] for item in items if item.get("post_link")]
     existing_by_link = {
-        item.post_link: item
-        for item in await repo.get_portfolio_items_by_post_links(creator.id, post_links)
+        item.post_link: item for item in await repo.get_portfolio_items_by_post_links(creator.id, post_links)
     }
 
     to_insert = []
@@ -778,12 +783,15 @@ async def import_instagram_portfolio(
     for item in items:
         existing = existing_by_link.get(item.get("post_link"))
         if existing:
-            refreshed = await repo.update_portfolio_item(existing.id, {
-                "media_url": item["media_url"],
-                "like_count": item["like_count"],
-                "comment_count": item["comment_count"],
-                "view_count": item.get("view_count"),
-            })
+            refreshed = await repo.update_portfolio_item(
+                existing.id,
+                {
+                    "media_url": item["media_url"],
+                    "like_count": item["like_count"],
+                    "comment_count": item["comment_count"],
+                    "view_count": item.get("view_count"),
+                },
+            )
             if refreshed:
                 updated.append(refreshed)
         else:

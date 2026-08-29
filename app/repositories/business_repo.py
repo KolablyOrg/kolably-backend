@@ -94,20 +94,14 @@ class BusinessRepository(BaseRepository):
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Campaign], int]:
-        query = (
-            (await self._table("campaigns"))
-            .select("*", count="exact")
-            .eq("business_id", business_id)
-        )
+        query = (await self._table("campaigns")).select("*", count="exact").eq("business_id", business_id)
 
         if status:
             query = query.eq("status", status)
 
         start = (page - 1) * page_size
         end = start + page_size - 1
-        result = await self._execute(
-            query.order("created_at", desc=True).range(start, end)
-        )
+        result = await self._execute(query.order("created_at", desc=True).range(start, end))
 
         rows = result.data or []
         return [Campaign.from_row(row) for row in rows], result.count or 0

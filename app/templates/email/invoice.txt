@@ -1,0 +1,16 @@
+Invoice Available
+
+Hi {{ recipient_name|default('Valued Customer') }}, an invoice has been issued for your collaboration with {{ sender_name }}.
+
+Invoice Reference: {{ invoice_number }}
+Total Amount: {{ amount_formatted }}
+Status: {{ status|default('Sent') }}
+
+{% if view_url %}
+View Invoice:
+{{ view_url }}
+{% endif %}
+
+--
+Kolably Support: support@kolably.com
+© 2026 Kolably Inc. All rights reserved.

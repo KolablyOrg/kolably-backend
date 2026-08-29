@@ -46,9 +46,7 @@ class ChatRepository(BaseRepository):
         )
         existing_ids = {row["profile_id"] for row in existing}
         to_add = [
-            {"conversation_id": conversation_id, "profile_id": pid}
-            for pid in profile_ids
-            if pid not in existing_ids
+            {"conversation_id": conversation_id, "profile_id": pid} for pid in profile_ids if pid not in existing_ids
         ]
         if to_add:
             await self.insert("conversation_participants", to_add)
@@ -164,11 +162,14 @@ class ChatRepository(BaseRepository):
         return Message.from_row(rows[0]) if rows else None
 
     async def upsert_read(self, conversation_id: str, profile_id: str) -> None:
-        await self.upsert("conversation_reads", {
-            "conversation_id": conversation_id,
-            "profile_id": profile_id,
-            "last_read_at": "now()",
-        })
+        await self.upsert(
+            "conversation_reads",
+            {
+                "conversation_id": conversation_id,
+                "profile_id": profile_id,
+                "last_read_at": "now()",
+            },
+        )
 
     async def get_last_read_at(self, conversation_id: str, profile_id: str) -> str | None:
         row = await self.select_one(

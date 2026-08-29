@@ -5,6 +5,7 @@ from app.services import creator_service
 
 router = APIRouter()
 
+
 @router.post("/snapshot-stats", status_code=status.HTTP_200_OK)
 async def snapshot_creator_stats(
     authorized: bool = Depends(verify_cron_secret),

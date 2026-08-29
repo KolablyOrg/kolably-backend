@@ -16,14 +16,17 @@ from app.core.enums import (
 
 # ── Step 1: Campaign Foundations ──────────────────────
 
+
 class CampaignCreateRequest(BaseModel):
     """Step 1 — create a draft campaign."""
+
     title: str
     objective: CampaignObjective
     description: str
 
 
 # ── Step 2: Deliverables & Offer ──────────────────────
+
 
 class DeliverableItem(BaseModel):
     platform: Platform
@@ -35,6 +38,7 @@ class DeliverableItem(BaseModel):
 
 class CampaignDeliverablesRequest(BaseModel):
     """Step 2 — set deliverables and compensation."""
+
     deliverables: list[DeliverableItem]
     compensation_type: CompensationType
     cash_amount_min: float | None = None
@@ -44,8 +48,10 @@ class CampaignDeliverablesRequest(BaseModel):
 
 # ── Step 3: Targeting ─────────────────────────────────
 
+
 class CampaignTargetingRequest(BaseModel):
     """Step 3 — set creator targeting criteria."""
+
     creator_category: str
     follower_range_min: int | None = None
     follower_range_max: int | None = None
@@ -57,16 +63,20 @@ class CampaignTargetingRequest(BaseModel):
 
 # ── Step 4: Finalise & Publish ────────────────────────
 
+
 class CampaignPublishRequest(BaseModel):
     """Step 4 — set cover image and deadline, then publish."""
+
     cover_image_url: str | None = None
     deadline: datetime | None = None
 
 
 # ── General Update ──────────────────────────────────────
 
+
 class CampaignUpdateRequest(BaseModel):
     """Patch any campaign field (owner only)."""
+
     title: str | None = None
     description: str | None = None
     objective: CampaignObjective | None = None
@@ -100,8 +110,10 @@ class CampaignUpdateRequest(BaseModel):
 
 # ── Responses ───────────────────────────────────────────
 
+
 class CampaignResponse(BaseModel):
     """Full campaign detail."""
+
     id: str
     business_id: str
     title: str
@@ -142,6 +154,7 @@ class CampaignResponse(BaseModel):
 
 class CampaignSummary(BaseModel):
     """Lightweight campaign card for lists."""
+
     id: str
     business_id: str
     title: str
@@ -167,6 +180,7 @@ class CampaignSummary(BaseModel):
 
 class CampaignCategoryResponse(BaseModel):
     """Static category list item."""
+
     value: str
     label: str
 
@@ -174,6 +188,7 @@ class CampaignCategoryResponse(BaseModel):
 class BudgetBoundsResponse(BaseModel):
     """Real min/max cash budget across active campaigns — sizes the
     filter-sheet slider to actual data instead of a guessed range."""
+
     min_budget: float
     max_budget: float
 
@@ -185,6 +200,7 @@ class CampaignAnalyticsResponse(BaseModel):
     content (no write path exists yet), so a client should show an honest
     "not available yet" state rather than reading absent metrics as zero.
     """
+
     applied_count: int
     accepted_count: int
     rejected_count: int
@@ -199,5 +215,6 @@ class CampaignAnalyticsResponse(BaseModel):
 
 class InviteRequest(BaseModel):
     """Request body for inviting a creator to a campaign."""
+
     creator_id: str
     message: str | None = None

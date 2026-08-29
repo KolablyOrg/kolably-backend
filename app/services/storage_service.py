@@ -75,10 +75,7 @@ def public_url(key: str) -> str:
     objects through Supabase's object-public endpoint with no presigning —
     this is what the frontend persists as `logo_url`/`profile_photo_url`.
     """
-    return (
-        f"{settings.SUPABASE_URL}/storage/v1/object/public/"
-        f"{settings.AWS_S3_BUCKET}/{key}"
-    )
+    return f"{settings.SUPABASE_URL}/storage/v1/object/public/{settings.AWS_S3_BUCKET}/{key}"
 
 
 def build_key(namespace: str, owner_id: str, filename: str) -> str:
@@ -125,9 +122,7 @@ async def generate_upload_url(*, namespace: str, owner_id: str, filename: str, c
         )
     except ClientError as exc:
         logger.exception("generate_upload_url failed key=%s", key)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not prepare upload"
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not prepare upload") from exc
 
     return {"upload_url": url, "key": key, "expires_in": PRESIGNED_URL_TTL_SECONDS}
 
@@ -143,9 +138,7 @@ async def generate_download_url(key: str, *, expires_in: int = PRESIGNED_URL_TTL
         )
     except ClientError as exc:
         logger.exception("generate_download_url failed key=%s", key)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found") from exc
 
 
 async def upload_bytes(
@@ -177,9 +170,7 @@ async def upload_bytes(
         )
     except ClientError as exc:
         logger.exception("upload_bytes failed key=%s", key)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail="Upload failed"
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Upload failed") from exc
 
     return key
 
@@ -190,9 +181,7 @@ async def delete_file(key: str) -> bool:
         await to_thread(_client().delete_object, Bucket=settings.AWS_S3_BUCKET, Key=key)
     except ClientError as exc:
         logger.exception("delete_file failed key=%s", key)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail="Delete failed"
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Delete failed") from exc
     return True
 
 
@@ -214,6 +203,4 @@ async def delete_files(keys: list[str]) -> None:
             )
         except ClientError as exc:
             logger.exception("delete_files failed chunk_size=%d", len(chunk))
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY, detail="Batch delete failed"
-            ) from exc
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Batch delete failed") from exc

@@ -155,9 +155,7 @@ async def import_instagram_portfolio(
 ):
     """Import Instagram media into the creator's portfolio — specific items
     if `media_ids` is given, otherwise everything."""
-    return await creator_service.import_instagram_portfolio(
-        profile_id=user.id, media_ids=data.media_ids
-    )
+    return await creator_service.import_instagram_portfolio(profile_id=user.id, media_ids=data.media_ids)
 
 
 # ── Payout & Tax Setup ──────────────────────────────────
@@ -329,6 +327,7 @@ async def delete_portfolio_item(
         profile_id=user.id,
         role=user.role,
     )
+
 
 @router.delete(
     "/{creator_id}/portfolio",

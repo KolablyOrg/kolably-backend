@@ -97,9 +97,7 @@ async def send_push_to_profile(
         logger.exception("Failed to send push notification (profile_id=%s)", profile_id)
 
 
-async def send_test_push(
-    profile_id: str, *, repo: PushTokenRepository | None = None
-) -> dict:
+async def send_test_push(profile_id: str, *, repo: PushTokenRepository | None = None) -> dict:
     """Send a push to the caller's own devices and REPORT what happened.
 
     Deliberately the opposite contract to `send_push_to_profile`: that one
@@ -151,14 +149,16 @@ async def send_test_push(
     detailed = []
     for token, receipt in zip((t.expo_push_token for t in tokens), receipts):
         status_value = receipt.get("status")
-        detailed.append({
-            # Truncated: enough to tell two devices apart in the UI without
-            # putting a full push credential on screen.
-            "token": f"{token[:24]}…",
-            "status": status_value,
-            "error": receipt.get("details", {}).get("error") if status_value == "error" else None,
-            "message": receipt.get("message") if status_value == "error" else None,
-        })
+        detailed.append(
+            {
+                # Truncated: enough to tell two devices apart in the UI without
+                # putting a full push credential on screen.
+                "token": f"{token[:24]}…",
+                "status": status_value,
+                "error": receipt.get("details", {}).get("error") if status_value == "error" else None,
+                "message": receipt.get("message") if status_value == "error" else None,
+            }
+        )
         if status_value == "error" and receipt.get("details", {}).get("error") == "DeviceNotRegistered":
             await repo.delete_by_token(token)
 

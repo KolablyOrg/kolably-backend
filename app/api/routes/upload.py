@@ -38,6 +38,7 @@ UploadPurpose = Literal[
     "verification-doc",
 ]
 
+
 @router.post("/image", response_model=UploadResponse)
 async def upload_image(
     file: UploadFile = File(...),
@@ -51,8 +52,7 @@ async def upload_image(
     contents = await file.read()
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File too large. Maximum size is 5MB."
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large. Maximum size is 5MB."
         )
 
     # Verify the bytes actually decode as an image, and derive the real

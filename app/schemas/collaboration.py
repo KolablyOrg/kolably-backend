@@ -117,6 +117,7 @@ class RevisionHistoryResponse(BaseModel):
 class CollaborationCampaignInfo(BaseModel):
     """Joined campaign fields the mobile collab screens render — deliverables,
     payout, and deadlines all live on the campaign, not the collaboration."""
+
     title: str
     deliverables: list[dict] = []
     deadline: datetime | None = None

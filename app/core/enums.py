@@ -110,3 +110,23 @@ class NotificationType(StrEnum):
 class InvoiceStatus(StrEnum):
     SENT = "sent"
     PAID = "paid"
+
+
+class EmailDeliveryStatus(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    DELIVERED = "delivered"
+    BOUNCED = "bounced"
+    COMPLAINED = "complained"
+
+
+class EmailFlow(StrEnum):
+    SIGNUP_CONFIRMATION = "signup_confirmation"
+    PASSWORD_RESET = "password_reset"
+    TEAM_INVITATION = "team_invitation"
+    KYB_APPROVED = "kyb_approved"
+    KYB_REJECTED = "kyb_rejected"
+    CAMPAIGN_INVITE = "campaign_invite"
+    REVISION_REQUESTED = "revision_requested"
+    INVOICE = "invoice"

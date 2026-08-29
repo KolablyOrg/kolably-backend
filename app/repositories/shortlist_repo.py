@@ -26,22 +26,15 @@ class ShortlistRepository(BaseRepository):
         )
 
     async def upsert(self, data: dict[str, Any]) -> dict[str, Any] | None:
-        query = (
-            (await self._table("business_shortlists"))
-            .upsert(data, on_conflict="business_id,creator_id")
-        )
+        query = (await self._table("business_shortlists")).upsert(data, on_conflict="business_id,creator_id")
         result = await self._execute(query)
         return result.data[0] if result.data else None
 
     async def update_for_creator(
         self, business_id: str, creator_id: str, data: dict[str, Any]
     ) -> dict[str, Any] | None:
-        rows = await self.update(
-            "business_shortlists", data, {"business_id": business_id, "creator_id": creator_id}
-        )
+        rows = await self.update("business_shortlists", data, {"business_id": business_id, "creator_id": creator_id})
         return rows[0] if rows else None
 
     async def delete_for_creator(self, business_id: str, creator_id: str) -> None:
-        await self.delete(
-            "business_shortlists", {"business_id": business_id, "creator_id": creator_id}
-        )
+        await self.delete("business_shortlists", {"business_id": business_id, "creator_id": creator_id})

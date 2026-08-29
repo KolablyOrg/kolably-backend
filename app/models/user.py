@@ -12,6 +12,7 @@ from app.core.enums import UserRole
 @dataclass
 class UserProfile:
     """User profile domain model — internal representation."""
+
     id: str  # profiles.id
     auth_id: str  # auth.users.id
     email: str

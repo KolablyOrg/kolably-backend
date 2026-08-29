@@ -267,6 +267,7 @@ Frontend ← { message: "Password updated" }
 # app/core/enums.py
 from enum import Enum
 
+
 class UserRole(str, Enum):
     CREATOR = "creator"
     BUSINESS = "business"
@@ -280,9 +281,10 @@ class UserRole(str, Enum):
 from pydantic import BaseModel
 from app.core.enums import UserRole
 
+
 class UserInToken(BaseModel):
-    id: str           # profiles.id
-    auth_id: str      # auth.users.id (from JWT "sub")
+    id: str  # profiles.id
+    auth_id: str  # auth.users.id (from JWT "sub")
     email: str
     role: UserRole
     is_active: bool
@@ -319,6 +321,7 @@ Route handler
 
 security = HTTPBearer()
 
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> UserInToken:
@@ -346,11 +349,13 @@ async def get_current_user(
 
     return UserInToken(...)
 
+
 def require_role(*allowed_roles: UserRole):
     async def _check(user: UserInToken = Depends(get_current_user)):
         if user.role not in allowed_roles:
             raise HTTPException(403, "Insufficient permissions")
         return user
+
     return _check
 ```
 
@@ -358,14 +363,11 @@ def require_role(*allowed_roles: UserRole):
 
 ```python
 @router.post("/")
-async def create_campaign(
-    user: UserInToken = Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))
-): ...
+async def create_campaign(user: UserInToken = Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))): ...
+
 
 @router.post("/")
-async def create_application(
-    user: UserInToken = Depends(require_role(UserRole.CREATOR, UserRole.SUPERADMIN))
-): ...
+async def create_application(user: UserInToken = Depends(require_role(UserRole.CREATOR, UserRole.SUPERADMIN))): ...
 ```
 
 ### 7.6 Superadmin Data Access

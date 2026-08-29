@@ -10,6 +10,7 @@ from typing import Any
 @dataclass
 class PortfolioItem:
     """Portfolio item domain model."""
+
     id: str
     creator_id: str
     title: str | None = None
@@ -56,6 +57,7 @@ class PortfolioItem:
 @dataclass
 class Creator:
     """Creator domain model — internal representation."""
+
     id: str
     profile_id: str
     name: str

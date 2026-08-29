@@ -102,9 +102,7 @@ class CreatorRepository(BaseRepository):
         if engagement_min is not None:
             # Sparse Instagram sync data: keep unknown rates visible rather than
             # silently dropping most creators when brands pick an engagement floor.
-            query = query.or_(
-                f"engagement_rate.is.null,engagement_rate.gte.{engagement_min}"
-            )
+            query = query.or_(f"engagement_rate.is.null,engagement_rate.gte.{engagement_min}")
         if verified_only:
             # "Instagram insights confirmed" — connected accounts have a user id.
             query = query.not_.is_("instagram_user_id", "null")
@@ -116,9 +114,7 @@ class CreatorRepository(BaseRepository):
         rows = result.data or []
         return [Creator.from_row(row) for row in rows], result.count or 0
 
-    async def list_recently_active_by_city(
-        self, city: str, since_iso: str
-    ) -> list[dict]:
+    async def list_recently_active_by_city(self, city: str, since_iso: str) -> list[dict]:
         """Discoverable creators in `city` who added a portfolio item since `since_iso`.
 
         Two-step (no cross-table join in postgrest): narrow to the city first,
@@ -149,11 +145,7 @@ class CreatorRepository(BaseRepository):
 
     async def get_locations(self) -> list[str]:
         """Distinct cities from discoverable creators — drives brand Discover pills."""
-        result = await self._execute(
-            (await self._table("creators"))
-            .select("city")
-            .eq("is_discoverable", True)
-        )
+        result = await self._execute((await self._table("creators")).select("city").eq("is_discoverable", True))
         rows = result.data or []
         seen: set[str] = set()
         locations: list[str] = []
@@ -170,11 +162,7 @@ class CreatorRepository(BaseRepository):
 
     async def get_niches(self) -> list[str]:
         """Distinct niches from discoverable creators — drives brand Discover pills."""
-        result = await self._execute(
-            (await self._table("creators"))
-            .select("niche")
-            .eq("is_discoverable", True)
-        )
+        result = await self._execute((await self._table("creators")).select("niche").eq("is_discoverable", True))
         rows = result.data or []
         seen: set[str] = set()
         niches: list[str] = []
@@ -215,12 +203,16 @@ class CreatorRepository(BaseRepository):
         Callback, when a user revokes access without a full data-deletion
         request. Lighter-touch than `anonymize`: only the connection fields
         are cleared, name/bio/photo/portfolio stay untouched."""
-        rows = await self.update("creators", {
-            "instagram_user_id": None,
-            "instagram_access_token": None,
-            "instagram_token_expires_at": None,
-            "instagram_synced_at": None,
-        }, {"id": creator_id})
+        rows = await self.update(
+            "creators",
+            {
+                "instagram_user_id": None,
+                "instagram_access_token": None,
+                "instagram_token_expires_at": None,
+                "instagram_synced_at": None,
+            },
+            {"id": creator_id},
+        )
         return Creator.from_row(rows[0]) if rows else None
 
     async def update_by_profile_id(self, profile_id: str, data: dict) -> Creator | None:
@@ -251,9 +243,7 @@ class CreatorRepository(BaseRepository):
         rows = await self.insert("portfolio_items", data)
         return PortfolioItem.from_row(rows[0]) if rows else None
 
-    async def get_portfolio_items_by_post_links(
-        self, creator_id: str, post_links: list[str]
-    ) -> list[PortfolioItem]:
+    async def get_portfolio_items_by_post_links(self, creator_id: str, post_links: list[str]) -> list[PortfolioItem]:
         if not post_links:
             return []
         rows = await self.select(
@@ -282,11 +272,7 @@ class CreatorRepository(BaseRepository):
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[PortfolioItem], int]:
-        query = (
-            (await self._table("portfolio_items"))
-            .select("*", count="exact")
-            .eq("creator_id", creator_id)
-        )
+        query = (await self._table("portfolio_items")).select("*", count="exact").eq("creator_id", creator_id)
 
         if media_type:
             query = query.eq("media_type", media_type)
@@ -350,13 +336,17 @@ class CreatorRepository(BaseRepository):
         available within the last `days_ago` window to use as a fallback base.
         """
         import datetime
+
         target_date = (datetime.datetime.utcnow() - datetime.timedelta(days=days_ago)).date()
 
-        query = (await self._table("creator_stats_history")).select("*")\
-            .eq("creator_id", creator_id)\
-            .gte("snapshot_date", target_date.isoformat())\
-            .order("snapshot_date", desc=False)\
+        query = (
+            (await self._table("creator_stats_history"))
+            .select("*")
+            .eq("creator_id", creator_id)
+            .gte("snapshot_date", target_date.isoformat())
+            .order("snapshot_date", desc=False)
             .limit(1)
+        )
 
         result = await self._execute(query)
         return result.data[0] if result and result.data else None
@@ -413,9 +403,7 @@ class CreatorRepository(BaseRepository):
         # UNIQUE(creator_id, snapshot_date) constraint as a hard error
         # instead of merging into today's existing snapshot.
         await self._execute(
-            (await self._table("creator_stats_history")).upsert(
-                payload, on_conflict="creator_id,snapshot_date"
-            )
+            (await self._table("creator_stats_history")).upsert(payload, on_conflict="creator_id,snapshot_date")
         )
 
     async def save_campaign(self, creator_id: str, campaign_id: str) -> None:

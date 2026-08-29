@@ -19,11 +19,7 @@ class CollaborationRepository(BaseRepository):
         page_size: int = 20,
         campaign_id: str | None = None,
     ) -> tuple[list[Collaboration], int]:
-        query = (
-            (await self._table("collaborations"))
-            .select("*", count="exact")
-            .eq("creator_id", creator_id)
-        )
+        query = (await self._table("collaborations")).select("*", count="exact").eq("creator_id", creator_id)
         if campaign_id:
             query = query.eq("campaign_id", campaign_id)
 
@@ -41,11 +37,7 @@ class CollaborationRepository(BaseRepository):
         page_size: int = 20,
         campaign_id: str | None = None,
     ) -> tuple[list[Collaboration], int]:
-        query = (
-            (await self._table("collaborations"))
-            .select("*", count="exact")
-            .eq("business_id", business_id)
-        )
+        query = (await self._table("collaborations")).select("*", count="exact").eq("business_id", business_id)
         if campaign_id:
             query = query.eq("campaign_id", campaign_id)
 
@@ -62,11 +54,7 @@ class CollaborationRepository(BaseRepository):
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Collaboration], int]:
-        query = (
-            (await self._table("collaborations"))
-            .select("*", count="exact")
-            .eq("campaign_id", campaign_id)
-        )
+        query = (await self._table("collaborations")).select("*", count="exact").eq("campaign_id", campaign_id)
 
         start = (page - 1) * page_size
         end = start + page_size - 1
@@ -82,9 +70,7 @@ class CollaborationRepository(BaseRepository):
             filters={"collaboration_id": collaboration_id},
         )
 
-    async def get_latest_submission(
-        self, collaboration_id: str, submission_type: str
-    ) -> dict | None:
+    async def get_latest_submission(self, collaboration_id: str, submission_type: str) -> dict | None:
         """Most recent submission of a given type ('draft' or 'live') for a
         collaboration — a collab can accumulate multiple draft rows across
         revision rounds, so callers that care about "the current one" (e.g.
@@ -112,15 +98,11 @@ class CollaborationRepository(BaseRepository):
         rows = await self.insert("collaborations", data)
         return Collaboration.from_row(rows[0]) if rows else None
 
-    async def update_status(
-        self, collaboration_id: str, data: dict
-    ) -> Collaboration | None:
+    async def update_status(self, collaboration_id: str, data: dict) -> Collaboration | None:
         rows = await self.update("collaborations", data, {"id": collaboration_id})
         return Collaboration.from_row(rows[0]) if rows else None
 
-    async def list_awaiting_creator_confirmation_before(
-        self, cutoff
-    ) -> list[Collaboration]:
+    async def list_awaiting_creator_confirmation_before(self, cutoff) -> list[Collaboration]:
         """Collaborations the business marked paid but the creator never
         confirmed, past the grace window — candidates for the daily
         auto-confirm sweep (see collaboration_service.

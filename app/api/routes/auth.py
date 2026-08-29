@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 # ── Signup ────────────────────────────────────────────
 
+
 @router.post("/signup/creator", response_model=AuthTokenResponse)
 @limiter.limit("5/minute")
 async def signup_creator(data: CreatorSignupRequest, request: Request):
@@ -65,13 +66,15 @@ async def signup_business(data: BusinessSignupRequest, request: Request):
 
 # ── Login / Logout ────────────────────────────────────
 
+
 @router.post("/login", response_model=AuthTokenResponse)
 @limiter.limit("10/minute")
 async def login(data: LoginRequest, request: Request):
     """Authenticate user and return tokens + profile — or, if 2FA is
     enabled, an `mfa_token` that POST /auth/2fa/verify exchanges for tokens."""
     return await auth_service.login(
-        data, ip_address=request.client.host if request.client else None,
+        data,
+        ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -84,7 +87,8 @@ async def google_auth(data: GoogleAuthRequest, request: Request):
     `is_new_user` responses to a profile-completion step (`PATCH /me`).
     """
     return await auth_service.google_auth(
-        data, ip_address=request.client.host if request.client else None,
+        data,
+        ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -134,7 +138,8 @@ async def google_code_auth(data: GoogleCodeAuthRequest, request: Request):
     direct id_token flow, for clients without a native Google Sign-In
     dev-client build."""
     return await auth_service.google_code_auth(
-        data, ip_address=request.client.host if request.client else None,
+        data,
+        ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -148,7 +153,8 @@ async def instagram_auth(data: InstagramAuthRequest, request: Request):
     "connect Instagram" onboarding step needed, unlike Google/email signups.
     """
     return await auth_service.instagram_auth(
-        data, ip_address=request.client.host if request.client else None,
+        data,
+        ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -218,6 +224,7 @@ async def revoke_other_sessions(
 
 # ── Token Refresh ─────────────────────────────────────
 
+
 @router.post("/refresh", response_model=AuthTokenResponse)
 async def refresh_token(data: RefreshTokenRequest):
     """Refresh an expired access token."""
@@ -225,6 +232,7 @@ async def refresh_token(data: RefreshTokenRequest):
 
 
 # ── Password Reset ────────────────────────────────────
+
 
 @router.post("/forgot-password", response_model=MessageResponse)
 @limiter.limit("5/minute")
@@ -301,6 +309,7 @@ async def verify_signup_otp(data: VerifySignupOtpRequest):
 
 
 # ── Current User ──────────────────────────────────────
+
 
 @router.get("/me")
 async def get_me(user: UserInToken = Depends(get_current_user)):

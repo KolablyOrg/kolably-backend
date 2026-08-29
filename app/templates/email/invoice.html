@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Invoice Available</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="background-color: #f9fafb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1f2937; margin: 0; padding: 32px 8px;">
+  <table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="max-width: 560px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e5e7eb; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin: auto;">
+    <tr>
+      <td align="center" style="padding-bottom: 24px;">
+        <a href="https://kolably.com" target="_blank" rel="noopener noreferrer">
+          <img src="https://kolably.com/logo-kolably.svg" alt="Kolably" width="120" style="display: block; border: 0; outline: none; margin: auto;" />
+        </a>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <h1 style="font-size: 20px; font-weight: 700; color: #111827; margin: 0 0 16px 0;">Invoice Available</h1>
+        <p style="font-size: 14px; line-height: 1.6; color: #374151; margin: 0 0 16px 0;">
+          Hi {{ recipient_name|default('Valued Customer')|e }}, an invoice has been issued for your collaboration with <strong>{{ sender_name|e }}</strong>.
+        </p>
+        <div style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 24px 0;">
+          <p style="font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin: 0;">Invoice Reference</p>
+          <p style="font-size: 16px; font-weight: 700; color: #111827; margin: 4px 0 12px 0;">{{ invoice_number|e }}</p>
+          <p style="font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin: 0;">Total Amount</p>
+          <p style="font-size: 24px; font-weight: 800; color: #fd6744; margin: 4px 0 8px 0;">{{ amount_formatted|e }}</p>
+          <p style="font-size: 12px; color: #4b5563; margin: 0;">Status: <strong style="text-transform: capitalize;">{{ status|default('Sent')|e }}</strong></p>
+        </div>
+        {% if view_url %}
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="{{ view_url|e }}" style="box-sizing: border-box; display: inline-block; background-color: #fd6744; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 24px; border-radius: 8px;">View Invoice</a>
+        </div>
+        {% endif %}
+        <p style="font-size: 12px; color: #6b7280; line-height: 1.5; margin: 16px 0 0 0;">
+          You can view and download your invoice details directly in your account dashboard.
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding-top: 32px;">
+        <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 0 0 24px 0;" />
+        <p style="font-size: 12px; color: #6b7280; text-align: center; margin: 0;">
+          Questions? Reply to this email or contact us at <a href="mailto:support@kolably.com" style="color: #fd6744; text-decoration: underline;">support@kolably.com</a>
+        </p>
+        <p style="font-size: 12px; color: #9ca3af; text-align: center; margin: 8px 0 0 0;">
+          © 2026 Kolably Inc. All rights reserved.
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

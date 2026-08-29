@@ -38,9 +38,7 @@ def _verify(signed_request: str) -> dict:
     known app secrets — see meta_signed_request.py's docstring on why it's
     ambiguous which one Meta actually signs with."""
     try:
-        return parse_signed_request(
-            signed_request, secrets=[settings.APP_SECRET, settings.INSTAGRAM_APP_SECRET]
-        )
+        return parse_signed_request(signed_request, secrets=[settings.APP_SECRET, settings.INSTAGRAM_APP_SECRET])
     except InvalidSignedRequestError as e:
         logger.exception("Meta signed_request verification failed")
         raise BadRequestError("Invalid signed request") from e
@@ -74,20 +72,20 @@ async def handle_data_deletion(
     if creator:
         await creator_repo.delete_portfolio_by_creator_id(creator.id)
         await creator_repo.anonymize(creator.id, dict(_ANONYMIZED_CREATOR_FIELDS))
-        await profile_repo.anonymize(
-            creator.profile_id, f"deleted-{creator.profile_id}@deleted.kolably.com"
-        )
+        await profile_repo.anonymize(creator.profile_id, f"deleted-{creator.profile_id}@deleted.kolably.com")
         status = "completed"
 
     confirmation_code = uuid.uuid4().hex
     now = datetime.now(UTC).isoformat()
-    await deletion_repo.insert_request({
-        "confirmation_code": confirmation_code,
-        "instagram_user_id": instagram_user_id,
-        "profile_id": creator.profile_id if creator else None,
-        "status": status,
-        "completed_at": now,
-    })
+    await deletion_repo.insert_request(
+        {
+            "confirmation_code": confirmation_code,
+            "instagram_user_id": instagram_user_id,
+            "profile_id": creator.profile_id if creator else None,
+            "status": status,
+            "completed_at": now,
+        }
+    )
 
     return {
         "url": f"{_STATUS_BASE_URL}/{confirmation_code}",

@@ -12,6 +12,7 @@ from app.core.enums import CollaborationStatus
 @dataclass
 class Collaboration:
     """Collaboration domain model — internal representation."""
+
     id: str
     campaign_id: str
     creator_id: str
@@ -39,6 +40,7 @@ class Collaboration:
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "Collaboration":
         import json
+
         deliverables = row.get("deliverables") or []
         if isinstance(deliverables, str):
             deliverables = json.loads(deliverables) if deliverables else []

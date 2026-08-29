@@ -47,9 +47,7 @@ class ProfileRepository(BaseRepository):
         """Scrub the account's contact info and deactivate it — used for
         Meta's Data Deletion Callback. Keeps the row (not a hard delete of
         the auth.users record) to avoid FK/cascade uncertainty."""
-        rows = await self.update(
-            "profiles", {"email": anonymized_email, "is_active": False}, {"id": profile_id}
-        )
+        rows = await self.update("profiles", {"email": anonymized_email, "is_active": False}, {"id": profile_id})
         return UserProfile.from_row(rows[0]) if rows else None
 
     async def list_deactivated_before(self, cutoff) -> list[UserProfile]:

@@ -86,9 +86,7 @@ async def create_invoice(
     creator = await creator_repo.get_by_profile_id(profile_id)
     if role != UserRole.SUPERADMIN:
         if not creator or collab.creator_id != creator.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="You do not own this collaboration"
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not own this collaboration")
     if not creator:
         creator = await creator_repo.get_by_id(collab.creator_id)
     if not creator:
@@ -176,9 +174,7 @@ async def list_invoices(
         )
         if not business_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business profile not found")
-        invoices, total = await repo.list_by_business(
-            business_id, status=status_filter, page=page, page_size=page_size
-        )
+        invoices, total = await repo.list_by_business(business_id, status=status_filter, page=page, page_size=page_size)
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -218,9 +214,7 @@ async def get_invoice(
         owns_as_creator = bool(creator) and invoice.creator_id == creator.id
         owns_as_business = bool(business_id) and invoice.business_id == business_id
         if not (owns_as_creator or owns_as_business):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this invoice"
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this invoice")
 
     return _invoice_to_response(invoice)
 

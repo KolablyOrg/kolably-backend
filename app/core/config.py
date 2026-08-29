@@ -120,7 +120,11 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_S3_BUCKET: str = "media"
-    AWS_S3_ENDPOINT_URL: str = "https://uxngcuyrdmajydkqpiyi.storage.supabase.co/storage/v1/s3"
+    # ── Email Service (Resend) ────────────────────────
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "Kolably <notifications@kolably.com>"
+    EMAIL_REPLY_TO: str = "support@kolably.com"
+    EMAIL_ENABLED: bool = True
 
     model_config = {
         "env_file": ".env",

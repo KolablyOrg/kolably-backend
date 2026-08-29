@@ -10,6 +10,7 @@ from typing import Any
 @dataclass
 class Business:
     """Business domain model — internal representation."""
+
     id: str
     profile_id: str
     description: str | None = None

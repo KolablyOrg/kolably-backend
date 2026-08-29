@@ -10,6 +10,7 @@ from typing import Any
 @dataclass
 class PushToken:
     """One Expo push token, tied to a single profile + app install."""
+
     id: str
     profile_id: str
     expo_push_token: str

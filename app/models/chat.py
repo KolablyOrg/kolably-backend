@@ -16,6 +16,7 @@ class Conversation:
     (`conversation_participants`, `messages`, `conversation_reads`) and are
     filled in by the service layer after construction, not read from a row.
     """
+
     id: str
     collaboration_id: str | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
@@ -43,6 +44,7 @@ class Conversation:
 @dataclass
 class Message:
     """Message domain model — internal representation."""
+
     id: str
     conversation_id: str
     sender_id: str

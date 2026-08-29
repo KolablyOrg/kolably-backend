@@ -26,8 +26,7 @@ _GRAPH_BASE = "https://graph.instagram.com"
 _SCOPES = "instagram_business_basic,instagram_business_manage_insights"
 
 _PROFILE_FIELDS = (
-    "user_id,username,name,biography,website,account_type,"
-    "followers_count,follows_count,media_count,profile_picture_url"
+    "user_id,username,name,biography,website,account_type,followers_count,follows_count,media_count,profile_picture_url"
 )
 _MEDIA_FIELDS = (
     "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,"

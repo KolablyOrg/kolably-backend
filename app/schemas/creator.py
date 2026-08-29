@@ -125,6 +125,7 @@ class CreatorUpdateRequest(BaseModel):
 
 class CreatorSummary(BaseModel):
     """Minimal creator info for nested responses."""
+
     id: str
     name: str
     profile_photo_url: str | None = None
@@ -150,6 +151,7 @@ class PortfolioItemCreateRequest(BaseModel):
     through the media upload flow when it is a local file; Instagram imports
     continue to store the source URL. `like_count`/`comment_count` are
     Instagram-import-only and are not accepted here."""
+
     title: str | None = None
     media_url: str = Field(..., min_length=1)
     post_link: str | None = None
@@ -204,6 +206,7 @@ class InstagramConnectRequest(BaseModel):
 class InstagramMediaPreviewItem(BaseModel):
     """One item from the creator's recent Instagram media, fetched but not
     yet imported into their portfolio — lets them pick which ones to add."""
+
     id: str
     media_url: str
     permalink: str | None = None
@@ -215,6 +218,7 @@ class InstagramMediaPreviewItem(BaseModel):
 class InstagramImportRequest(BaseModel):
     """`media_ids` selects specific previewed items to import; omitted/None
     imports everything (back-compat with the original bulk-import call)."""
+
     media_ids: list[str] | None = None
 
 

@@ -5,7 +5,8 @@ from fastapi import HTTPException, status
 from app.core.enums import NotificationType
 from app.models.notification import Notification
 from app.repositories.notification_repo import NotificationRepository
-from app.services import push_notification_service
+from app.repositories.profile_repo import ProfileRepository
+from app.services import email_service, push_notification_service
 
 
 def _notification_to_response(notif: Notification) -> dict:
@@ -38,13 +39,15 @@ async def create_notification(
     """
     repo = repo or NotificationRepository()
     try:
-        await repo.insert_notification({
-            "profile_id": profile_id,
-            "type": type.value,
-            "title": title,
-            "body": body,
-            "related_id": related_id,
-        })
+        await repo.insert_notification(
+            {
+                "profile_id": profile_id,
+                "type": type.value,
+                "title": title,
+                "body": body,
+                "related_id": related_id,
+            }
+        )
     except Exception:
         logging.getLogger(__name__).exception(
             "Failed to create notification (profile_id=%s, type=%s)", profile_id, type.value
@@ -60,6 +63,54 @@ async def create_notification(
         body,
         data={"type": type.value, "related_id": related_id},
     )
+
+    # Fan out to branded email for supported transactional notification types
+    try:
+        if type in (
+            NotificationType.CAMPAIGN_INVITE_RECEIVED,
+            NotificationType.REVISION_REQUESTED,
+            NotificationType.INVOICE_RECEIVED,
+        ):
+            profile = await ProfileRepository().get_by_id(profile_id)
+            if profile and profile.email:
+                if type == NotificationType.CAMPAIGN_INVITE_RECEIVED:
+                    await email_service.send_campaign_invite_email(
+                        email=profile.email,
+                        creator_name=profile.full_name or "Creator",
+                        campaign_title=title,
+                        business_name="Your Brand Partner",
+                        compensation_text="See details in app",
+                        action_url="https://kolably.com/campaigns",
+                        campaign_id=related_id or "campaign",
+                        creator_profile_id=profile_id,
+                    )
+                elif type == NotificationType.REVISION_REQUESTED:
+                    await email_service.send_revision_requested_email(
+                        email=profile.email,
+                        creator_name=profile.full_name or "Creator",
+                        campaign_title="Your Collaboration",
+                        business_name="Brand Partner",
+                        revision_notes=body,
+                        review_url="https://kolably.com/collaborations",
+                        application_id=related_id or "application",
+                        creator_profile_id=profile_id,
+                    )
+                elif type == NotificationType.INVOICE_RECEIVED:
+                    await email_service.send_invoice_email(
+                        email=profile.email,
+                        recipient_name=profile.full_name or "Partner",
+                        sender_name="Kolably Partner",
+                        invoice_number=title,
+                        amount_formatted="See Invoice",
+                        status="Sent",
+                        view_url="https://kolably.com/invoices",
+                        invoice_id=related_id or "invoice",
+                        recipient_profile_id=profile_id,
+                    )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Failed to fan-out email notification (profile_id=%s, type=%s)", profile_id, type.value
+        )
 
 
 async def list_notifications(

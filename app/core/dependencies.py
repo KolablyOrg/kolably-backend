@@ -44,13 +44,7 @@ async def get_current_user(
         )
 
     supabase = await get_supabase_admin_client()
-    result = await (
-        supabase.table("profiles")
-        .select("*")
-        .eq("auth_id", auth_id)
-        .single()
-        .execute()
-    )
+    result = await supabase.table("profiles").select("*").eq("auth_id", auth_id).single().execute()
 
     if not result.data:
         raise HTTPException(

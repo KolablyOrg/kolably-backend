@@ -60,9 +60,7 @@ async def _get_business_id_for_user(
     return business_id
 
 
-def _application_to_response(
-    app: CampaignApplication, *, collaboration_id: str | None = None
-) -> ApplicationResponse:
+def _application_to_response(app: CampaignApplication, *, collaboration_id: str | None = None) -> ApplicationResponse:
     """Convert a CampaignApplication model to ApplicationResponse schema."""
     return ApplicationResponse(
         id=app.id,
@@ -261,15 +259,17 @@ async def apply_to_campaign(
             detail="You've already applied to this campaign",
         )
 
-    application = await app_repo.insert_application({
-        "campaign_id": data.campaign_id,
-        "creator_id": creator_id,
-        "direction": ApplicationDirection.CREATOR_APPLIED.value,
-        "message": data.message,
-        "instagram_handle": data.instagram_handle,
-        "example_content_url": data.example_content_url,
-        "status": ApplicationStatus.PENDING.value,
-    })
+    application = await app_repo.insert_application(
+        {
+            "campaign_id": data.campaign_id,
+            "creator_id": creator_id,
+            "direction": ApplicationDirection.CREATOR_APPLIED.value,
+            "message": data.message,
+            "instagram_handle": data.instagram_handle,
+            "example_content_url": data.example_content_url,
+            "status": ApplicationStatus.PENDING.value,
+        }
+    )
     if not application:
         logger.error(
             "insert_application returned no row for campaign_id=%s creator_id=%s",
@@ -311,10 +311,7 @@ async def withdraw_application(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Application not found",
         )
-    if (
-        application.direction != ApplicationDirection.CREATOR_APPLIED
-        or application.creator_id != creator_id
-    ):
+    if application.direction != ApplicationDirection.CREATOR_APPLIED or application.creator_id != creator_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only withdraw your own applications",
@@ -437,8 +434,13 @@ async def accept_application(
         application_id, app_repo=app_repo, campaign_repo=campaign_repo
     )
     await _authorize_decision(
-        application, profile_id, role,
-        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo, member_repo=member_repo,
+        application,
+        profile_id,
+        role,
+        campaign=campaign,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     # Invites carry a deadline (see campaign_service.invite_creator). It's
@@ -471,20 +473,24 @@ async def accept_application(
             detail="Failed to accept application",
         )
 
-    collaboration = await collab_repo.insert_collaboration({
-        "application_id": application.id,
-        "campaign_id": application.campaign_id,
-        "creator_id": application.creator_id,
-        "business_id": campaign.business_id,
-        "status": CollaborationStatus.ACTIVE.value,
-    })
+    collaboration = await collab_repo.insert_collaboration(
+        {
+            "application_id": application.id,
+            "campaign_id": application.campaign_id,
+            "creator_id": application.creator_id,
+            "business_id": campaign.business_id,
+            "status": CollaborationStatus.ACTIVE.value,
+        }
+    )
 
     if collaboration:
         creator = await creator_repo.get_by_id(application.creator_id)
         business = await business_repo.get_by_id(campaign.business_id)
         if creator and business:
             await chat_service.get_or_create_conversation(
-                creator.profile_id, business.profile_id, collaboration.id,
+                creator.profile_id,
+                business.profile_id,
+                collaboration.id,
             )
 
     notify_profile_id = await _other_party_profile_id(
@@ -499,9 +505,7 @@ async def accept_application(
             related_id=collaboration.id if collaboration else application.id,
         )
 
-    return _application_to_response(
-        updated, collaboration_id=collaboration.id if collaboration else None
-    )
+    return _application_to_response(updated, collaboration_id=collaboration.id if collaboration else None)
 
 
 async def reject_application(
@@ -525,8 +529,13 @@ async def reject_application(
         application_id, app_repo=app_repo, campaign_repo=campaign_repo
     )
     await _authorize_decision(
-        application, profile_id, role,
-        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo, member_repo=member_repo,
+        application,
+        profile_id,
+        role,
+        campaign=campaign,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     updated = await app_repo.update_status(application_id, ApplicationStatus.REJECTED.value)
@@ -583,8 +592,13 @@ async def request_revision(
         application_id, app_repo=app_repo, campaign_repo=campaign_repo
     )
     await _authorize_decision(
-        application, profile_id, role,
-        campaign=campaign, creator_repo=creator_repo, business_repo=business_repo, member_repo=member_repo,
+        application,
+        profile_id,
+        role,
+        campaign=campaign,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     updated = await app_repo.update_application(

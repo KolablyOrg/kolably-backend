@@ -1,0 +1,15 @@
+Verification Update Required
+
+Thank you for submitting verification details for {{ business_name }}. Our compliance team reviewed your submission and requires additional information before approving your business.
+
+Reason for Update:
+{{ rejection_reason|default('Information submitted was incomplete or could not be verified.') }}
+
+{% if resubmit_url %}
+Update your verification details using this link:
+{{ resubmit_url }}
+{% endif %}
+
+--
+Kolably Support: support@kolably.com
+© 2026 Kolably Inc. All rights reserved.

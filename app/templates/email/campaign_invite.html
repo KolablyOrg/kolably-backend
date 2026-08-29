@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Campaign Invitation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="background-color: #f9fafb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1f2937; margin: 0; padding: 32px 8px;">
+  <table align="center" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="max-width: 560px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e5e7eb; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin: auto;">
+    <tr>
+      <td align="center" style="padding-bottom: 24px;">
+        <a href="https://kolably.com" target="_blank" rel="noopener noreferrer">
+          <img src="https://kolably.com/logo-kolably.svg" alt="Kolably" width="120" style="display: block; border: 0; outline: none; margin: auto;" />
+        </a>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <h1 style="font-size: 20px; font-weight: 700; color: #111827; margin: 0 0 16px 0;">Campaign Invitation</h1>
+        <p style="font-size: 14px; line-height: 1.6; color: #374151; margin: 0 0 16px 0;">
+          Hi {{ creator_name|default('Creator')|e }}, <strong>{{ business_name|e }}</strong> has invited you to collaborate on their campaign <strong>{{ campaign_title|e }}</strong>!
+        </p>
+        <div style="background-color: #fff4ee; border: 1px solid #fdd8ca; border-radius: 8px; padding: 20px; margin: 24px 0;">
+          <p style="font-size: 15px; font-weight: 600; color: #c8320e; margin: 0;">Campaign: {{ campaign_title|e }}</p>
+          <p style="font-size: 13px; color: #9a2c10; margin: 4px 0 0 0;">Brand: {{ business_name|e }}</p>
+          <p style="font-size: 13px; font-weight: 500; color: #c8320e; margin: 8px 0 0 0;">Compensation: {{ compensation_text|default('Paid Collaboration')|e }}</p>
+        </div>
+        {% if action_url %}
+        <div style="text-align: center; margin: 24px 0;">
+          <a href="{{ action_url|e }}" style="box-sizing: border-box; display: inline-block; background-color: #fd6744; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 24px; border-radius: 8px;">View Campaign Details</a>
+        </div>
+        {% endif %}
+        <p style="font-size: 12px; color: #6b7280; line-height: 1.5; margin: 16px 0 0 0;">
+          Review deliverables, guidelines, and dates directly in your Kolably dashboard.
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding-top: 32px;">
+        <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 0 0 24px 0;" />
+        <p style="font-size: 12px; color: #6b7280; text-align: center; margin: 0;">
+          Questions? Reply to this email or contact us at <a href="mailto:support@kolably.com" style="color: #fd6744; text-decoration: underline;">support@kolably.com</a>
+        </p>
+        <p style="font-size: 12px; color: #9ca3af; text-align: center; margin: 8px 0 0 0;">
+          © 2026 Kolably Inc. All rights reserved.
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

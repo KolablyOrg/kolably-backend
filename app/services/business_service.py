@@ -14,6 +14,7 @@ from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
 from app.repositories.campaign_repo import CampaignRepository
 from app.repositories.creator_repo import CreatorRepository
+from app.repositories.profile_repo import ProfileRepository
 from app.repositories.shortlist_repo import ShortlistRepository
 from app.schemas.business import (
     DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
@@ -28,7 +29,7 @@ from app.schemas.business import (
     TeamRoleUpdateRequest,
 )
 from app.schemas.campaign import CampaignSummary
-from app.services import business_access
+from app.services import business_access, email_service
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,7 @@ def _business_to_response(business: Business) -> BusinessResponse:
         is_verified=business.is_verified,
         kyb_status=business.kyb_status,
         is_discoverable=business.is_discoverable,
-        notification_preferences=business.notification_preferences
-        or DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
+        notification_preferences=business.notification_preferences or DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
     )
 
 
@@ -68,9 +68,7 @@ async def _ensure_business_access(
     member_repo: BusinessMemberRepository | None = None,
 ) -> Business:
     if not business:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Business not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
     if role == UserRole.SUPERADMIN or business.profile_id == profile_id:
         return business
 
@@ -230,9 +228,7 @@ async def update_business(
 
     updated = await repo.update_business(business.id, update_data)
     if not updated:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Business not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
     return _business_to_response(updated)
 
 
@@ -287,13 +283,15 @@ async def update_shortlist(
     if not await creator_repo.get_by_id(creator_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Creator not found")
     shortlist_repo = shortlist_repo or ShortlistRepository()
-    row = await shortlist_repo.upsert({
-        "business_id": business_id,
-        "creator_id": creator_id,
-        "tags": [tag.strip() for tag in data.tags if tag.strip()][:10],
-        "note": data.note.strip() if data.note and data.note.strip() else None,
-        "updated_at": datetime.now(UTC).isoformat(),
-    })
+    row = await shortlist_repo.upsert(
+        {
+            "business_id": business_id,
+            "creator_id": creator_id,
+            "tags": [tag.strip() for tag in data.tags if tag.strip()][:10],
+            "note": data.note.strip() if data.note and data.note.strip() else None,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+    )
     if not row:
         logger.error(
             "shortlist upsert returned no row for business_id=%s creator_id=%s",
@@ -385,17 +383,13 @@ async def get_creator_activity_banner(
     """
     repo = repo or BusinessRepository()
     creator_repo = creator_repo or CreatorRepository()
-    business = await business_access.get_business_for_profile(
-        profile_id, business_repo=repo, member_repo=member_repo
-    )
+    business = await business_access.get_business_for_profile(profile_id, business_repo=repo, member_repo=member_repo)
 
     if not business or not business.city:
         return CreatorActivityBannerResponse(count=0)
 
     since_iso = (datetime.now(UTC) - timedelta(days=7)).isoformat()
-    active_creators = await creator_repo.list_recently_active_by_city(
-        city=business.city, since_iso=since_iso
-    )
+    active_creators = await creator_repo.list_recently_active_by_city(city=business.city, since_iso=since_iso)
     count = len(active_creators)
     if count == 0:
         return CreatorActivityBannerResponse(count=0, city=business.city)
@@ -505,6 +499,32 @@ async def review_kyb_verification(
             detail="Failed to update KYB status",
         )
 
+    # Dispatch branded verification outcome email via Resend
+    try:
+        profile_repo = ProfileRepository()
+        owner_profile = await profile_repo.get_by_id(business.profile_id)
+        if owner_profile and owner_profile.email:
+            biz_name = updated.business_name or "Your Business"
+            if decision == "verified":
+                await email_service.send_kyb_approved_email(
+                    email=owner_profile.email,
+                    business_name=biz_name,
+                    dashboard_url="https://kolably.com/dashboard",
+                    business_id=business_id,
+                    profile_id=business.profile_id,
+                )
+            else:
+                await email_service.send_kyb_rejected_email(
+                    email=owner_profile.email,
+                    business_name=biz_name,
+                    rejection_reason=rejection_reason or "Information submitted could not be verified.",
+                    resubmit_url="https://kolably.com/settings/verification",
+                    business_id=business_id,
+                    profile_id=business.profile_id,
+                )
+    except Exception:
+        logger.exception("Failed to dispatch KYB outcome email for business_id=%s", business_id)
+
     return {
         "status": updated.kyb_status,
         "submitted_at": updated.kyb_submitted_at,
@@ -516,6 +536,7 @@ async def review_kyb_verification(
 # ── Team members ─────────────────────────────────────────────────────
 # Invite/remove/role-change are deliberately owner-only (not editor) — team
 # composition is a step above day-to-day operational writes.
+
 
 def _member_to_response(member) -> TeamMemberResponse:
     return TeamMemberResponse(
@@ -588,13 +609,15 @@ async def invite_team_member(
             detail="This email already has a pending invite",
         )
 
-    member = await member_repo.insert_member({
-        "business_id": business_id,
-        "invited_email": data.email,
-        "role": data.role,
-        "invited_by": profile_id,
-        "status": "pending",
-    })
+    member = await member_repo.insert_member(
+        {
+            "business_id": business_id,
+            "invited_email": data.email,
+            "role": data.role,
+            "invited_by": profile_id,
+            "status": "pending",
+        }
+    )
     if not member:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -612,6 +635,20 @@ async def invite_team_member(
         # `business_members` row still lets them join — see `join_business` —
         # they just won't get Supabase's invite email prompting them to.
         pass
+
+    # Send branded team invitation email via Resend
+    business_record = await business_repo.get_by_id(business_id)
+    inviter_name = (business_record.owner_name if business_record else None) or "A team owner"
+    biz_name = (business_record.business_name if business_record else None) or "Your Team"
+    await email_service.send_team_invitation_email(
+        email=data.email,
+        inviter_name=inviter_name,
+        business_name=biz_name,
+        role=data.role,
+        accept_url=settings.WEB_TEAM_INVITE_REDIRECT_URL,
+        business_id=business_id,
+        inviter_profile_id=profile_id,
+    )
 
     return _member_to_response(member)
 

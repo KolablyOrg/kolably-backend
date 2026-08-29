@@ -12,6 +12,7 @@ from app.core.enums import ApplicationDirection, ApplicationStatus
 @dataclass
 class CampaignApplication:
     """Campaign application domain model — internal representation."""
+
     id: str
     campaign_id: str
     creator_id: str

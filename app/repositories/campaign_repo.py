@@ -29,10 +29,7 @@ class CampaignRepository(BaseRepository):
 
     async def _business_ids_matching_name(self, term: str) -> list[str]:
         result = await self._execute(
-            (await self._table("businesses"))
-            .select("id")
-            .ilike("business_name", f"%{term}%")
-            .limit(50)
+            (await self._table("businesses")).select("id").ilike("business_name", f"%{term}%").limit(50)
         )
         return [row["id"] for row in (result.data or []) if row.get("id")]
 
@@ -156,9 +153,7 @@ class CampaignRepository(BaseRepository):
             # or engagement rate hasn't synced yet isn't filtered out on a
             # number we don't have — same treatment as creator discovery.
             if creator_follower_count is not None:
-                query = query.or_(
-                    f"follower_range_min.is.null,follower_range_min.lte.{int(creator_follower_count)}"
-                )
+                query = query.or_(f"follower_range_min.is.null,follower_range_min.lte.{int(creator_follower_count)}")
             if creator_engagement_rate is not None:
                 query = query.or_(
                     f"min_engagement_rate.is.null,min_engagement_rate.lte.{float(creator_engagement_rate)}"
@@ -253,11 +248,7 @@ class CampaignRepository(BaseRepository):
 
     async def get_locations(self) -> list[str]:
         # Fetch all active locations and deduplicate in Python
-        result = await self._execute(
-            (await self._table("campaigns"))
-            .select("location")
-            .eq("status", "active")
-        )
+        result = await self._execute((await self._table("campaigns")).select("location").eq("status", "active"))
         rows = result.data or []
         # Extract location string, filter nulls/empties, trim, and unique
         seen = set()
@@ -276,9 +267,7 @@ class CampaignRepository(BaseRepository):
         since both columns are null for them.
         """
         result = await self._execute(
-            (await self._table("campaigns"))
-            .select("cash_amount_min,cash_amount_max")
-            .eq("status", "active")
+            (await self._table("campaigns")).select("cash_amount_min,cash_amount_max").eq("status", "active")
         )
         rows = result.data or []
         mins = [float(r["cash_amount_min"]) for r in rows if r.get("cash_amount_min") is not None]
