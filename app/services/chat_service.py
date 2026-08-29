@@ -64,11 +64,11 @@ async def _resolve_participant_summary(
     business_repo: BusinessRepository,
 ) -> dict:
     if profile_id is None:
-        return {"id": "", "name": "", "avatar_url": None}
+        return {"id": "", "name": "", "avatar_url": None, "last_seen_at": None}
 
     profile = await profile_repo.get_by_id(profile_id)
     if not profile:
-        return {"id": profile_id, "name": "", "avatar_url": None}
+        return {"id": profile_id, "name": "", "avatar_url": None, "last_seen_at": None}
 
     if profile.role.value == "creator":
         creator = await creator_repo.get_by_profile_id(profile_id)
@@ -77,6 +77,7 @@ async def _resolve_participant_summary(
                 "id": profile_id,
                 "name": creator.name,
                 "avatar_url": creator.profile_photo_url,
+                "last_seen_at": profile.last_seen_at,
                 "creator_id": creator.id,
             }
     elif profile.role.value == "business":
@@ -90,11 +91,12 @@ async def _resolve_participant_summary(
                 "id": profile_id,
                 "name": business.business_name or business.owner_name or profile.email,
                 "avatar_url": business.logo_url,
+                "last_seen_at": profile.last_seen_at,
                 "business_id": business.id,
                 "is_verified": business.is_verified,
             }
 
-    return {"id": profile_id, "name": profile.email, "avatar_url": None}
+    return {"id": profile_id, "name": profile.email, "avatar_url": None, "last_seen_at": profile.last_seen_at}
 
 
 async def _resolve_collaboration_context(
@@ -334,13 +336,18 @@ async def send_message(
     for recipient_id in participant_ids:
         if recipient_id == sender_id:
             continue
-        await notification_service.create_notification(
-            profile_id=recipient_id,
-            type=NotificationType.NEW_MESSAGE,
-            title="New message",
-            body=content[:120],
-            related_id=conversation_id,
-        )
+        try:
+            await notification_service.create_notification(
+                profile_id=recipient_id,
+                type=NotificationType.NEW_MESSAGE,
+                title="New message",
+                body=content[:120],
+                related_id=conversation_id,
+            )
+        except Exception:
+            # Message insertion and the database trigger are authoritative;
+            # a notification/broadcast delivery outage must not roll them back.
+            logger.exception("New-message notification failed for profile_id=%s", recipient_id)
 
     return _message_to_response(message)
 

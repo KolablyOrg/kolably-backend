@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str = ""  # anon/public key
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""  # Settings → API → JWT Secret
+    REDIS_URL: str = ""
 
     # ── App ───────────────────────────────────────────
     APP_ENV: str = "development"

@@ -3,6 +3,10 @@ from app.repositories.base import BaseRepository
 
 
 class ProfileRepository(BaseRepository):
+    async def update_last_seen_at(self, profile_id: str, last_seen_at) -> UserProfile | None:
+        """Persist the server-generated heartbeat timestamp for a profile."""
+        return await self.update(profile_id, {"last_seen_at": last_seen_at})
+
     async def get_by_auth_id(self, auth_id: str) -> UserProfile | None:
         row = await self.select_one(
             "profiles",

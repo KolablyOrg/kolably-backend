@@ -41,9 +41,20 @@ CREATE TABLE profiles (
   email TEXT UNIQUE NOT NULL,
   role TEXT CHECK (role IN ('creator','business','superadmin')),
   is_active BOOLEAN DEFAULT TRUE,
+  last_seen_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 ```
+
+`last_seen_at` is written from the authenticated heartbeat endpoint using
+server time. A Redis `presence:{profile_id}` key with a 90-second TTL provides
+the fast online signal; the timestamp is used for recently-active fallback.
+
+The `inbox_broadcast_new_message` `AFTER INSERT` trigger fans each committed
+message out to `inbox:{profile_id}` for every conversation participant.
+`is_inbox_realtime_owner()` and the `inbox_owner_can_receive_broadcast` policy
+allow only the profile owner to subscribe. The global presence channel has
+authenticated SELECT and INSERT policies for `global:online-users`.
 
 ---
 

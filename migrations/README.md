@@ -101,6 +101,8 @@ When making schema changes:
 | 027 | Add views_count to creators (real aggregate for Engagement "Total views") |
 | 028 | Chat Realtime: broadcast-on-insert trigger + participant RLS on realtime.messages |
 | 029 | Notifications Realtime: broadcast-on-insert trigger + owner RLS on realtime.messages |
+| 030 | Add profiles.last_seen_at and authenticated global presence RLS policies |
+| 031 | Broadcast committed messages to private per-profile inbox topics with owner RLS |
 
 ## Notes
 
@@ -110,3 +112,5 @@ When making schema changes:
 - Enums are modeled as `TEXT + CHECK` constraints (not native Postgres ENUM) for easier evolution
 - `updated_at` is maintained by trigger, not application code
 - RLS is enabled on all tables; the backend uses Supabase service-role client (bypasses RLS)
+- Presence heartbeats persist `profiles.last_seen_at`; Redis presence keys are a 90-second cache.
+- Inbox broadcasts are emitted by the `AFTER INSERT` messages trigger to `inbox:{profile_id}`.
