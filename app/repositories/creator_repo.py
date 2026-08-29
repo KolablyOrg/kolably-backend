@@ -344,17 +344,6 @@ class CreatorRepository(BaseRepository):
         )
         return round(sum(float(row.get("total_amount") or 0) for row in rows), 2)
 
-    async def sum_portfolio_views(self, creator_id: str) -> int:
-        """Total view_count across this creator's portfolio items. Video-only
-        (photos never have a view_count — Instagram doesn't report views for
-        them), so this only ever counts what Instagram actually returned."""
-        rows = await self.select(
-            "portfolio_items",
-            columns="view_count",
-            filters={"creator_id": creator_id},
-        )
-        return sum(int(row.get("view_count") or 0) for row in rows)
-
     async def get_historical_stats(self, creator_id: str, days_ago: int) -> dict | None:
         """
         Fetch the snapshot for exactly `days_ago`. If not found, fetch the oldest snapshot

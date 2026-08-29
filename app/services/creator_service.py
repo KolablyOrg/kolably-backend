@@ -348,25 +348,30 @@ async def get_creator_portfolio(
         page_size=page_size,
     )
 
-    # Auto-repair legacy items that have raw .mp4 URLs instead of thumbnails
-    broken = [item for item in items if item.media_url and ".mp4" in item.media_url]
-    if broken:
+    # Instagram's media/thumbnail URLs are signed and expire after a few days,
+    # so a stored media_url silently starts 403'ing (rendering as a blank tile,
+    # whether it was a photo thumbnail or a raw video file) well before a
+    # creator removes the post from Instagram. Re-resolve every item's URL
+    # against a fresh media fetch whenever we have a live token, matching by
+    # permalink, and only write back the rows whose URL actually changed.
+    refreshable = [item for item in items if item.post_link]
+    if refreshable:
         try:
             creator = await repo.get_by_id(creator_id)
             if creator and creator.instagram_access_token:
                 access_token = decrypt_token(creator.instagram_access_token)
                 ig_media = await instagram_service.fetch_media(access_token)
-                # Build a lookup: permalink -> thumbnail_url
-                permalink_to_thumb: dict[str, str] = {}
+                # Build a lookup: permalink -> current viewable URL
+                permalink_to_url: dict[str, str] = {}
                 for m in ig_media:
                     plink = m.get("permalink")
-                    thumb = instagram_service.get_media_url_or_thumbnail(m)
-                    if plink and thumb and ".mp4" not in thumb:
-                        permalink_to_thumb[plink] = thumb
+                    url = instagram_service.get_media_url_or_thumbnail(m)
+                    if plink and url:
+                        permalink_to_url[plink] = url
 
-                for item in broken:
-                    new_url = permalink_to_thumb.get(item.post_link) if item.post_link else None
-                    if new_url:
+                for item in refreshable:
+                    new_url = permalink_to_url.get(item.post_link)
+                    if new_url and new_url != item.media_url:
                         await repo.update_portfolio_item(str(item.id), {"media_url": new_url})
                         item.media_url = new_url
         except Exception:
@@ -538,7 +543,7 @@ async def connect_instagram(
         )
 
     media = await instagram_service.fetch_media(access_token)
-    engagement_rate = await instagram_service.calculate_engagement_rate(access_token, media)
+    engagement_rate, views_count = await instagram_service.calculate_engagement_and_views(access_token, media)
     expires_at = datetime.now(UTC) + timedelta(seconds=long_lived.get("expires_in", _DEFAULT_TOKEN_LIFETIME_SECONDS))
     now = datetime.now(UTC).isoformat()
 
@@ -548,6 +553,7 @@ async def connect_instagram(
         "instagram_access_token": encrypt_token(access_token),
         "instagram_token_expires_at": expires_at.isoformat(),
         "instagram_synced_at": now,
+        "views_count": views_count,
         **instagram_service.build_profile_prefill(ig_profile, engagement_rate),
     })
 
@@ -581,13 +587,11 @@ async def _refresh_instagram_stats(creator: Creator, *, repo: CreatorRepository)
 
     ig_profile = await instagram_service.fetch_profile(access_token)
     media = await instagram_service.fetch_media(access_token)
-    engagement_rate = await instagram_service.calculate_engagement_rate(access_token, media)
-    # Sums whatever's already stored on portfolio_items (populated at
-    # import time — see import_instagram_portfolio) rather than re-fetching
-    # insights for every recent media item here, which would multiply this
-    # already-multi-call refresh across every connected creator in the daily
-    # batch job.
-    views_count = await repo.sum_portfolio_views(creator.id)
+    # One insights call per recent media item covers both engagement and
+    # views, so `views_count` reflects Instagram directly rather than
+    # whatever happens to be sitting in portfolio_items (which only gets
+    # populated for items the creator has explicitly imported).
+    engagement_rate, views_count = await instagram_service.calculate_engagement_and_views(access_token, media)
 
     updated = await repo.update_by_profile_id(creator.profile_id, {
         "follower_count": ig_profile.get("followers_count"),

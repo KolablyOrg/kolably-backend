@@ -192,12 +192,15 @@ async def fetch_media_insights(access_token: str, media_id: str, media_type: str
     return {item["name"]: item["values"][0]["value"] for item in result.get("data", [])}
 
 
-async def calculate_engagement_rate(access_token: str, media: list[dict]) -> float | None:
-    """Average (likes + comments) / reach across recent media, as a percentage.
+async def calculate_engagement_and_views(access_token: str, media: list[dict]) -> tuple[float | None, int]:
+    """Average (likes + comments) / reach across recent media (as a
+    percentage), plus the summed `views` across the same media — one
+    insights call per item covers both, so nothing using both stats (see
+    `creator_service._refresh_instagram_stats`/`connect_instagram`) needs to
+    fetch insights twice.
 
-    Same shape as the `avg_engagement_rate` formula already used for business
-    dashboards (`business_service.py`). Returns `None` if there's no media to
-    average (nothing self-reported to overwrite with).
+    Engagement is `None` if there's no media to average (nothing
+    self-reported to overwrite with); views is always an int, 0 if none.
 
     Each media item's insights are fetched independently and a failure on
     one item (an unsupported metric for that media type, a story that's
@@ -206,9 +209,10 @@ async def calculate_engagement_rate(access_token: str, media: list[dict]) -> flo
     rate for an account whose other posts have perfectly good data.
     """
     if not media:
-        return None
+        return None, 0
 
     ratios = []
+    total_views = 0
     for item in media:
         try:
             insights = await fetch_media_insights(access_token, item["id"], item["media_type"])
@@ -217,7 +221,14 @@ async def calculate_engagement_rate(access_token: str, media: list[dict]) -> flo
         reach = insights.get("reach")
         if reach:
             ratios.append((insights.get("likes", 0) + insights.get("comments", 0)) / reach)
+        total_views += insights.get("views") or 0
 
-    if not ratios:
-        return None
-    return round((sum(ratios) / len(ratios)) * 100, 2)
+    engagement_rate = round((sum(ratios) / len(ratios)) * 100, 2) if ratios else None
+    return engagement_rate, total_views
+
+
+async def calculate_engagement_rate(access_token: str, media: list[dict]) -> float | None:
+    """Engagement-only wrapper around `calculate_engagement_and_views`, for
+    callers (the direct-signup flow) that don't need the views total."""
+    engagement_rate, _ = await calculate_engagement_and_views(access_token, media)
+    return engagement_rate
