@@ -91,6 +91,62 @@ async def test_create_notification_writes_expected_row():
     }
 
 
+async def test_create_notification_also_fans_out_a_push(monkeypatch):
+    from app.services import push_notification_service
+
+    sent = {}
+
+    async def fake_send_push(profile_id, title, body, data=None, **kwargs):
+        sent.update(profile_id=profile_id, title=title, body=body, data=data)
+
+    monkeypatch.setattr(push_notification_service, "send_push_to_profile", fake_send_push)
+    repo = FakeNotificationRepo()
+
+    await notification_service.create_notification(
+        profile_id="p1",
+        type=NotificationType.NEW_MESSAGE,
+        title="New message",
+        body="Hey!",
+        related_id="conv1",
+        repo=repo,
+    )
+
+    assert sent == {
+        "profile_id": "p1",
+        "title": "New message",
+        "body": "Hey!",
+        "data": {"type": "new_message", "related_id": "conv1"},
+    }
+
+
+async def test_create_notification_does_not_push_when_the_db_write_itself_failed(monkeypatch):
+    """If the notification never got written, there's nothing to fan out —
+    and no push should imply a notification exists when it doesn't."""
+    from app.services import push_notification_service
+
+    called = False
+
+    async def fake_send_push(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(push_notification_service, "send_push_to_profile", fake_send_push)
+
+    class ExplodingRepo:
+        async def insert_notification(self, data):
+            raise RuntimeError("db is down")
+
+    await notification_service.create_notification(
+        profile_id="p1",
+        type=NotificationType.NEW_MESSAGE,
+        title="New message",
+        body="Hey!",
+        repo=ExplodingRepo(),
+    )
+
+    assert called is False
+
+
 async def test_create_notification_swallows_repo_errors():
     class ExplodingRepo:
         async def insert_notification(self, data):

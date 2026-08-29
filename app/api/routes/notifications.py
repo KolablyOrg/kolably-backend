@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user
 from app.schemas.common import MessageResponse, PaginatedResponse
-from app.schemas.notification import NotificationResponse, UnreadCountResponse
+from app.schemas.notification import NotificationResponse, RegisterPushTokenRequest, UnreadCountResponse
 from app.schemas.user import UserInToken
-from app.services import notification_service
+from app.services import notification_service, push_notification_service
 
 router = APIRouter()
 
@@ -53,3 +53,24 @@ async def mark_all_notifications_read(
 ):
     """Mark all of the current user's notifications as read."""
     return await notification_service.mark_all_notifications_read(profile_id=user.id)
+
+
+@router.post("/register-token", response_model=MessageResponse)
+async def register_push_token(
+    body: RegisterPushTokenRequest,
+    user: UserInToken = Depends(get_current_user),
+):
+    """Register (or reassign) an Expo push token for the current user's device."""
+    await push_notification_service.register_token(user.id, body.token, body.platform)
+    return {"message": "Push token registered"}
+
+
+@router.delete("/register-token", response_model=MessageResponse)
+async def unregister_push_token(
+    token: str = Query(...),
+    user: UserInToken = Depends(get_current_user),
+):
+    """Remove a device's push token, e.g. on logout. Not ownership-checked —
+    a token that isn't this user's (or doesn't exist) is a no-op either way."""
+    await push_notification_service.unregister_token(token)
+    return {"message": "Push token unregistered"}

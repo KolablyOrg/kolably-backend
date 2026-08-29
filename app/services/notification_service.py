@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from app.core.enums import NotificationType
 from app.models.notification import Notification
 from app.repositories.notification_repo import NotificationRepository
+from app.services import push_notification_service
 
 
 def _notification_to_response(notif: Notification) -> dict:
@@ -48,6 +49,17 @@ async def create_notification(
         logging.getLogger(__name__).exception(
             "Failed to create notification (profile_id=%s, type=%s)", profile_id, type.value
         )
+        return
+
+    # Fan out to every device this profile has push enabled on. Has its own
+    # never-raise contract — a push failing to send must not undo, or even
+    # surface as an error on, the in-app notification write above.
+    await push_notification_service.send_push_to_profile(
+        profile_id,
+        title,
+        body,
+        data={"type": type.value, "related_id": related_id},
+    )
 
 
 async def list_notifications(

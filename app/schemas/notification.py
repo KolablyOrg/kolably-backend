@@ -3,6 +3,7 @@ Notification Pydantic schemas.
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -29,3 +30,8 @@ class NotificationListResponse(BaseModel):
 
 class UnreadCountResponse(BaseModel):
     unread_count: int
+
+
+class RegisterPushTokenRequest(BaseModel):
+    token: str
+    platform: Literal["ios", "android"]
