@@ -566,9 +566,28 @@ async def test_request_revision_requires_at_least_one_note():
     assert exc.value.status_code == 400
 
 
+def test_revision_note_normalizes_timestamps():
+    assert RevisionNoteItem(timestamp="0.04", note="Trim intro").timestamp == "0:04"
+    assert RevisionNoteItem(timestamp="1.23", note="Trim intro").timestamp == "1:23"
+    assert RevisionNoteItem(timestamp="0.4", note="Trim intro").timestamp == "0:04"
+    assert RevisionNoteItem(timestamp="0:04", note="Trim intro").timestamp == "0:04"
+    assert RevisionNoteItem(timestamp="1:23", note="Trim intro").timestamp == "1:23"
+    assert RevisionNoteItem(timestamp="1.05.30", note="Trim intro").timestamp == "1:05:30"
+    assert RevisionNoteItem(timestamp="1:05:30", note="Trim intro").timestamp == "1:05:30"
+    assert RevisionNoteItem(timestamp="", note="Trim intro").timestamp is None
+    assert RevisionNoteItem(timestamp="   ", note="Trim intro").timestamp is None
+    assert RevisionNoteItem(timestamp=None, note="Trim intro").timestamp is None
+
+
 def test_revision_note_rejects_invalid_timestamp_format():
     with pytest.raises(ValueError):
         RevisionNoteItem(timestamp="4:75", note="Trim the intro")
+    with pytest.raises(ValueError):
+        RevisionNoteItem(timestamp="1:60:00", note="Trim the intro")
+    with pytest.raises(ValueError):
+        RevisionNoteItem(timestamp="abc", note="Trim the intro")
+    with pytest.raises(ValueError):
+        RevisionNoteItem(timestamp="1:2:3:4", note="Trim the intro")
 
 
 async def test_request_revision_rejects_non_owning_business():
