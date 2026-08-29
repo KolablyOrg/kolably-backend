@@ -18,6 +18,15 @@ logger = logging.getLogger(__name__)
 
 _EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
+# Must match `ANDROID_CHANNEL_ID` in the mobile app's
+# services/notifications/pushRegistration.ts. Android decides whether a
+# notification produces a heads-up banner from the *channel's* importance,
+# not from anything in the payload — so a message that names a channel the
+# app never created falls back to a low-importance default and lands
+# silently in the tray. That reads as "no notification arrived" to a user
+# whose app is backgrounded.
+_ANDROID_CHANNEL_ID = "messages_v2"
+
 
 async def _post(messages: list[dict]) -> list[dict]:
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -57,6 +66,20 @@ async def send_push_to_profile(
                 "body": body,
                 "sound": "default",
                 "data": data or {},
+                # Android: without an explicit high priority, FCM is free to
+                # batch/delay delivery while the app is backgrounded or the
+                # device is dozing — which is exactly when a push matters
+                # most. `channelId` picks the MAX-importance channel the app
+                # registers; omitting it silently downgrades to a fallback
+                # channel with no heads-up banner.
+                "priority": "high",
+                "channelId": _ANDROID_CHANNEL_ID,
+                # iOS: bump the app-icon badge. Expo requires this per
+                # message; there's no server-side counter, so this is a
+                # presence indicator ("something new"), not an accurate
+                # unread count — the app reconciles the real number from
+                # GET /notifications/unread-count once opened.
+                "badge": 1,
             }
             for t in tokens
         ]
