@@ -35,3 +35,27 @@ class UnreadCountResponse(BaseModel):
 class RegisterPushTokenRequest(BaseModel):
     token: str
     platform: Literal["ios", "android"]
+
+
+class TestPushReceipt(BaseModel):
+    """One device's result from Expo. `token` is truncated on purpose."""
+
+    token: str
+    status: str | None = None
+    error: str | None = None
+    message: str | None = None
+
+
+class TestPushResponse(BaseModel):
+    """Diagnostic result of POST /notifications/test-push.
+
+    `sent` means Expo accepted the message for at least one device — it does
+    NOT mean a notification appeared. That distinction is the whole point of
+    this endpoint: it separates "the server never had a device to send to"
+    from "the server sent it and something downstream ate it."
+    """
+
+    sent: bool
+    devices: int
+    detail: str
+    receipts: list[TestPushReceipt] = []

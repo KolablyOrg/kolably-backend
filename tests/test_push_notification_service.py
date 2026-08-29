@@ -3,6 +3,8 @@ Unit tests for push_notification_service — repository injected as a fake,
 Expo's HTTP API mocked at the `_post` boundary, no real network calls.
 """
 
+import pytest
+
 from app.services import push_notification_service
 
 
@@ -99,6 +101,71 @@ async def test_send_push_sets_android_delivery_fields(monkeypatch):
     assert message["channelId"] == "messages_v2"
     assert message["sound"] == "default"
     assert message["badge"] == 1
+
+
+async def test_test_push_reports_when_no_devices_are_registered(monkeypatch):
+    """The most common real cause of "push doesn't work", and the one the
+    production path hides completely: it returns early and silently when a
+    profile has no tokens, so the client sees the same nothing it would see
+    from a delivery failure. The test endpoint has to distinguish them."""
+    called = False
+
+    async def fake_post(messages):
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(push_notification_service, "_post", fake_post)
+
+    result = await push_notification_service.send_test_push("p1", repo=FakePushTokenRepo(tokens=[]))
+
+    assert result["sent"] is False
+    assert result["devices"] == 0
+    assert result["receipts"] == []
+    assert "No push tokens registered" in result["detail"]
+    # Nothing to send to — must not hit Expo at all.
+    assert called is False
+
+
+async def test_test_push_reports_per_device_receipts(monkeypatch):
+    async def fake_post(messages):
+        return [
+            {"status": "ok"},
+            {"status": "error", "details": {"error": "DeviceNotRegistered"}, "message": "gone"},
+        ]
+
+    monkeypatch.setattr(push_notification_service, "_post", fake_post)
+    repo = FakePushTokenRepo(tokens=[FakeToken("tok-good"), FakeToken("tok-stale")])
+
+    result = await push_notification_service.send_test_push("p1", repo=repo)
+
+    assert result["devices"] == 2
+    # One device accepted, so `sent` is true even though the other failed —
+    # a partial success is still worth distinguishing from a total one.
+    assert result["sent"] is True
+    assert [r["status"] for r in result["receipts"]] == ["ok", "error"]
+    assert result["receipts"][1]["error"] == "DeviceNotRegistered"
+    # Same cleanup the production path does — a dead token shouldn't survive
+    # just because it was found via the test endpoint.
+    assert repo.deleted == ["tok-stale"]
+    # Tokens are truncated before leaving the server.
+    assert result["receipts"][0]["token"].endswith("…")
+
+
+async def test_test_push_does_not_swallow_transport_errors(monkeypatch):
+    """Opposite contract to send_push_to_profile on purpose: a debugging tool
+    that reports success when the request actually failed is worse than no
+    tool, because it sends you looking in the wrong place."""
+
+    async def fake_post(messages):
+        raise RuntimeError("expo unreachable")
+
+    monkeypatch.setattr(push_notification_service, "_post", fake_post)
+
+    with pytest.raises(RuntimeError):
+        await push_notification_service.send_test_push(
+            "p1", repo=FakePushTokenRepo(tokens=[FakeToken("tok-a")])
+        )
 
 
 async def test_send_push_deletes_token_on_device_not_registered(monkeypatch):

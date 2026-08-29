@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user
 from app.schemas.common import MessageResponse, PaginatedResponse
-from app.schemas.notification import NotificationResponse, RegisterPushTokenRequest, UnreadCountResponse
+from app.schemas.notification import (
+    NotificationResponse,
+    RegisterPushTokenRequest,
+    TestPushResponse,
+    UnreadCountResponse,
+)
 from app.schemas.user import UserInToken
 from app.services import notification_service, push_notification_service
 
@@ -63,6 +68,22 @@ async def register_push_token(
     """Register (or reassign) an Expo push token for the current user's device."""
     await push_notification_service.register_token(user.id, body.token, body.platform)
     return {"message": "Push token registered"}
+
+
+@router.post("/test-push", response_model=TestPushResponse)
+async def send_test_push(
+    user: UserInToken = Depends(get_current_user),
+):
+    """Send a test push to the caller's own registered devices.
+
+    Only ever targets `user.id` — there is no recipient parameter, so this
+    cannot be used to push to anyone else.
+
+    Unlike every other push in this app, this one reports what happened:
+    how many devices are registered and Expo's per-token receipt. "No
+    notification arrived" is otherwise unfalsifiable from the client side.
+    """
+    return await push_notification_service.send_test_push(user.id)
 
 
 @router.delete("/register-token", response_model=MessageResponse)
