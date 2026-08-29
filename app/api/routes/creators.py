@@ -299,8 +299,11 @@ async def add_portfolio_item(
     data: PortfolioItemCreateRequest,
     user: UserInToken = Depends(get_current_user),
 ):
-    """Add a portfolio item (owner or superadmin only). `media_url` is the
-    Supabase Storage URL the client uploaded to directly."""
+    """Add a portfolio item (owner or superadmin only).
+
+    `media_url` may be a public storage URL for a locally uploaded asset or
+    an external Instagram/source URL for imported content.
+    """
     return await creator_service.add_portfolio_item(
         creator_id=creator_id,
         profile_id=user.id,

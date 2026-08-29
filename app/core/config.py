@@ -113,6 +113,14 @@ class Settings(BaseSettings):
     # will break mobile signup until it integrates Turnstile's mobile SDK too.
     TURNSTILE_SECRET_KEY: str = ""
 
+    # ── S3-Compatible Object Storage (Supabase S3) ───────
+    # Used by storage_service for presigned upload/download URLs
+    AWS_REGION: str = "ap-south-1"
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_S3_BUCKET: str = "media"
+    AWS_S3_ENDPOINT_URL: str = "https://uxngcuyrdmajydkqpiyi.storage.supabase.co/storage/v1/s3"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

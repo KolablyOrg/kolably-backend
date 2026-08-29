@@ -22,12 +22,10 @@
    self-reported — not integrated.
 3. Media the client controls directly (`media_url`, `content_url`, business
    `logo_url`, etc. — anything not fetched from Instagram per point 2 above)
-   is uploaded straight to Supabase Storage; the backend only ever stores
-   the resulting URL string. Requires Storage buckets: `avatars` (business
-   logos, and creator profile photo as a pre-Instagram-connection fallback),
-   `campaign-covers`, `portfolio` (manual additions only — Instagram imports
-   don't need one), `content-submissions`, each with an RLS policy scoping
-   writes to the owning user.
+   is uploaded to Supabase Storage (a single public S3 bucket, `media`,
+   namespaced per purpose); the backend only ever stores the resulting URL
+   string. Writes go through `app/services/storage_service.py` over the S3
+   endpoint with S3 access keys (see DB_DESIGN.md §7).
 4. Chat and notifications are polled by the client, not pushed over a
    websocket.
 

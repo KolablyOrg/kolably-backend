@@ -83,11 +83,17 @@ either add a sorted-pair hash column on `conversations` or enforce it in
 
 ## 7. Storage buckets (Supabase Storage, not Postgres tables)
 
-Referenced by `*_url` columns above but live outside Postgres:
-`avatars`, `campaign-covers`, `portfolio`, `content-submissions` — each
-needs an RLS policy scoping writes to the owning user (per
-API_REQUIREMENTS.md §MVP scope, point 3). Not part of `schema.sql`; tracked
-here so it isn't lost.
+Referenced by `*_url` columns above but live outside Postgres. A single
+public S3 bucket — `media` — holds everything, namespaced by top-level
+folder per purpose (`avatar/`, `business-logo/`, `campaign-cover/`,
+`campaign-reference/`, `verification-doc/`). The backend talks to it over Supabase's S3-compatible
+endpoint via `app/services/storage_service.py` (boto3) using the S3 access
+keys, and hands back public URLs of the form
+`{SUPABASE_URL}/storage/v1/object/public/media/{key}`.
+
+Not part of `schema.sql`; tracked here so it isn't lost. The bucket is
+created once in the Supabase dashboard (Storage → new bucket), not via a
+migration — Supabase offers no Postgres DDL for bucket creation.
 
 ## 8. Suggested migration path from the live DB
 

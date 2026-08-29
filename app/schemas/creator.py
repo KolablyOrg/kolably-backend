@@ -147,9 +147,9 @@ def _require_http_url(value: str | None, field_name: str) -> str | None:
 
 class PortfolioItemCreateRequest(BaseModel):
     """Manual portfolio addition — `media_url` comes from the client uploading
-    directly to Supabase Storage (`portfolio` bucket); the backend only stores
-    the URL string. `like_count`/`comment_count` are Instagram-import-only and
-    are not accepted here."""
+    through the media upload flow when it is a local file; Instagram imports
+    continue to store the source URL. `like_count`/`comment_count` are
+    Instagram-import-only and are not accepted here."""
     title: str | None = None
     media_url: str = Field(..., min_length=1)
     post_link: str | None = None

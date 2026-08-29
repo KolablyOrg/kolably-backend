@@ -12,6 +12,11 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class UploadResponse(BaseModel):
+    """Public URL returned after a media upload completes."""
+    url: str
+
+
 class PaginationParams(BaseModel):
     """Standard pagination query parameters."""
     page: int = 1
