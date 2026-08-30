@@ -244,6 +244,19 @@ async def apply_to_campaign(
             detail="This campaign is not open for applications",
         )
 
+    # Validate creator meets campaign requirements
+    creator_repo = creator_repo or CreatorRepository()
+    creator = await creator_repo.get_by_id(creator_id)
+    if creator:
+        if campaign.follower_range_min and (creator.follower_count or 0) < campaign.follower_range_min:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Follower count requirement not met")
+        if campaign.min_engagement_rate and (creator.engagement_rate or 0) < campaign.min_engagement_rate:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Engagement rate requirement not met")
+        if campaign.creator_category:
+            categories = creator.categories or []
+            if creator.niche != campaign.creator_category and campaign.creator_category not in categories:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category requirement not met")
+
     app_repo = app_repo or ApplicationRepository()
     existing = await app_repo.get_existing(data.campaign_id, creator_id)
     if existing:
