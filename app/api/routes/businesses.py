@@ -118,9 +118,7 @@ async def update_shortlist(
     user: UserInToken = Depends(get_current_user),
 ):
     """Save or update a creator in the current business's shortlist."""
-    return await business_service.update_shortlist(
-        profile_id=user.id, creator_id=creator_id, data=data
-    )
+    return await business_service.update_shortlist(profile_id=user.id, creator_id=creator_id, data=data)
 
 
 @router.delete("/me/shortlist/{creator_id}", response_model=MessageResponse)

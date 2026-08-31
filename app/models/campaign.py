@@ -30,6 +30,7 @@ def _parse_json_list(value: Any) -> list:
 @dataclass
 class CampaignDeliverable:
     """A single deliverable item within a campaign."""
+
     platform: Platform
     content_type: ContentType
     quantity: int
@@ -59,6 +60,7 @@ class CampaignDeliverable:
 @dataclass
 class Campaign:
     """Campaign domain model — internal representation."""
+
     id: str
     business_id: str
     title: str

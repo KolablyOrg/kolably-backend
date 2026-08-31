@@ -1,0 +1,16 @@
+Campaign Invitation
+
+Hi {{ creator_name|default('Creator') }}, {{ business_name }} has invited you to collaborate on their campaign {{ campaign_title }}!
+
+Campaign: {{ campaign_title }}
+Brand: {{ business_name }}
+Compensation: {{ compensation_text|default('Paid Collaboration') }}
+
+{% if action_url %}
+View details and accept the invite:
+{{ action_url }}
+{% endif %}
+
+--
+Kolably Support: support@kolably.com
+© 2026 Kolably Inc. All rights reserved.

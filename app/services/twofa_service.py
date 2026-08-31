@@ -100,9 +100,7 @@ async def verify_login_mfa(
     try:
         payload = json.loads(decrypt_token(mfa_token))
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired login session"
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired login session") from exc
 
     if datetime.now(UTC) > datetime.fromisoformat(payload["exp"]):
         raise HTTPException(

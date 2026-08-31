@@ -42,17 +42,20 @@ class ApplicationResponse(BaseModel):
 
 class ApplicationWithCampaign(ApplicationResponse):
     """GET /applications/me/sent"""
+
     campaign: CampaignSummary
     business: BusinessSummary
 
 
 class ApplicationWithCreator(ApplicationResponse):
     """GET /campaigns/{id}/applications, GET /businesses/me/applications"""
+
     creator: CreatorSummary
 
 
 class ApplicationUpdateRequest(BaseModel):
     """Creator resubmits after revision request."""
+
     message: str | None = None
     instagram_handle: str | None = None
     example_content_url: str | None = None
@@ -60,10 +63,12 @@ class ApplicationUpdateRequest(BaseModel):
 
 class ApplicationRevisionRequest(BaseModel):
     """Business requests revision."""
+
     reason: str
 
 
 class ApplicationRejectRequest(BaseModel):
     """Optional decline reason — shown to the other party in their
     notification, not persisted as its own column."""
+
     reason: str | None = Field(None, max_length=500)

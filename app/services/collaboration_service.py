@@ -71,10 +71,7 @@ def _deliverable_slot_count(deliverables: list | None) -> int:
 def _required_deliverable_count(campaign: Campaign | None) -> int:
     if not campaign or not campaign.deliverables:
         return 0
-    items = [
-        d.to_dict() if hasattr(d, "to_dict") else d
-        for d in campaign.deliverables
-    ]
+    items = [d.to_dict() if hasattr(d, "to_dict") else d for d in campaign.deliverables]
     return _deliverable_slot_count(items)
 
 
@@ -122,9 +119,7 @@ async def _sync_draft_review_status(
 
     if all_approved:
         if collab.status != CollaborationStatus.APPROVED:
-            updated = await repo.update_status(
-                collab.id, {"status": CollaborationStatus.APPROVED.value}
-            )
+            updated = await repo.update_status(collab.id, {"status": CollaborationStatus.APPROVED.value})
             return updated or collab
         return collab
 
@@ -133,9 +128,7 @@ async def _sync_draft_review_status(
         CollaborationStatus.ACTIVE,
         CollaborationStatus.REVISION_REQUESTED,
     ):
-        updated = await repo.update_status(
-            collab.id, {"status": CollaborationStatus.CONTENT_SUBMITTED.value}
-        )
+        updated = await repo.update_status(collab.id, {"status": CollaborationStatus.CONTENT_SUBMITTED.value})
         return updated or collab
     return collab
 
@@ -152,9 +145,7 @@ async def _assert_can_review_draft(
             detail=f"Cannot review drafts for a {collab.status.value} collaboration",
         )
 
-    collab = await _sync_draft_review_status(
-        collab, repo=repo, campaign_repo=campaign_repo
-    )
+    collab = await _sync_draft_review_status(collab, repo=repo, campaign_repo=campaign_repo)
 
     if not _latest_drafts_by_index(await repo.list_submissions(collab.id)):
         raise HTTPException(
@@ -255,8 +246,7 @@ async def _all_required_drafts_approved(
     )
     if required <= 0:
         return all(
-            (sub.get("draft_status") or DraftReviewStatus.PENDING.value)
-            == DraftReviewStatus.APPROVED.value
+            (sub.get("draft_status") or DraftReviewStatus.PENDING.value) == DraftReviewStatus.APPROVED.value
             for sub in by_index.values()
         )
 
@@ -515,16 +505,11 @@ async def get_collaboration(
                 detail="You do not own this collaboration",
             )
 
-    collab = await _sync_draft_review_status(
-        collab, repo=repo, campaign_repo=campaign_repo
-    )
+    collab = await _sync_draft_review_status(collab, repo=repo, campaign_repo=campaign_repo)
 
     submissions_raw = await repo.list_submissions(collaboration_id)
     revision_history = await repo.list_revision_history(collaboration_id)
-    submissions = [
-        _serialize_submission(sub)
-        for sub in submissions_raw
-    ]
+    submissions = [_serialize_submission(sub) for sub in submissions_raw]
 
     campaign = await campaign_repo.get_by_id(collab.campaign_id)
     business = await business_repo.get_by_id(collab.business_id)
@@ -616,10 +601,13 @@ async def complete_collaboration(
             detail="Confirm the live post before marking this collaboration as completed",
         )
 
-    updated = await repo.update_status(collaboration_id, {
-        "status": CollaborationStatus.COMPLETED.value,
-        "completed_at": datetime.now(UTC).isoformat(),
-    })
+    updated = await repo.update_status(
+        collaboration_id,
+        {
+            "status": CollaborationStatus.COMPLETED.value,
+            "completed_at": datetime.now(UTC).isoformat(),
+        },
+    )
     if not updated:
         logger.error(
             "complete_collaboration: update_status returned no row for collaboration_id=%s "
@@ -673,9 +661,12 @@ async def cancel_collaboration(
             detail=f"Collaboration is already {collab.status.value}",
         )
 
-    updated = await repo.update_status(collaboration_id, {
-        "status": CollaborationStatus.CANCELLED.value,
-    })
+    updated = await repo.update_status(
+        collaboration_id,
+        {
+            "status": CollaborationStatus.CANCELLED.value,
+        },
+    )
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -735,9 +726,7 @@ async def submit_content(
         )
 
     submission_type = (
-        data.submission_type.value
-        if hasattr(data.submission_type, "value")
-        else data.submission_type
+        data.submission_type.value if hasattr(data.submission_type, "value") else data.submission_type
     ) or SubmissionType.DRAFT.value
 
     if submission_type == SubmissionType.LIVE.value:
@@ -768,24 +757,24 @@ async def submit_content(
         next_status = CollaborationStatus.CONTENT_SUBMITTED
 
     platform = data.platform.value if hasattr(data.platform, "value") else data.platform
-    await repo.insert_submission({
-        "collaboration_id": collaboration_id,
-        "content_url": data.content_url,
-        "platform": platform,
-        # Identifies *which* deliverable this fulfils. Without these the
-        # brand just sees N rows that all say "instagram" and can't tell
-        # reel 1 from reel 2, or spot what's still missing.
-        "content_type": data.content_type,
-        "deliverable_index": data.deliverable_index,
-        "submission_type": submission_type,
-        "draft_status": DraftReviewStatus.PENDING.value
-        if submission_type == SubmissionType.DRAFT.value
-        else None,
-        "views": data.views,
-        "likes": data.likes,
-        "comments": data.comments,
-        "notes": data.notes,
-    })
+    await repo.insert_submission(
+        {
+            "collaboration_id": collaboration_id,
+            "content_url": data.content_url,
+            "platform": platform,
+            # Identifies *which* deliverable this fulfils. Without these the
+            # brand just sees N rows that all say "instagram" and can't tell
+            # reel 1 from reel 2, or spot what's still missing.
+            "content_type": data.content_type,
+            "deliverable_index": data.deliverable_index,
+            "submission_type": submission_type,
+            "draft_status": DraftReviewStatus.PENDING.value if submission_type == SubmissionType.DRAFT.value else None,
+            "views": data.views,
+            "likes": data.likes,
+            "comments": data.comments,
+            "notes": data.notes,
+        }
+    )
 
     if collab.status != next_status:
         updated = await repo.update_status(collaboration_id, {"status": next_status.value})
@@ -812,8 +801,13 @@ async def submit_content(
     )
 
     return await get_collaboration(
-        collaboration_id, profile_id, "creator",
-        repo=repo, campaign_repo=campaign_repo, business_repo=business_repo, creator_repo=creator_repo,
+        collaboration_id,
+        profile_id,
+        "creator",
+        repo=repo,
+        campaign_repo=campaign_repo,
+        business_repo=business_repo,
+        creator_repo=creator_repo,
     )
 
 
@@ -837,9 +831,7 @@ async def request_revision(
     collab = await _get_owned_collaboration(
         collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
-    collab = await _assert_can_review_draft(
-        collab, repo=repo, campaign_repo=campaign_repo
-    )
+    collab = await _assert_can_review_draft(collab, repo=repo, campaign_repo=campaign_repo)
     if collab.revision_rounds >= 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -851,9 +843,7 @@ async def request_revision(
             detail="Add at least one timestamped note or an overall note",
         )
 
-    submission = await _get_owned_draft_submission(
-        collaboration_id, data.submission_id, repo=repo
-    )
+    submission = await _get_owned_draft_submission(collaboration_id, data.submission_id, repo=repo)
     if (submission.get("draft_status") or DraftReviewStatus.PENDING.value) == DraftReviewStatus.APPROVED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -874,24 +864,29 @@ async def request_revision(
             detail="Failed to update submission",
         )
 
-    updated = await repo.update_status(collaboration_id, {
-        "revision_rounds": collab.revision_rounds + 1,
-        "revision_notes": [n.model_dump() for n in data.notes],
-        "revision_overall_note": (data.overall_note or "").strip() or None,
-    })
+    updated = await repo.update_status(
+        collaboration_id,
+        {
+            "revision_rounds": collab.revision_rounds + 1,
+            "revision_notes": [n.model_dump() for n in data.notes],
+            "revision_overall_note": (data.overall_note or "").strip() or None,
+        },
+    )
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to request revision",
         )
 
-    history = await repo.insert_revision_history({
-        "collaboration_id": collaboration_id,
-        "revision_number": collab.revision_rounds + 1,
-        "requested_by": profile_id,
-        "notes": [n.model_dump() for n in data.notes],
-        "overall_note": (data.overall_note or "").strip() or None,
-    })
+    history = await repo.insert_revision_history(
+        {
+            "collaboration_id": collaboration_id,
+            "revision_number": collab.revision_rounds + 1,
+            "requested_by": profile_id,
+            "notes": [n.model_dump() for n in data.notes],
+            "overall_note": (data.overall_note or "").strip() or None,
+        }
+    )
     if not history:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -930,7 +925,9 @@ async def request_revision(
     )
 
     return await get_collaboration(
-        collaboration_id, profile_id, "business",
+        collaboration_id,
+        profile_id,
+        "business",
         repo=repo,
         campaign_repo=campaign_repo,
         business_repo=business_repo,
@@ -960,13 +957,9 @@ async def approve_draft(
     collab = await _get_owned_collaboration(
         collaboration_id, profile_id, repo=repo, business_repo=business_repo, member_repo=member_repo
     )
-    collab = await _assert_can_review_draft(
-        collab, repo=repo, campaign_repo=campaign_repo
-    )
+    collab = await _assert_can_review_draft(collab, repo=repo, campaign_repo=campaign_repo)
 
-    submission = await _get_owned_draft_submission(
-        collaboration_id, data.submission_id, repo=repo
-    )
+    submission = await _get_owned_draft_submission(collaboration_id, data.submission_id, repo=repo)
     if (submission.get("draft_status") or DraftReviewStatus.PENDING.value) == DraftReviewStatus.APPROVED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -994,9 +987,7 @@ async def approve_draft(
 
     updated = collab
     if all_approved:
-        updated = await repo.update_status(
-            collaboration_id, {"status": CollaborationStatus.APPROVED.value}
-        )
+        updated = await repo.update_status(collaboration_id, {"status": CollaborationStatus.APPROVED.value})
         if not updated:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1032,7 +1023,9 @@ async def approve_draft(
         )
 
     return await get_collaboration(
-        collaboration_id, profile_id, "business",
+        collaboration_id,
+        profile_id,
+        "business",
         repo=repo,
         campaign_repo=campaign_repo,
         business_repo=business_repo,
@@ -1116,18 +1109,19 @@ async def verify_live_post(
                     caption = (match.get("caption") or "").lower()
                     checks["tagged_business"] = handle in caption if handle else None
             except Exception:
-                logger.exception(
-                    "Live-post verification failed for collaboration_id=%s", collaboration_id
-                )
+                logger.exception("Live-post verification failed for collaboration_id=%s", collaboration_id)
                 # Leave checks as None ("not checkable") rather than surfacing
                 # a 500 — a flaky Graph API call shouldn't block the business
                 # from proceeding to a manual decision.
 
     now = datetime.now(UTC).isoformat()
-    updated_submission = await repo.update_submission(submission["id"], {
-        "verification_checks": checks,
-        "verified_at": now,
-    })
+    updated_submission = await repo.update_submission(
+        submission["id"],
+        {
+            "verification_checks": checks,
+            "verified_at": now,
+        },
+    )
     if not updated_submission:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1145,8 +1139,13 @@ async def verify_live_post(
         )
 
     return await get_collaboration(
-        collaboration_id, profile_id, "business",
-        repo=repo, campaign_repo=campaign_repo, business_repo=business_repo, member_repo=member_repo,
+        collaboration_id,
+        profile_id,
+        "business",
+        repo=repo,
+        campaign_repo=campaign_repo,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
 
@@ -1187,12 +1186,15 @@ async def confirm_payment(
         )
 
     now = datetime.now(UTC).isoformat()
-    updated = await repo.update_status(collaboration_id, {
-        "payment_confirmed_at": now,
-        "payment_confirmed_by": profile_id,
-        # Deliberately NOT completed_at / COMPLETED — the creator closes it.
-        "status": CollaborationStatus.PAYMENT_CONFIRMED.value,
-    })
+    updated = await repo.update_status(
+        collaboration_id,
+        {
+            "payment_confirmed_at": now,
+            "payment_confirmed_by": profile_id,
+            # Deliberately NOT completed_at / COMPLETED — the creator closes it.
+            "status": CollaborationStatus.PAYMENT_CONFIRMED.value,
+        },
+    )
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1284,11 +1286,14 @@ async def confirm_completion(
         )
 
     now = datetime.now(UTC).isoformat()
-    updated = await repo.update_status(collaboration_id, {
-        "creator_confirmed_at": now,
-        "status": CollaborationStatus.COMPLETED.value,
-        "completed_at": now,
-    })
+    updated = await repo.update_status(
+        collaboration_id,
+        {
+            "creator_confirmed_at": now,
+            "status": CollaborationStatus.COMPLETED.value,
+            "completed_at": now,
+        },
+    )
     if not updated:
         logger.error(
             "confirm_completion: update_status returned no row for collaboration_id=%s "
@@ -1352,15 +1357,18 @@ async def auto_confirm_stale_collaborations(
     for collab in stale:
         try:
             now = datetime.now(UTC).isoformat()
-            updated = await repo.update_status(collab.id, {
-                # Left NULL on purpose — the creator never actually
-                # confirmed anything, and recording a confirmation they
-                # didn't give would misrepresent the record. `completed_at`
-                # with a NULL `creator_confirmed_at` is precisely the
-                # signature of an auto-closed collaboration.
-                "status": CollaborationStatus.COMPLETED.value,
-                "completed_at": now,
-            })
+            updated = await repo.update_status(
+                collab.id,
+                {
+                    # Left NULL on purpose — the creator never actually
+                    # confirmed anything, and recording a confirmation they
+                    # didn't give would misrepresent the record. `completed_at`
+                    # with a NULL `creator_confirmed_at` is precisely the
+                    # signature of an auto-closed collaboration.
+                    "status": CollaborationStatus.COMPLETED.value,
+                    "completed_at": now,
+                },
+            )
             if not updated:
                 failed += 1
                 logger.error(
@@ -1400,8 +1408,6 @@ async def auto_confirm_stale_collaborations(
             confirmed += 1
         except Exception:
             failed += 1
-            logger.exception(
-                "auto_confirm: failed to close collaboration_id=%s", collab.id
-            )
+            logger.exception("auto_confirm: failed to close collaboration_id=%s", collab.id)
 
     return {"candidates": len(stale), "closed": confirmed, "failed": failed}

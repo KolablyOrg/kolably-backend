@@ -2,7 +2,7 @@
 Notification routes.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.dependencies import get_current_user
 from app.schemas.common import MessageResponse, PaginatedResponse
@@ -13,7 +13,7 @@ from app.schemas.notification import (
     UnreadCountResponse,
 )
 from app.schemas.user import UserInToken
-from app.services import notification_service, push_notification_service
+from app.services import email_service, notification_service, push_notification_service
 
 router = APIRouter()
 
@@ -95,3 +95,10 @@ async def unregister_push_token(
     a token that isn't this user's (or doesn't exist) is a no-op either way."""
     await push_notification_service.unregister_token(token)
     return {"message": "Push token unregistered"}
+
+
+@router.post("/webhooks/resend")
+async def resend_webhook(request: Request):
+    """Process delivery webhook events from Resend (delivered, bounced, complained)."""
+    payload = await request.json()
+    return await email_service.handle_resend_webhook(payload)

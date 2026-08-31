@@ -28,6 +28,7 @@ router = APIRouter()
 
 # ── Step 1: Create Draft ──────────────────────────────
 
+
 @router.post(
     "/",
     response_model=CampaignResponse,
@@ -42,6 +43,7 @@ async def create_campaign(
 
 
 # ── Step 2: Deliverables & Offer ──────────────────────
+
 
 @router.patch(
     "/{campaign_id}/deliverables",
@@ -59,6 +61,7 @@ async def update_campaign_deliverables(
 
 # ── Step 3: Targeting ─────────────────────────────────
 
+
 @router.patch(
     "/{campaign_id}/targeting",
     response_model=CampaignResponse,
@@ -74,6 +77,7 @@ async def update_campaign_targeting(
 
 
 # ── Step 4: Finalise & Publish ────────────────────────
+
 
 @router.patch(
     "/{campaign_id}",
@@ -143,6 +147,7 @@ async def get_campaign_analytics(
 
 # ── Feed & Discovery ──────────────────────────────────
 
+
 @router.get("/", response_model=PaginatedResponse[CampaignSummary])
 async def list_campaigns(
     search: str | None = Query(None),
@@ -198,6 +203,7 @@ async def get_budget_bounds():
 
 # ── Detail & General CRUD ─────────────────────────────
 
+
 @router.get("/{campaign_id}", response_model=CampaignResponse)
 async def get_campaign(
     campaign_id: str,
@@ -222,6 +228,7 @@ async def delete_campaign(
 
 # ── Nested: Applications & Invite ─────────────────────
 
+
 @router.get(
     "/{campaign_id}/applications",
     response_model=PaginatedResponse[ApplicationWithCreator],
@@ -234,9 +241,7 @@ async def list_campaign_applications(
     user: UserInToken = Depends(get_current_user),
 ):
     """List applications for a campaign (business owner only)."""
-    return await campaign_service.list_campaign_applications(
-        campaign_id, user.id, page=page, page_size=page_size
-    )
+    return await campaign_service.list_campaign_applications(campaign_id, user.id, page=page, page_size=page_size)
 
 
 @router.post(

@@ -82,7 +82,9 @@ def verify_supabase_token(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+
 cron_header = APIKeyHeader(name="X-Cron-Secret", auto_error=False)
+
 
 def verify_cron_secret(cron_secret: str = Depends(cron_header)) -> bool:
     """Verify the cron secret header against the environment variable."""

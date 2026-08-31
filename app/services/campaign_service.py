@@ -311,7 +311,12 @@ async def update_campaign_deliverables(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     update_data: dict[str, Any] = {
@@ -346,7 +351,12 @@ async def update_campaign_targeting(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     # mode="json" so enums/datetimes are JSON-safe for PostgREST.
@@ -374,7 +384,12 @@ async def update_campaign_general(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     campaign = await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     # mode="json" is required: bare datetime objects in the payload make the
@@ -404,7 +419,12 @@ async def publish_campaign(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     campaign = await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     if campaign.status != CampaignStatus.DRAFT:
@@ -449,9 +469,7 @@ async def publish_campaign(
             detail={"message": "Product compensation requires a product description"},
         )
 
-    updated = await campaign_repo.update_campaign(
-        campaign_id, {"status": CampaignStatus.ACTIVE.value}
-    )
+    updated = await campaign_repo.update_campaign(campaign_id, {"status": CampaignStatus.ACTIVE.value})
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -605,7 +623,12 @@ async def delete_campaign(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     await campaign_repo.delete_campaign(campaign_id)
@@ -647,14 +670,17 @@ async def list_campaign_applications(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id,
-        require_write=False, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        require_write=False,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     app_repo = app_repo or ApplicationRepository()
-    applications, total = await app_repo.list_by_campaign(
-        campaign_id, page=page, page_size=page_size
-    )
+    applications, total = await app_repo.list_by_campaign(campaign_id, page=page, page_size=page_size)
 
     # Single query for the whole page rather than one per accepted
     # application — an accepted application always has exactly one
@@ -712,7 +738,12 @@ async def close_campaign(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     campaign = await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     if campaign.status != CampaignStatus.ACTIVE:
@@ -721,9 +752,7 @@ async def close_campaign(
             detail="Only active campaigns can be closed",
         )
 
-    updated = await campaign_repo.update_campaign(
-        campaign_id, {"status": CampaignStatus.CLOSED.value}
-    )
+    updated = await campaign_repo.update_campaign(campaign_id, {"status": CampaignStatus.CLOSED.value})
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -744,7 +773,12 @@ async def complete_campaign(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     campaign = await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     if campaign.status not in (CampaignStatus.ACTIVE, CampaignStatus.CLOSED):
@@ -753,9 +787,7 @@ async def complete_campaign(
             detail="Only active or closed campaigns can be completed",
         )
 
-    updated = await campaign_repo.update_campaign(
-        campaign_id, {"status": CampaignStatus.COMPLETED.value}
-    )
+    updated = await campaign_repo.update_campaign(campaign_id, {"status": CampaignStatus.COMPLETED.value})
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -778,8 +810,13 @@ async def get_campaign_analytics(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id,
-        require_write=False, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        require_write=False,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     application_repo = application_repo or ApplicationRepository()
@@ -789,9 +826,7 @@ async def get_campaign_analytics(
     # page_size covers realistic applicant volumes today; total (from the
     # paginated tuple) stays accurate even past that cap, only the status
     # breakdown below would under-count in an unrealistically large campaign.
-    applications, applied_count = await application_repo.list_by_campaign(
-        campaign_id, page=1, page_size=500
-    )
+    applications, applied_count = await application_repo.list_by_campaign(campaign_id, page=1, page_size=500)
     accepted_count = sum(1 for a in applications if a.status == ApplicationStatus.ACCEPTED)
     rejected_count = sum(1 for a in applications if a.status == ApplicationStatus.REJECTED)
     decided = accepted_count + rejected_count
@@ -843,7 +878,12 @@ async def invite_creator(
     business_id = await _get_business_id_for_user(profile_id, repo=business_repo, member_repo=member_repo)
     campaign_repo = campaign_repo or CampaignRepository()
     campaign = await _ensure_campaign_owner(
-        campaign_repo, campaign_id, business_id, profile_id, business_repo=business_repo, member_repo=member_repo,
+        campaign_repo,
+        campaign_id,
+        business_id,
+        profile_id,
+        business_repo=business_repo,
+        member_repo=member_repo,
     )
 
     if campaign.status != CampaignStatus.ACTIVE:
@@ -926,6 +966,7 @@ async def invite_creator(
         created_at=application.created_at,
         expires_at=application.expires_at,
     )
+
 
 async def get_locations(
     *,

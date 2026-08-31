@@ -1,0 +1,17 @@
+Welcome to Kolably!
+
+Hi {{ name|default('there') }}, thanks for joining Kolably. To finish setting up your account, please enter the verification code below:
+
+Verification Code: {{ otp_code }}
+(This code expires in 15 minutes)
+
+{% if action_url %}
+Or confirm directly using this link:
+{{ action_url }}
+{% endif %}
+
+If you did not sign up for a Kolably account, you can safely ignore this email.
+
+--
+Kolably Support: support@kolably.com
+© 2026 Kolably Inc. All rights reserved.

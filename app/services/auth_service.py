@@ -42,11 +42,7 @@ def _signup_confirm_redirect(redirect_to: str | None) -> str:
     open redirect for the confirmation link. Falls back to the web URL,
     which works whether or not the caller has the mobile app installed.
     Same reasoning as forgot_password's allow-list."""
-    return (
-        redirect_to
-        if redirect_to in _ALLOWED_SIGNUP_CONFIRM_REDIRECTS
-        else settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL
-    )
+    return redirect_to if redirect_to in _ALLOWED_SIGNUP_CONFIRM_REDIRECTS else settings.WEB_SIGNUP_CONFIRM_REDIRECT_URL
 
 
 async def _record_login_event(profile_id: str, ip_address: str | None, user_agent: str | None) -> None:
@@ -123,8 +119,7 @@ def _deactivated_account_detail(role: UserRole) -> str:
 
 
 _PERMANENTLY_DELETED_DETAIL = (
-    f"This account was deactivated more than {_REACTIVATION_WINDOW_DAYS} days "
-    f"ago and has been permanently deleted."
+    f"This account was deactivated more than {_REACTIVATION_WINDOW_DAYS} days ago and has been permanently deleted."
 )
 
 
@@ -152,9 +147,7 @@ def _reactivation_window_closed(deactivated_at: datetime | str | None) -> bool:
     return datetime.now(UTC) - deactivated_at > timedelta(days=_REACTIVATION_WINDOW_DAYS)
 
 
-async def _reactivate_or_reject(
-    profile: UserProfile, profile_repo: ProfileRepository
-) -> UserProfile:
+async def _reactivate_or_reject(profile: UserProfile, profile_repo: ProfileRepository) -> UserProfile:
     """Called with a deactivated profile mid-login. Reactivates and returns
     the updated profile if still within the window; otherwise raises."""
     if _reactivation_window_closed(profile.deactivated_at):
@@ -262,18 +255,20 @@ async def signup_creator(
             detail=_ACCOUNT_EXISTS_DETAIL,
         )
     elif not existing_creator:
-        await creator_repo.insert_creator({
-            "profile_id": profile_id,
-            "name": data.name,
-            "username": data.username,
-            "city": data.city,
-            "niche": data.niche,
-            "profile_photo_url": data.profile_photo_url,
-            # follower_count/instagram_handle intentionally omitted — they
-            # stay at their DB defaults (0 / null) until the creator
-            # actually connects Instagram via connect_instagram, which is
-            # the only legitimate writer of those columns.
-        })
+        await creator_repo.insert_creator(
+            {
+                "profile_id": profile_id,
+                "name": data.name,
+                "username": data.username,
+                "city": data.city,
+                "niche": data.niche,
+                "profile_photo_url": data.profile_photo_url,
+                # follower_count/instagram_handle intentionally omitted — they
+                # stay at their DB defaults (0 / null) until the creator
+                # actually connects Instagram via connect_instagram, which is
+                # the only legitimate writer of those columns.
+            }
+        )
     # else: existing_creator is set but the account isn't confirmed yet —
     # someone re-submitting signup before finishing verification. Nothing
     # new to insert; fall through and respond exactly like a first-time
@@ -365,10 +360,12 @@ async def signup_business(
             detail=_ACCOUNT_EXISTS_DETAIL,
         )
     elif not existing_business:
-        await business_repo.insert_business({
-            "profile_id": profile_id,
-            "owner_name": data.name,
-        })
+        await business_repo.insert_business(
+            {
+                "profile_id": profile_id,
+                "owner_name": data.name,
+            }
+        )
     # else: existing but unconfirmed — retrying signup before verifying.
     # Fall through to the normal withheld-tokens response.
 
@@ -513,8 +510,7 @@ async def google_auth(
     auth_user = auth_response.user
     auth_id = str(auth_user.id)
     is_new_user = auth_user.last_sign_in_at is not None and (
-        abs((auth_user.last_sign_in_at - auth_user.created_at).total_seconds())
-        < _NEW_USER_SIGN_IN_TOLERANCE_SECONDS
+        abs((auth_user.last_sign_in_at - auth_user.created_at).total_seconds()) < _NEW_USER_SIGN_IN_TOLERANCE_SECONDS
     )
 
     profile_repo = profile_repo or ProfileRepository()
@@ -556,17 +552,21 @@ async def google_auth(
     avatar_url = metadata.get("avatar_url") or metadata.get("picture")
 
     if profile.role == "creator" and not await creator_repo.get_by_profile_id(profile.id):
-        await creator_repo.insert_creator({
-            "profile_id": profile.id,
-            "name": display_name,
-            "profile_photo_url": avatar_url,
-        })
+        await creator_repo.insert_creator(
+            {
+                "profile_id": profile.id,
+                "name": display_name,
+                "profile_photo_url": avatar_url,
+            }
+        )
     elif profile.role == "business" and not await business_repo.get_by_profile_id(profile.id):
-        await business_repo.insert_business({
-            "profile_id": profile.id,
-            "business_name": display_name,
-            "logo_url": avatar_url,
-        })
+        await business_repo.insert_business(
+            {
+                "profile_id": profile.id,
+                "business_name": display_name,
+                "logo_url": avatar_url,
+            }
+        )
 
     session = auth_response.session
     await _record_login_event(profile.id, ip_address, user_agent)
@@ -617,10 +617,12 @@ async def _mint_session_for_email(email: str):
     link = await supabase_admin.auth.admin.generate_link({"type": "magiclink", "email": email})
 
     supabase_anon = await get_supabase_client()
-    auth_response = await supabase_anon.auth.verify_otp({
-        "token_hash": link.properties.hashed_token,
-        "type": "magiclink",
-    })
+    auth_response = await supabase_anon.auth.verify_otp(
+        {
+            "token_hash": link.properties.hashed_token,
+            "type": "magiclink",
+        }
+    )
     return auth_response.session
 
 
@@ -646,9 +648,7 @@ async def instagram_auth(
     `creator_service.connect_instagram` for why the token exchange always
     uses the fixed relay URL instead.
     """
-    short_lived = await instagram_service.exchange_code_for_token(
-        data.code, instagram_service.relay_redirect_uri()
-    )
+    short_lived = await instagram_service.exchange_code_for_token(data.code, instagram_service.relay_redirect_uri())
     long_lived = await instagram_service.exchange_for_long_lived_token(short_lived["access_token"])
     access_token = long_lived["access_token"]
 
@@ -677,14 +677,17 @@ async def instagram_auth(
                 detail="Account is deactivated",
             )
 
-        await creator_repo.update_by_profile_id(existing_creator.profile_id, {
-            "follower_count": ig_profile.get("followers_count"),
-            "following_count": ig_profile.get("follows_count"),
-            "profile_photo_url": ig_profile.get("profile_picture_url"),
-            "instagram_access_token": encrypted_token,
-            "instagram_token_expires_at": expires_at.isoformat(),
-            "instagram_synced_at": now,
-        })
+        await creator_repo.update_by_profile_id(
+            existing_creator.profile_id,
+            {
+                "follower_count": ig_profile.get("followers_count"),
+                "following_count": ig_profile.get("follows_count"),
+                "profile_photo_url": ig_profile.get("profile_picture_url"),
+                "instagram_access_token": encrypted_token,
+                "instagram_token_expires_at": expires_at.isoformat(),
+                "instagram_synced_at": now,
+            },
+        )
 
         session = await _mint_session_for_email(profile.email)
         await _record_login_event(profile.id, ip_address, user_agent)
@@ -712,11 +715,13 @@ async def instagram_auth(
 
     supabase_admin = await get_supabase_admin_client()
     try:
-        user_response = await supabase_admin.auth.admin.create_user({
-            "email": placeholder_email,
-            "email_confirm": True,
-            "user_metadata": {"role": "creator"},
-        })
+        user_response = await supabase_admin.auth.admin.create_user(
+            {
+                "email": placeholder_email,
+                "email_confirm": True,
+                "user_metadata": {"role": "creator"},
+            }
+        )
     except AuthApiError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -731,21 +736,21 @@ async def instagram_auth(
     media = await instagram_service.fetch_media(access_token)
     engagement_rate = await instagram_service.calculate_engagement_rate(access_token, media)
 
-    new_creator = await creator_repo.insert_creator({
-        "profile_id": profile.id,
-        "username": ig_profile["username"],
-        "instagram_handle": ig_profile["username"],
-        "instagram_user_id": instagram_user_id,
-        "instagram_access_token": encrypted_token,
-        "instagram_token_expires_at": expires_at.isoformat(),
-        "instagram_synced_at": now,
-        **instagram_service.build_profile_prefill(ig_profile, engagement_rate),
-    })
+    new_creator = await creator_repo.insert_creator(
+        {
+            "profile_id": profile.id,
+            "username": ig_profile["username"],
+            "instagram_handle": ig_profile["username"],
+            "instagram_user_id": instagram_user_id,
+            "instagram_access_token": encrypted_token,
+            "instagram_token_expires_at": expires_at.isoformat(),
+            "instagram_synced_at": now,
+            **instagram_service.build_profile_prefill(ig_profile, engagement_rate),
+        }
+    )
 
     if media and new_creator:
-        await creator_repo.insert_portfolio_items(
-            instagram_service.build_portfolio_items(new_creator.id, media)
-        )
+        await creator_repo.insert_portfolio_items(instagram_service.build_portfolio_items(new_creator.id, media))
 
     session = await _mint_session_for_email(placeholder_email)
     await _record_login_event(profile.id, ip_address, user_agent)
@@ -827,9 +832,7 @@ async def forgot_password(
     # into an open redirect for the recovery link. Falls back to the web
     # URL since that works whether or not the caller has the mobile app.
     target = (
-        redirect_to
-        if redirect_to in _ALLOWED_PASSWORD_RESET_REDIRECTS
-        else settings.WEB_PASSWORD_RESET_REDIRECT_URL
+        redirect_to if redirect_to in _ALLOWED_PASSWORD_RESET_REDIRECTS else settings.WEB_PASSWORD_RESET_REDIRECT_URL
     )
 
     # A deactivated account has no business getting a working reset link.
@@ -868,11 +871,13 @@ async def resend_verification_email(email: str, redirect_to: str | None = None) 
     supabase = await get_supabase_client()
 
     try:
-        await supabase.auth.resend({
-            "type": "signup",
-            "email": email,
-            "options": {"email_redirect_to": _signup_confirm_redirect(redirect_to)},
-        })
+        await supabase.auth.resend(
+            {
+                "type": "signup",
+                "email": email,
+                "options": {"email_redirect_to": _signup_confirm_redirect(redirect_to)},
+            }
+        )
     except AuthApiError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -895,11 +900,13 @@ async def verify_reset_otp(email: str, token: str) -> dict:
     supabase = await get_supabase_client()
 
     try:
-        auth_response = await supabase.auth.verify_otp({
-            "email": email,
-            "token": token,
-            "type": "recovery",
-        })
+        auth_response = await supabase.auth.verify_otp(
+            {
+                "email": email,
+                "token": token,
+                "type": "recovery",
+            }
+        )
     except AuthApiError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -942,11 +949,13 @@ async def verify_signup_otp(
     supabase = await get_supabase_client()
 
     try:
-        auth_response = await supabase.auth.verify_otp({
-            "email": email,
-            "token": token,
-            "type": "signup",
-        })
+        auth_response = await supabase.auth.verify_otp(
+            {
+                "email": email,
+                "token": token,
+                "type": "signup",
+            }
+        )
     except AuthApiError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1175,9 +1184,7 @@ async def delete_user_account(
     }
 
 
-async def cleanup_expired_deactivated_accounts(
-    *, profile_repo: ProfileRepository | None = None
-) -> dict:
+async def cleanup_expired_deactivated_accounts(*, profile_repo: ProfileRepository | None = None) -> dict:
     """Daily batch job: anonymize any account whose 30-day reactivation
     window (see _reactivate_or_reject) has closed.
 
@@ -1201,17 +1208,13 @@ async def cleanup_expired_deactivated_accounts(
     failed = 0
     for profile in expired:
         try:
-            result = await profile_repo.anonymize(
-                profile.id, f"deleted-{profile.id}@deleted.kolably.com"
-            )
+            result = await profile_repo.anonymize(profile.id, f"deleted-{profile.id}@deleted.kolably.com")
             if result:
                 anonymized += 1
             else:
                 failed += 1
         except Exception:
-            logger.exception(
-                "Failed to anonymize expired deactivated profile_id=%s", profile.id
-            )
+            logger.exception("Failed to anonymize expired deactivated profile_id=%s", profile.id)
             failed += 1
 
     return {"anonymized": anonymized, "failed": failed, "checked": len(expired)}

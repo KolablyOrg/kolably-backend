@@ -12,6 +12,7 @@ from app.core.enums import UserRole
 @dataclass
 class UserProfile:
     """User profile domain model — internal representation."""
+
     id: str  # profiles.id
     auth_id: str  # auth.users.id
     email: str
@@ -27,6 +28,7 @@ class UserProfile:
     email_confirmed_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime | None = None
+    last_seen_at: datetime | None = None
     totp_secret_encrypted: str | None = None
     totp_enabled: bool = False
 
@@ -45,6 +47,7 @@ class UserProfile:
             email_confirmed_at=row.get("email_confirmed_at"),
             created_at=row["created_at"],
             updated_at=row.get("updated_at"),
+            last_seen_at=row.get("last_seen_at"),
             totp_secret_encrypted=row.get("totp_secret_encrypted"),
             totp_enabled=row.get("totp_enabled", False),
         )
@@ -62,4 +65,5 @@ class UserProfile:
             "email_confirmed_at": self.email_confirmed_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "last_seen_at": self.last_seen_at,
         }

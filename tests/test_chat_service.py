@@ -245,6 +245,7 @@ async def test_list_conversations_resolves_other_participant_and_last_message():
     assert conv["last_message"] == "Hi there!"
     assert conv["last_message_sender_id"] == "p-business"
     assert conv["unread_count"] == 1  # from business, never read by creator
+    assert conv["other_participant"]["last_seen_at"] is None
 
 
 async def test_list_conversations_omits_empty_non_collaboration_conversation():
@@ -525,6 +526,27 @@ async def test_send_message_inserts_and_marks_sender_read(monkeypatch):
     assert result["sender_id"] == "p-creator"
     assert ("conv1", "p-creator") in repo.reads
     assert notified == ["p-business"]
+
+
+async def test_send_message_notifies_with_120_character_preview(monkeypatch):
+    bodies = []
+
+    async def _capture_notification(profile_id, type, title, body, related_id=None, **kwargs):
+        bodies.append((profile_id, body))
+
+    monkeypatch.setattr(chat_service.notification_service, "create_notification", _capture_notification)
+    await chat_service.send_message("conv1", "p-creator", "x" * 200, repo=FakeChatRepo())
+
+    assert bodies == [("p-business", "x" * 120)]
+
+
+async def test_send_message_survives_notification_failure(monkeypatch):
+    async def _fail_notification(*args, **kwargs):
+        raise RuntimeError("broadcast service unavailable")
+
+    monkeypatch.setattr(chat_service.notification_service, "create_notification", _fail_notification)
+    result = await chat_service.send_message("conv1", "p-creator", "Hey!", repo=FakeChatRepo())
+    assert result["content"] == "Hey!"
 
 
 async def test_send_message_rejects_non_participant():

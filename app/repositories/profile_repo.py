@@ -3,6 +3,10 @@ from app.repositories.base import BaseRepository
 
 
 class ProfileRepository(BaseRepository):
+    async def update_last_seen_at(self, profile_id: str, last_seen_at) -> UserProfile | None:
+        """Persist the server-generated heartbeat timestamp for a profile."""
+        return await self.update(profile_id, {"last_seen_at": last_seen_at})
+
     async def get_by_auth_id(self, auth_id: str) -> UserProfile | None:
         row = await self.select_one(
             "profiles",
@@ -43,9 +47,7 @@ class ProfileRepository(BaseRepository):
         """Scrub the account's contact info and deactivate it — used for
         Meta's Data Deletion Callback. Keeps the row (not a hard delete of
         the auth.users record) to avoid FK/cascade uncertainty."""
-        rows = await self.update(
-            "profiles", {"email": anonymized_email, "is_active": False}, {"id": profile_id}
-        )
+        rows = await self.update("profiles", {"email": anonymized_email, "is_active": False}, {"id": profile_id})
         return UserProfile.from_row(rows[0]) if rows else None
 
     async def list_deactivated_before(self, cutoff) -> list[UserProfile]:

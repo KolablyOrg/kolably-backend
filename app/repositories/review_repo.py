@@ -59,9 +59,7 @@ class ReviewRepository(BaseRepository):
         fetching the ratings is cheaper than adding a view or RPC for it.
         """
         result = await self._execute(
-            (await self._table(self.TABLE))
-            .select("rating")
-            .eq("reviewee_profile_id", reviewee_profile_id)
+            (await self._table(self.TABLE)).select("rating").eq("reviewee_profile_id", reviewee_profile_id)
         )
         ratings = [r["rating"] for r in (result.data or []) if r.get("rating") is not None]
         if not ratings:

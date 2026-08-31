@@ -12,6 +12,7 @@ class ParticipantSummary(BaseModel):
     id: str
     name: str
     avatar_url: str | None = None
+    last_seen_at: datetime | None = None
     # Only set when the other participant is a business — lets the client
     # link straight to GET /businesses/{business_id} for a profile view.
     business_id: str | None = None
@@ -30,6 +31,7 @@ class MessageCreateRequest(BaseModel):
 class ConversationCreateRequest(BaseModel):
     """Get-or-create: returns the existing conversation between the two
     participants for `collaboration_id` if one exists, else creates one."""
+
     participant_id: str
     collaboration_id: str | None = None
 
@@ -54,6 +56,7 @@ class MessageResponse(BaseModel):
 class CollaborationContext(BaseModel):
     """Summary of the collaboration a conversation is scoped to — powers the
     inbox's Active/Invite tag and the chat thread's context banner."""
+
     id: str
     status: str
     campaign_id: str

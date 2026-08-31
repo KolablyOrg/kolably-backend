@@ -1,0 +1,17 @@
+Team Invitation on Kolably
+
+{{ inviter_name|default('A team owner') }} has invited you to join {{ business_name }} on Kolably as a {{ role|default('Team Member') }}.
+
+Organization: {{ business_name }}
+Role: {{ role|default('Team Member') }}
+
+{% if accept_url %}
+Accept the invitation using this link:
+{{ accept_url }}
+{% endif %}
+
+This invitation link will expire in 7 days. If you were not expecting this invitation, you can safely ignore this email.
+
+--
+Kolably Support: support@kolably.com
+© 2026 Kolably Inc. All rights reserved.

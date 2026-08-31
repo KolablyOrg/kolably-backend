@@ -117,10 +117,13 @@ async def submit_review(
 
     existing = await repo.get_by_collaboration_and_reviewer(collaboration_id, profile_id)
     row = (
-        await repo.update_review(existing["id"], {
-            "rating": payload["rating"],
-            "comment": payload["comment"],
-        })
+        await repo.update_review(
+            existing["id"],
+            {
+                "rating": payload["rating"],
+                "comment": payload["comment"],
+            },
+        )
         if existing
         else await repo.insert_review(payload)
     )

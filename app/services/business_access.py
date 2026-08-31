@@ -84,9 +84,7 @@ async def require_write_access(
     member_repo: BusinessMemberRepository | None = None,
 ) -> None:
     """Raise 403 if this profile can only view this business (viewer role)."""
-    role = await get_role_for_profile(
-        business_id, profile_id, business_repo=business_repo, member_repo=member_repo
-    )
+    role = await get_role_for_profile(business_id, profile_id, business_repo=business_repo, member_repo=member_repo)
     if role not in WRITE_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

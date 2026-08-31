@@ -12,6 +12,7 @@ from app.core.enums import NotificationType
 @dataclass
 class Notification:
     """Notification domain model — internal representation."""
+
     id: str
     profile_id: str  # profiles.id
     type: NotificationType

@@ -1,0 +1,15 @@
+Revision Requested
+
+Hi {{ creator_name|default('Creator') }}, {{ business_name }} reviewed your submitted draft for {{ campaign_title }} and requested a few updates.
+
+Feedback Notes:
+{{ revision_notes|default('Please see requested adjustments in the app.') }}
+
+{% if review_url %}
+Review feedback and resubmit in the collaboration workspace:
+{{ review_url }}
+{% endif %}
+
+--
+Kolably Support: support@kolably.com
+© 2026 Kolably Inc. All rights reserved.

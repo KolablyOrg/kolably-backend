@@ -104,14 +104,10 @@ class ApplicationRepository(BaseRepository):
         return CampaignApplication.from_row(rows[0]) if rows else None
 
     async def update_status(self, application_id: str, status: str) -> CampaignApplication | None:
-        rows = await self.update(
-            "campaign_applications", {"status": status}, {"id": application_id}
-        )
+        rows = await self.update("campaign_applications", {"status": status}, {"id": application_id})
         return CampaignApplication.from_row(rows[0]) if rows else None
 
-    async def update_application(
-        self, application_id: str, data: dict
-    ) -> CampaignApplication | None:
+    async def update_application(self, application_id: str, data: dict) -> CampaignApplication | None:
         rows = await self.update("campaign_applications", data, {"id": application_id})
         return CampaignApplication.from_row(rows[0]) if rows else None
 

@@ -64,11 +64,11 @@ async def _resolve_participant_summary(
     business_repo: BusinessRepository,
 ) -> dict:
     if profile_id is None:
-        return {"id": "", "name": "", "avatar_url": None}
+        return {"id": "", "name": "", "avatar_url": None, "last_seen_at": None}
 
     profile = await profile_repo.get_by_id(profile_id)
     if not profile:
-        return {"id": profile_id, "name": "", "avatar_url": None}
+        return {"id": profile_id, "name": "", "avatar_url": None, "last_seen_at": None}
 
     if profile.role.value == "creator":
         creator = await creator_repo.get_by_profile_id(profile_id)
@@ -77,6 +77,7 @@ async def _resolve_participant_summary(
                 "id": profile_id,
                 "name": creator.name,
                 "avatar_url": creator.profile_photo_url,
+                "last_seen_at": profile.last_seen_at,
                 "creator_id": creator.id,
             }
     elif profile.role.value == "business":
@@ -90,11 +91,12 @@ async def _resolve_participant_summary(
                 "id": profile_id,
                 "name": business.business_name or business.owner_name or profile.email,
                 "avatar_url": business.logo_url,
+                "last_seen_at": profile.last_seen_at,
                 "business_id": business.id,
                 "is_verified": business.is_verified,
             }
 
-    return {"id": profile_id, "name": profile.email, "avatar_url": None}
+    return {"id": profile_id, "name": profile.email, "avatar_url": None, "last_seen_at": profile.last_seen_at}
 
 
 async def _resolve_collaboration_context(
@@ -171,9 +173,7 @@ async def _conversation_to_response(
         ),
         _resolve_last_message(conv.id, repo=repo),
         repo.count_unread(conv.id, profile_id),
-        _resolve_collaboration_context(
-            conv.collaboration_id, collab_repo=collab_repo, campaign_repo=campaign_repo
-        ),
+        _resolve_collaboration_context(conv.collaboration_id, collab_repo=collab_repo, campaign_repo=campaign_repo),
     )
 
     return {
@@ -216,9 +216,14 @@ async def list_conversations(
     items = await asyncio.gather(
         *(
             _conversation_to_response(
-                c, profile_id, repo=repo, profile_repo=profile_repo,
-                creator_repo=creator_repo, business_repo=business_repo,
-                collab_repo=collab_repo, campaign_repo=campaign_repo,
+                c,
+                profile_id,
+                repo=repo,
+                profile_repo=profile_repo,
+                creator_repo=creator_repo,
+                business_repo=business_repo,
+                collab_repo=collab_repo,
+                campaign_repo=campaign_repo,
             )
             for c in conversations
         )
@@ -272,7 +277,10 @@ async def get_conversation(
         )
 
     messages = await _load_messages(
-        conversation_id, repo=repo, after_id=after_id, limit=limit,
+        conversation_id,
+        repo=repo,
+        after_id=after_id,
+        limit=limit,
     )
     await repo.upsert_read(conversation_id, profile_id)
 
@@ -280,14 +288,18 @@ async def get_conversation(
     other_last_read_at = await repo.get_last_read_at(conversation_id, other_id) if other_id else None
 
     resp = await _conversation_to_response(
-        conversation, profile_id, repo=repo, profile_repo=profile_repo,
-        creator_repo=creator_repo, business_repo=business_repo,
-        collab_repo=collab_repo, campaign_repo=campaign_repo,
+        conversation,
+        profile_id,
+        repo=repo,
+        profile_repo=profile_repo,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+        collab_repo=collab_repo,
+        campaign_repo=campaign_repo,
     )
     resp["other_last_read_at"] = other_last_read_at
     resp["messages"] = [
-        _message_to_response(m, seen=_is_seen_by_other(m, profile_id, other_last_read_at))
-        for m in messages
+        _message_to_response(m, seen=_is_seen_by_other(m, profile_id, other_last_read_at)) for m in messages
     ]
     return resp
 
@@ -315,11 +327,13 @@ async def send_message(
             detail="You are not a participant in this conversation",
         )
 
-    message = await repo.insert_message({
-        "conversation_id": conversation_id,
-        "sender_id": sender_id,
-        "content": content,
-    })
+    message = await repo.insert_message(
+        {
+            "conversation_id": conversation_id,
+            "sender_id": sender_id,
+            "content": content,
+        }
+    )
     if not message:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -334,13 +348,18 @@ async def send_message(
     for recipient_id in participant_ids:
         if recipient_id == sender_id:
             continue
-        await notification_service.create_notification(
-            profile_id=recipient_id,
-            type=NotificationType.NEW_MESSAGE,
-            title="New message",
-            body=content[:120],
-            related_id=conversation_id,
-        )
+        try:
+            await notification_service.create_notification(
+                profile_id=recipient_id,
+                type=NotificationType.NEW_MESSAGE,
+                title="New message",
+                body=content[:120],
+                related_id=conversation_id,
+            )
+        except Exception:
+            # Message insertion and the database trigger are authoritative;
+            # a notification/broadcast delivery outage must not roll them back.
+            logger.exception("New-message notification failed for profile_id=%s", recipient_id)
 
     return _message_to_response(message)
 
@@ -380,20 +399,22 @@ async def post_collaboration_event(
             # can legitimately fire before any conversation exists.
             return None
 
-        message = await repo.insert_message({
-            "conversation_id": conversation.id,
-            # NOT NULL, and genuinely meaningful: whoever's action triggered
-            # this. Clients key rendering off `kind`, not the sender, so an
-            # event never renders as that person's chat bubble.
-            "sender_id": actor_profile_id,
-            "content": content,
-            "kind": "event",
-            "metadata": {
-                "event_type": event_type,
-                "collaboration_id": collaboration_id,
-                **(extra or {}),
-            },
-        })
+        message = await repo.insert_message(
+            {
+                "conversation_id": conversation.id,
+                # NOT NULL, and genuinely meaningful: whoever's action triggered
+                # this. Clients key rendering off `kind`, not the sender, so an
+                # event never renders as that person's chat bubble.
+                "sender_id": actor_profile_id,
+                "content": content,
+                "kind": "event",
+                "metadata": {
+                    "event_type": event_type,
+                    "collaboration_id": collaboration_id,
+                    **(extra or {}),
+                },
+            }
+        )
         if message:
             await chat_message_cache.append(conversation.id, message)
         return _message_to_response(message) if message else None
@@ -446,9 +467,7 @@ async def get_or_create_conversation(
     if collaboration_id:
         conversation = await repo.find_conversation_by_collaboration(collaboration_id)
     else:
-        conversation = await repo.find_shared_conversation_without_collaboration(
-            profile_id, other_profile_id
-        )
+        conversation = await repo.find_shared_conversation_without_collaboration(profile_id, other_profile_id)
 
     if not conversation:
         conversation = await repo.insert_conversation(collaboration_id)
@@ -462,9 +481,14 @@ async def get_or_create_conversation(
     await repo.add_participants(conversation.id, [profile_id, other_profile_id])
 
     resp = await _conversation_to_response(
-        conversation, profile_id, repo=repo, profile_repo=profile_repo,
-        creator_repo=creator_repo, business_repo=business_repo,
-        collab_repo=collab_repo, campaign_repo=campaign_repo,
+        conversation,
+        profile_id,
+        repo=repo,
+        profile_repo=profile_repo,
+        creator_repo=creator_repo,
+        business_repo=business_repo,
+        collab_repo=collab_repo,
+        campaign_repo=campaign_repo,
     )
     return resp, created
 

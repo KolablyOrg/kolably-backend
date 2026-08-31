@@ -14,19 +14,30 @@ class RevisionNoteItem(BaseModel):
     timestamp: str | None = None
     note: str = Field(..., min_length=1)
 
-    @field_validator("timestamp")
+    @field_validator("timestamp", mode="before")
     @classmethod
-    def validate_timestamp(cls, value: str | None) -> str | None:
+    def validate_timestamp(cls, value: Any) -> str | None:
         if value is None:
             return None
-        parts = value.split(":")
+        if not isinstance(value, str):
+            value = str(value)
+        trimmed = value.strip()
+        if not trimmed:
+            return None
+        normalized = trimmed.replace(".", ":")
+        parts = normalized.split(":")
         if len(parts) not in (2, 3) or not all(part.isdigit() for part in parts):
-            raise ValueError("Timestamp must use M:SS or H:MM:SS format")
-        seconds = int(parts[-1])
-        minutes = int(parts[-2])
-        if seconds > 59 or (len(parts) == 3 and minutes > 59):
-            raise ValueError("Timestamp contains an invalid minute or second")
-        return value
+            raise ValueError("Timestamp must use M:SS or H:MM:SS format (e.g. 0:04 or 1:23)")
+        if len(parts) == 2:
+            minutes, seconds = int(parts[0]), int(parts[1])
+            if seconds > 59:
+                raise ValueError("Timestamp seconds must be less than 60")
+            return f"{minutes}:{seconds:02d}"
+        else:
+            hours, minutes, seconds = int(parts[0]), int(parts[1]), int(parts[2])
+            if minutes > 59 or seconds > 59:
+                raise ValueError("Timestamp minutes and seconds must be less than 60")
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
 
 
 class ContentSubmissionResponse(BaseModel):
@@ -106,6 +117,7 @@ class RevisionHistoryResponse(BaseModel):
 class CollaborationCampaignInfo(BaseModel):
     """Joined campaign fields the mobile collab screens render — deliverables,
     payout, and deadlines all live on the campaign, not the collaboration."""
+
     title: str
     deliverables: list[dict] = []
     deadline: datetime | None = None

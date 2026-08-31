@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str = ""  # anon/public key
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""  # Settings → API → JWT Secret
+    REDIS_URL: str = ""
 
     # ── App ───────────────────────────────────────────
     APP_ENV: str = "development"
@@ -112,6 +113,18 @@ class Settings(BaseSettings):
     # mobile app — mobile does not currently obtain one, so setting this
     # will break mobile signup until it integrates Turnstile's mobile SDK too.
     TURNSTILE_SECRET_KEY: str = ""
+
+    # ── S3-Compatible Object Storage (Supabase S3) ───────
+    # Used by storage_service for presigned upload/download URLs
+    AWS_REGION: str = "ap-south-1"
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_S3_BUCKET: str = "media"
+    # ── Email Service (Resend) ────────────────────────
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "Kolably <notifications@kolably.com>"
+    EMAIL_REPLY_TO: str = "support@kolably.com"
+    EMAIL_ENABLED: bool = True
 
     model_config = {
         "env_file": ".env",

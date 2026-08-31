@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.error_handlers import register_exception_handlers
 from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
+from app.core.redis_client import close_redis_client
 from app.core.scheduler import start_scheduler, stop_scheduler
 
 configure_logging()
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     yield
     stop_scheduler()
+    await close_redis_client()
 
 
 app = FastAPI(

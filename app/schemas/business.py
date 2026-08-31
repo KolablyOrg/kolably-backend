@@ -104,6 +104,7 @@ class BusinessStatsResponse(BaseModel):
 
 class CreatorActivityBannerResponse(BaseModel):
     """Backs the home-dashboard 'N creators near you posted recently' banner."""
+
     count: int
     city: str | None = None
     avg_followers: int = 0
@@ -121,6 +122,7 @@ class KybSubmitRequest(BaseModel):
 
 class KybReviewRequest(BaseModel):
     """Admin action on a pending KYB submission."""
+
     decision: Literal["verified", "rejected"]
     rejection_reason: str | None = None
 

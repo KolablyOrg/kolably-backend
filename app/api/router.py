@@ -16,6 +16,7 @@ from app.api.routes import (
     invoices,
     meta,
     notifications,
+    presence,
     upload,
     users,
     waitlist,
@@ -33,6 +34,7 @@ api_router.include_router(collaborations.router, prefix="/collaborations", tags=
 api_router.include_router(invoices.router, prefix="/invoices", tags=["invoices"])
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(presence.router, prefix="/presence", tags=["presence"])
 api_router.include_router(meta.router, prefix="/meta", tags=["meta"])
 api_router.include_router(upload.router)
 api_router.include_router(cron.router, prefix="/cron", tags=["cron"])

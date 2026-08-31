@@ -1,0 +1,17 @@
+Verification Approved
+
+Congratulations! Your business verification for {{ business_name }} has been reviewed and approved.
+
+Status: Verified Brand
+You now have full access to discover creators, publish campaigns, and manage collaborations.
+
+{% if dashboard_url %}
+Go to your Dashboard:
+{{ dashboard_url }}
+{% endif %}
+
+Thank you for helping us maintain a trusted marketplace for brands and creators.
+
+--
+Kolably Support: support@kolably.com
+© 2026 Kolably Inc. All rights reserved.
