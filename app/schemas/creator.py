@@ -26,6 +26,9 @@ class CreatorResponse(CreatorBase):
     id: str
     user_id: str
     created_at: datetime
+    # Owner-only. Intentionally absent from CreatorPublicResponse below —
+    # see the privacy note in that class's docstring.
+    phone: str | None = None
     tiktok_handle: str | None = None
     youtube_handle: str | None = None
     instagram_connected: bool = False
@@ -60,9 +63,16 @@ class CreatorPublicResponse(CreatorBase):
 
     Deliberately excludes everything `CreatorResponse` carries for the
     owner's own private settings: payout_method_type, account_number_last4,
-    bank_name, upi_id, payout_verified, identity_status, and
-    notification_preferences. A brand or anonymous visitor has no business
-    seeing another person's bank/UPI/KYC details."""
+    bank_name, upi_id, payout_verified, identity_status,
+    notification_preferences, and `phone`. A brand or anonymous visitor has
+    no business seeing another person's bank/UPI/KYC details or their
+    personal number.
+
+    `phone` in particular: this endpoint is reachable unauthenticated, so
+    adding it here would publish every creator's phone number to the open
+    internet. If brands need a creator's number for an accepted
+    collaboration, that belongs in a scoped, consented disclosure on the
+    collaboration itself — not on the public profile."""
 
     id: str
     user_id: str
@@ -102,6 +112,7 @@ class CreatorUpdateRequest(BaseModel):
     city: str | None = None
     niche: str | None = None
     bio: str | None = None
+    phone: str | None = None
     tiktok_handle: str | None = None
     youtube_handle: str | None = None
     profile_photo_url: str | None = None
@@ -121,6 +132,44 @@ class CreatorUpdateRequest(BaseModel):
         if value is not None and not value.strip():
             raise ValueError("Name can't be empty")
         return value.strip() if value is not None else value
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: str | None) -> str | None:
+        """Normalise to `+`-prefixed-or-bare digits, stripping formatting.
+
+        Unlike `name`, an empty string here is meaningful: it's how a creator
+        clears a number they'd previously saved. It is passed through as ""
+        rather than converted to None here, because `update_creator` dumps
+        this model with `exclude_none=True` — returning None would make a
+        deliberate "clear my phone" indistinguishable from "phone not in this
+        request", and the field would silently never clear. The service
+        converts "" to a real NULL at write time.
+
+        Deliberately permissive on format — no country-specific rules, no
+        region inference. The product is India-first but not India-only, and
+        a validator that rejects a legitimate foreign number is a worse
+        failure than storing one this app never dials. Length bounds only
+        catch obvious typos.
+        """
+        if value is None:
+            return None
+
+        stripped = value.strip()
+        if not stripped:
+            return ""  # explicit clear — see docstring
+
+        has_plus = stripped.startswith("+")
+        digits = "".join(ch for ch in stripped if ch.isdigit())
+
+        if not digits:
+            raise ValueError("Phone number must contain digits")
+        # E.164 allows at most 15 digits; 7 is shorter than any real
+        # dialable international number.
+        if not 7 <= len(digits) <= 15:
+            raise ValueError("Phone number must be between 7 and 15 digits")
+
+        return f"+{digits}" if has_plus else digits
 
 
 class CreatorSummary(BaseModel):

@@ -10,6 +10,7 @@ from app.core.enums import UserRole
 from app.models.campaign import Campaign
 from app.models.creator import Creator, PortfolioItem
 from app.schemas.creator import (
+    CreatorPublicResponse,
     CreatorResponse,
     CreatorUpdateRequest,
     PayoutSetupRequest,
@@ -322,6 +323,69 @@ async def test_update_creator_applies_only_provided_fields():
     assert repo.updated_with == {"name": "Alice Cooper", "tiktok_handle": "@alicecooper"}
     assert result.name == "Alice Cooper"
     assert result.city == "Springfield"  # untouched
+
+
+# ── phone ─────────────────────────────────────────────────────────────
+def test_phone_is_normalised_to_digits():
+    """Users type numbers however they like; the column should hold one
+    shape so two records of the same number compare equal."""
+    assert CreatorUpdateRequest(phone="+91 98765-43210").phone == "+919876543210"
+    assert CreatorUpdateRequest(phone="(022) 1234 5678").phone == "02212345678"
+    # A leading + is meaningful (international) and must survive.
+    assert CreatorUpdateRequest(phone="+1 415 555 0100").phone == "+14155550100"
+
+
+def test_phone_rejects_obvious_nonsense():
+    with pytest.raises(ValidationError):
+        CreatorUpdateRequest(phone="not a number")
+    with pytest.raises(ValidationError):
+        CreatorUpdateRequest(phone="12345")  # too short to dial
+    with pytest.raises(ValidationError):
+        CreatorUpdateRequest(phone="1234567890123456")  # past E.164's 15 digits
+
+
+async def test_update_creator_can_clear_phone():
+    """Regression: `update_creator` dumps with exclude_none=True, so a
+    validator returning None for "" would make a deliberate clear vanish
+    silently — the field would simply never be clearable. "" must survive
+    the dump and become a real NULL at write time."""
+    repo = FakeCreatorRepo(row={**CREATOR_ROW, "phone": "+919876543210"})
+
+    await creator_service.update_creator(
+        creator_id="c1",
+        profile_id="p1",
+        role=UserRole.CREATOR,
+        data=CreatorUpdateRequest(phone=""),
+        repo=repo,
+    )
+
+    assert "phone" in repo.updated_with
+    assert repo.updated_with["phone"] is None
+
+
+async def test_update_creator_leaves_phone_alone_when_not_provided():
+    """The other half of the same distinction: absent must still mean
+    "don't touch", or every profile edit would wipe the phone."""
+    repo = FakeCreatorRepo(row={**CREATOR_ROW, "phone": "+919876543210"})
+
+    await creator_service.update_creator(
+        creator_id="c1",
+        profile_id="p1",
+        role=UserRole.CREATOR,
+        data=CreatorUpdateRequest(name="Alice Cooper"),
+        repo=repo,
+    )
+
+    assert "phone" not in repo.updated_with
+
+
+def test_phone_is_not_exposed_on_the_public_profile():
+    """CreatorPublicResponse is reachable unauthenticated. A phone field
+    leaking onto it would publish every creator's number to the open
+    internet — asserted explicitly because it's a one-line change away and
+    nothing else would fail if someone made it."""
+    assert "phone" not in CreatorPublicResponse.model_fields
+    assert "phone" in CreatorResponse.model_fields
 
 
 async def test_update_creator_404_when_creator_missing():

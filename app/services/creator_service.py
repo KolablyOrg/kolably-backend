@@ -42,6 +42,7 @@ def _creator_to_response(creator: Creator) -> CreatorResponse:
         follower_count=creator.follower_count,
         engagement_rate=creator.engagement_rate,
         bio=creator.bio,
+        phone=creator.phone,
         instagram_handle=creator.instagram_handle,
         created_at=creator.created_at,
         tiktok_handle=creator.tiktok_handle,
@@ -205,6 +206,14 @@ async def update_creator(
     _ensure_creator_access(creator, profile_id, role)
 
     update_data = data.model_dump(exclude_none=True)
+
+    # `exclude_none=True` is what makes "field absent" mean "don't touch it",
+    # but it also means None can never express "clear this". CreatorUpdateRequest's
+    # phone validator therefore emits "" for a deliberate clear; translate it
+    # to a real NULL here so the column has one representation of "no phone"
+    # rather than a mix of NULL and "".
+    if update_data.get("phone") == "":
+        update_data["phone"] = None
 
     # ── notification_preferences: merge incoming keys onto existing ones
     # so a client sending {campaign_alerts: false} doesn't wipe the others.

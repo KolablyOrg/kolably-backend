@@ -64,6 +64,9 @@ class Creator:
     niche: str | None = None
     follower_count: int | None = None
     bio: str | None = None
+    # Owner-only contact number (migration 20260829150000). Never exposed on
+    # CreatorPublicResponse — same privacy class as the payout/KYC fields.
+    phone: str | None = None
     instagram_handle: str | None = None
     engagement_rate: float | None = None
     profile_photo_url: str | None = None
@@ -123,6 +126,7 @@ class Creator:
             niche=row.get("niche"),
             follower_count=row.get("follower_count"),
             bio=row.get("bio"),
+            phone=row.get("phone"),
             instagram_handle=row.get("instagram_handle"),
             engagement_rate=row.get("engagement_rate"),
             profile_photo_url=row.get("profile_photo_url"),
@@ -174,6 +178,7 @@ class Creator:
             "niche": self.niche,
             "follower_count": self.follower_count,
             "bio": self.bio,
+            "phone": self.phone,
             "instagram_handle": self.instagram_handle,
             "engagement_rate": self.engagement_rate,
             "profile_photo_url": self.profile_photo_url,
