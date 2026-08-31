@@ -27,6 +27,16 @@ class Business:
     business_type: str | None = None
     pan_number: str | None = None
     gst_number: str | None = None
+    # ── Subscription / billing (migration 20260829160000) ────────────
+    # Entitlement is `plan` AND `subscription_status` together — see
+    # app/core/plans.resolve_plan. Quotas live in plans.py, not here.
+    plan: str = "free"
+    subscription_status: str = "none"
+    billing_provider: str | None = None
+    billing_customer_id: str | None = None
+    billing_subscription_id: str | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool = False
     business_proof_document_url: str | None = None
     kyb_status: str = "unverified"
     kyb_submitted_at: datetime | None = None
@@ -61,6 +71,13 @@ class Business:
             business_type=row.get("business_type"),
             pan_number=row.get("pan_number"),
             gst_number=row.get("gst_number"),
+            plan=row.get("plan") or "free",
+            subscription_status=row.get("subscription_status") or "none",
+            billing_provider=row.get("billing_provider"),
+            billing_customer_id=row.get("billing_customer_id"),
+            billing_subscription_id=row.get("billing_subscription_id"),
+            current_period_end=row.get("current_period_end"),
+            cancel_at_period_end=bool(row.get("cancel_at_period_end") or False),
             business_proof_document_url=row.get("business_proof_document_url"),
             kyb_status=row.get("kyb_status", "unverified"),
             kyb_submitted_at=row.get("kyb_submitted_at"),
@@ -95,6 +112,13 @@ class Business:
             "business_type": self.business_type,
             "pan_number": self.pan_number,
             "gst_number": self.gst_number,
+            "plan": self.plan,
+            "subscription_status": self.subscription_status,
+            "billing_provider": self.billing_provider,
+            "billing_customer_id": self.billing_customer_id,
+            "billing_subscription_id": self.billing_subscription_id,
+            "current_period_end": self.current_period_end,
+            "cancel_at_period_end": self.cancel_at_period_end,
             "business_proof_document_url": self.business_proof_document_url,
             "kyb_status": self.kyb_status,
             "kyb_submitted_at": self.kyb_submitted_at,

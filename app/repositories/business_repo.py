@@ -20,6 +20,24 @@ class BusinessRepository(BaseRepository):
         )
         return Business.from_row(row) if row else None
 
+    async def get_by_billing_subscription_id(
+        self, provider_subscription_id: str
+    ) -> Business | None:
+        """Look a business up by the payment gateway's subscription id.
+
+        This is the lookup every billing webhook needs: gateways key their
+        events by their own subscription id, not ours. Backed by the
+        partial UNIQUE index added in migration 20260829160000 — unique so
+        one gateway subscription can never resolve to two businesses,
+        partial because every free account legitimately has NULL here.
+        """
+        row = await self.select_one(
+            "businesses",
+            columns="*",
+            filters={"billing_subscription_id": provider_subscription_id},
+        )
+        return Business.from_row(row) if row else None
+
     async def get_id_by_profile_id(self, profile_id: str) -> str | None:
         row = await self.select_one(
             "businesses",

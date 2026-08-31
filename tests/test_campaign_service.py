@@ -2,13 +2,15 @@
 Unit tests for campaign_service — repositories injected as fakes, no Supabase.
 """
 
-from datetime import UTC
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
+from app.core import plans
 from app.core.enums import CampaignObjective, CampaignStatus, CompensationType, ContentType, Platform, UserRole
+from app.core.plans import PLAN_LIMITS, BusinessPlan
 from app.models.campaign import Campaign
 from app.models.creator import Creator
 from app.schemas.campaign import (
@@ -54,7 +56,15 @@ CAMPAIGN_ROW = {
 
 
 class FakeCampaignRepo:
-    def __init__(self, row=None, list_rows=None, total=None, counts=None, budget_bounds=None):
+    def __init__(
+        self,
+        row=None,
+        list_rows=None,
+        total=None,
+        counts=None,
+        budget_bounds=None,
+        campaigns_this_month: int = 0,
+    ):
         self._row = row if row is not None else dict(CAMPAIGN_ROW)
         self._list_rows = list_rows
         self._total = total
@@ -64,6 +74,14 @@ class FakeCampaignRepo:
         self.inserted = None
         self.deleted = None
         self.list_kwargs = None
+        # Defaults to 0 so every pre-existing test represents a business
+        # that hasn't used its quota — the plan gate is transparent to them.
+        self._campaigns_this_month = campaigns_this_month
+        self.count_since_arg = None
+
+    async def count_created_since(self, business_id: str, since) -> int:
+        self.count_since_arg = since
+        return self._campaigns_this_month
 
     async def get_budget_bounds(self):
         return self._budget_bounds
@@ -128,10 +146,24 @@ class FakeBusinessRepo:
     app/services/business_access.py), which every mutating campaign_service
     call now goes through for team-account role gating."""
 
-    def __init__(self, business_id: str | None = "b1", businesses=None, owner_profile_id: str = "p-business"):
+    def __init__(
+        self,
+        business_id: str | None = "b1",
+        businesses=None,
+        owner_profile_id: str = "p-business",
+        plan: str = "free",
+        subscription_status: str = "none",
+        current_period_end=None,
+    ):
         self._business_id = business_id
         self._businesses = businesses or []
         self._owner_profile_id = owner_profile_id
+        # Campaign creation resolves the plan quota from these two columns
+        # (see campaign_service._assert_campaign_quota_available). Defaults
+        # mirror a brand-new account: free plan, never subscribed.
+        self._plan = plan
+        self._subscription_status = subscription_status
+        self._current_period_end = current_period_end
 
     async def get_id_by_profile_id(self, profile_id: str):
         return self._business_id
@@ -142,7 +174,15 @@ class FakeBusinessRepo:
     async def get_by_id(self, business_id: str):
         if business_id != self._business_id:
             return None
-        return SimpleNamespace(id=business_id, profile_id=self._owner_profile_id)
+        return SimpleNamespace(
+            id=business_id,
+            profile_id=self._owner_profile_id,
+            plan=self._plan,
+            subscription_status=self._subscription_status,
+            # None = open-ended, the default for a manually-activated
+            # subscription with no expiry set.
+            current_period_end=self._current_period_end,
+        )
 
 
 class FakeCreatorRepo:
@@ -992,6 +1032,120 @@ async def test_create_campaign_step1_creates_draft():
     assert result.status == CampaignStatus.DRAFT
     assert repo.inserted["status"] == "draft"
     assert repo.inserted["business_id"] == "b1"
+
+
+# ── plan quota gate ───────────────────────────────────────────────────
+async def test_create_campaign_blocked_when_free_monthly_quota_is_used():
+    """402, not 403: the caller isn't forbidden, they've hit a payment-shaped
+    limit that upgrading resolves. The client needs that distinction to show
+    an upgrade prompt rather than a generic access error."""
+    limit = PLAN_LIMITS[BusinessPlan.FREE].max_campaigns_per_month
+    repo = FakeCampaignRepo(campaigns_this_month=limit)
+    business_repo = FakeBusinessRepo(business_id="b1", plan="free")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await campaign_service.create_campaign_step1(
+            "p-business",
+            CampaignCreateRequest(
+                title="One too many",
+                objective=CampaignObjective.BRAND_AWARENESS,
+                description="Desc",
+            ),
+            campaign_repo=repo,
+            business_repo=business_repo,
+        )
+
+    assert exc_info.value.status_code == 402
+    assert repo.inserted is None  # nothing was written
+
+
+async def test_quota_counts_from_the_start_of_the_calendar_month():
+    """Guards the window itself. A rolling 30-day window would block a brand
+    who used their 3 on the 28th until the 27th of the next month, which
+    contradicts what they're told ("3 per month") even though it's
+    arithmetically defensible."""
+    repo = FakeCampaignRepo()
+    business_repo = FakeBusinessRepo(business_id="b1", plan="free")
+
+    await campaign_service.create_campaign_step1(
+        "p-business",
+        CampaignCreateRequest(
+            title="First of the month",
+            objective=CampaignObjective.BRAND_AWARENESS,
+            description="Desc",
+        ),
+        campaign_repo=repo,
+        business_repo=business_repo,
+    )
+
+    assert repo.count_since_arg == plans.month_start()
+
+
+async def test_create_campaign_allowed_on_paid_plan_past_the_free_quota():
+    repo = FakeCampaignRepo(campaigns_this_month=500)
+    business_repo = FakeBusinessRepo(business_id="b1", plan="pro", subscription_status="active")
+
+    result = await campaign_service.create_campaign_step1(
+        "p-business",
+        CampaignCreateRequest(
+            title="Unlimited",
+            objective=CampaignObjective.BRAND_AWARENESS,
+            description="Desc",
+        ),
+        campaign_repo=repo,
+        business_repo=business_repo,
+    )
+
+    assert result.status == CampaignStatus.DRAFT
+
+
+async def test_create_campaign_blocked_when_manual_subscription_expired():
+    """The manual-activation safety net, end to end: a PRO business whose
+    expiry has passed is back on the free quota without anyone having
+    switched it off."""
+    repo = FakeCampaignRepo(campaigns_this_month=500)
+    business_repo = FakeBusinessRepo(
+        business_id="b1",
+        plan="pro",
+        subscription_status="active",
+        current_period_end=datetime(2020, 1, 1, tzinfo=UTC),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await campaign_service.create_campaign_step1(
+            "p-business",
+            CampaignCreateRequest(
+                title="Expired sub",
+                objective=CampaignObjective.BRAND_AWARENESS,
+                description="Desc",
+            ),
+            campaign_repo=repo,
+            business_repo=business_repo,
+        )
+
+    assert exc_info.value.status_code == 402
+
+
+async def test_create_campaign_blocked_when_paid_plan_was_cancelled():
+    """The `plan` column doesn't clean itself up — a cancelled account can
+    sit at plan='pro' indefinitely. Entitlement must come from plan AND
+    status together, or a cancellation grants unlimited access forever."""
+    repo = FakeCampaignRepo(campaigns_this_month=500)
+    business_repo = FakeBusinessRepo(business_id="b1", plan="pro", subscription_status="canceled")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await campaign_service.create_campaign_step1(
+            "p-business",
+            CampaignCreateRequest(
+                title="Should be blocked",
+                objective=CampaignObjective.BRAND_AWARENESS,
+                description="Desc",
+            ),
+            campaign_repo=repo,
+            business_repo=business_repo,
+        )
+
+    assert exc_info.value.status_code == 402
 
 
 async def test_update_campaign_general_persists_brief_fields():

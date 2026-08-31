@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from supabase_auth.errors import AuthApiError
 
+from app.core import plans
 from app.core.config import settings
 from app.core.crypto import encrypt_token
 from app.core.enums import UserRole
@@ -56,6 +57,16 @@ def _business_to_response(business: Business) -> BusinessResponse:
         is_discoverable=business.is_discoverable,
         notification_preferences=business.notification_preferences
         or DEFAULT_BUSINESS_NOTIFICATION_PREFERENCES,
+        plan=business.plan,
+        subscription_status=business.subscription_status,
+        current_period_end=business.current_period_end,
+        cancel_at_period_end=business.cancel_at_period_end,
+        # Computed, not stored: the raw columns can disagree (a cancelled
+        # subscription leaves plan='pro' behind), and every consumer would
+        # otherwise have to re-derive this rule correctly.
+        effective_plan=plans.resolve_plan(
+            business.plan, business.subscription_status
+        ).value,
     )
 
 
@@ -472,6 +483,73 @@ async def get_kyb_status(
         "verified_at": business.kyb_verified_at,
         "rejection_reason": business.kyb_rejection_reason,
     }
+
+
+async def set_business_plan(
+    business_id: str,
+    plan: str,
+    expires_at: datetime | None = None,
+    note: str | None = None,
+    *,
+    repo: BusinessRepository | None = None,
+) -> BusinessResponse:
+    """Manually activate or deactivate a brand's subscription.
+
+    Superadmin-only (enforced at the route). This is the whole of "billing"
+    today: payment happens offline because a payment gateway requires GST
+    registration, so a human confirms receipt and calls this.
+
+    Writes `billing_provider='manual'` so that if a gateway is added later,
+    manually-granted subscriptions remain distinguishable from
+    gateway-managed ones — a webhook must never think it owns a row a human
+    created.
+    """
+    repo = repo or BusinessRepository()
+    business = await repo.get_by_id(business_id)
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business not found",
+        )
+
+    if plan == "free":
+        # Downgrade. `plan` is set to free AND status to canceled rather
+        # than only one of them: leaving a stale 'pro' with an entitling
+        # status is exactly how an unpaid brand keeps access.
+        update: dict[str, Any] = {
+            "plan": "free",
+            "subscription_status": "canceled",
+            "cancel_at_period_end": False,
+            "current_period_end": None,
+        }
+    else:
+        update = {
+            "plan": plan,
+            "subscription_status": "active",
+            "billing_provider": "manual",
+            "cancel_at_period_end": False,
+            "current_period_end": expires_at.isoformat() if expires_at else None,
+        }
+
+    updated = await repo.update_business(business_id, update)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not update the business's plan",
+        )
+
+    # Logged rather than stored: there's no billing-audit table yet, and
+    # adding one for a handful of manual activations would be premature.
+    # The log line is the audit trail — keep it greppable.
+    logger.info(
+        "Business plan set manually: business_id=%s plan=%s expires_at=%s note=%r",
+        business_id,
+        plan,
+        expires_at.isoformat() if expires_at else None,
+        note,
+    )
+
+    return _business_to_response(updated)
 
 
 async def review_kyb_verification(

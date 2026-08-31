@@ -15,6 +15,7 @@ from app.schemas.business import (
     KybReviewRequest,
     KybStatusResponse,
     KybSubmitRequest,
+    SetBusinessPlanRequest,
     ShortlistItemResponse,
     ShortlistUpdateRequest,
     TeamInviteRequest,
@@ -221,6 +222,33 @@ async def review_verification(
         business_id=business_id,
         decision=data.decision,
         rejection_reason=data.rejection_reason,
+    )
+
+
+@router.patch(
+    "/{business_id}/plan",
+    response_model=BusinessResponse,
+    dependencies=[Depends(require_role(UserRole.SUPERADMIN))],
+)
+async def set_business_plan(
+    business_id: str,
+    data: SetBusinessPlanRequest,
+):
+    """Activate or deactivate a brand's subscription manually.
+
+    Superadmin-only, and the only way a plan can change today: there is no
+    payment gateway (it needs GST registration first), so payment is taken
+    offline and confirmed by a human here.
+
+    Deliberately NOT reachable by the business role — a brand being able to
+    set its own plan would be the whole feature bypassed in one request.
+    That's also why `plan` is absent from BusinessUpdateRequest.
+    """
+    return await business_service.set_business_plan(
+        business_id=business_id,
+        plan=data.plan,
+        expires_at=data.expires_at,
+        note=data.note,
     )
 
 

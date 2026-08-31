@@ -171,6 +171,36 @@ class CampaignRepository(BaseRepository):
         rows = result.data or []
         return [Campaign.from_row(row) for row in rows], result.count or 0
 
+    async def count_created_since(self, business_id: str, since) -> int:
+        """Campaigns this business has created since `since`.
+
+        Backs the "3 campaigns per month" free quota. Counting rows by
+        `created_at` is why no usage-tracking table is needed — the
+        campaigns themselves are the counter.
+
+        Counts campaigns in ANY status, including drafts and closed ones:
+        the quota is on the act of creating, not on holding an open
+        campaign. Creating and immediately closing one still consumes the
+        month's allowance, which is the intent.
+
+        Known gap, accepted for now: `delete_campaign` removes the row, so
+        create → delete → create can exceed the allowance. Not worth an
+        anti-abuse mechanism at this stage — subscriptions are activated by
+        hand and the customer base is small enough that it would be
+        noticed. Revisit if self-serve billing ships.
+
+        Uses a count-only select (`head=True`) so it doesn't pull every
+        campaign row just to length it — this runs on every creation.
+        """
+        query = (
+            (await self._table("campaigns"))
+            .select("id", count="exact", head=True)
+            .eq("business_id", business_id)
+            .gte("created_at", since.isoformat())
+        )
+        result = await self._execute(query)
+        return result.count or 0
+
     async def insert_campaign(self, data: dict) -> Campaign | None:
         rows = await self.insert("campaigns", data)
         return Campaign.from_row(rows[0]) if rows else None

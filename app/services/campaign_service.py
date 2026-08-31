@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import HTTPException, status
 
+from app.core import plans
 from app.core.enums import (
     ApplicationDirection,
     ApplicationStatus,
@@ -201,6 +202,58 @@ async def _ensure_campaign_owner(
     return campaign
 
 
+async def _assert_campaign_quota_available(
+    business_id: str,
+    *,
+    campaign_repo: CampaignRepository,
+    business_repo: BusinessRepository | None = None,
+) -> None:
+    """Enforce the business's monthly campaign allowance.
+
+    Free brands get 3 campaigns per calendar month; PRO is unlimited. This
+    is currently the ONLY thing a subscription unlocks, deliberately —
+    nothing else in the product is plan-gated.
+
+    Gated here in the service rather than the route so it applies to every
+    caller of this function, including future ones.
+
+    Raises 402 rather than 403: the caller isn't forbidden, they've hit a
+    payment-shaped limit that upgrading resolves. That distinction lets the
+    client show an upgrade prompt instead of a generic access error.
+    """
+    business_repo = business_repo or BusinessRepository()
+    business = await business_repo.get_by_id(business_id)
+    if not business:
+        # Access was already verified above; a missing row here means the
+        # record vanished mid-request. Fail closed rather than granting an
+        # unlimited quota by treating "no business" as "no limits".
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business not found",
+        )
+
+    limits = plans.limits_for(
+        business.plan, business.subscription_status, business.current_period_end
+    )
+    if limits.max_campaigns_per_month is None:
+        return
+
+    created_this_month = await campaign_repo.count_created_since(
+        business_id, plans.month_start()
+    )
+    if plans.is_within_limit(created_this_month, limits.max_campaigns_per_month):
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail=(
+            f"You've used all {limits.max_campaigns_per_month} campaigns included "
+            "this month. Your allowance resets on the 1st, or you can upgrade for "
+            "unlimited campaigns."
+        ),
+    )
+
+
 async def create_campaign_step1(
     profile_id: str,
     data: CampaignCreateRequest,
@@ -214,6 +267,10 @@ async def create_campaign_step1(
         business_id, profile_id, business_repo=business_repo, member_repo=member_repo
     )
     campaign_repo = campaign_repo or CampaignRepository()
+
+    await _assert_campaign_quota_available(
+        business_id, campaign_repo=campaign_repo, business_repo=business_repo
+    )
 
     insert_data = {
         "business_id": business_id,
