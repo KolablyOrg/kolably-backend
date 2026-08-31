@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from app.core.enums import ApplicationDirection, ApplicationStatus, CollaborationStatus, NotificationType
 from app.models.application import CampaignApplication
 from app.models.campaign import Campaign
+from app.models.creator import Creator
 from app.repositories.application_repo import ApplicationRepository
 from app.repositories.business_member_repo import BusinessMemberRepository
 from app.repositories.business_repo import BusinessRepository
@@ -226,6 +227,47 @@ async def list_business_applications(
     }
 
 
+def _unmet_campaign_requirements(campaign: Campaign, creator: Creator) -> list[str]:
+    """Mirrors CampaignModal.tsx's buildRequirements() on the frontend —
+    same fields, same thresholds — so a requirement disables the Apply
+    button there and rejects the request here, not just one or the other.
+
+    Instagram-connected is deliberately NOT re-checked: `require_instagram_
+    connected` already gates the whole /applications route (see
+    app/api/routes/applications.py), so it's guaranteed true by the time
+    this runs.
+
+    Returns human-readable reasons rather than a bool — used to build one
+    clear error message instead of a generic "requirements not met".
+    """
+    reasons: list[str] = []
+
+    if campaign.follower_range_min is not None and (creator.follower_count or 0) < campaign.follower_range_min:
+        reasons.append(f"at least {campaign.follower_range_min} followers")
+
+    if campaign.min_engagement_rate is not None and (creator.engagement_rate or 0) < campaign.min_engagement_rate:
+        reasons.append(f"at least {campaign.min_engagement_rate}% engagement rate")
+
+    # str.title() would render "tiktok" as "Tiktok", not "TikTok" — explicit
+    # display names rather than a derived one.
+    platform_display = {"tiktok": ("TikTok", creator.tiktok_handle), "youtube": ("YouTube", creator.youtube_handle)}
+    for platform in campaign.platforms:
+        if platform == "instagram":
+            continue
+        display = platform_display.get(platform)
+        if display and not display[1]:
+            reasons.append(f"a connected {display[0]} account")
+
+    if (
+        campaign.creator_category
+        and campaign.creator_category != creator.niche
+        and campaign.creator_category not in (creator.categories or [])
+    ):
+        reasons.append(f"the {campaign.creator_category} niche")
+
+    return reasons
+
+
 async def apply_to_campaign(
     profile_id: str,
     data: ApplicationCreateRequest,
@@ -236,6 +278,7 @@ async def apply_to_campaign(
     member_repo: BusinessMemberRepository | None = None,
     app_repo: ApplicationRepository | None = None,
 ) -> ApplicationResponse:
+    creator_repo = creator_repo or CreatorRepository()
     creator_id = await _get_creator_id_for_user(profile_id, repo=creator_repo)
 
     campaign_repo = campaign_repo or CampaignRepository()
@@ -249,6 +292,22 @@ async def apply_to_campaign(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This campaign is not open for applications",
+        )
+
+    # Server-side half of #52 — the frontend already disables Apply for an
+    # unqualified creator, but a direct API call bypassed it entirely since
+    # nothing here re-checked the same requirements.
+    creator = await creator_repo.get_by_id(creator_id)
+    if not creator:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Creator profile not found",
+        )
+    unmet = _unmet_campaign_requirements(campaign, creator)
+    if unmet:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This campaign requires " + ", ".join(unmet) + ".",
         )
 
     app_repo = app_repo or ApplicationRepository()

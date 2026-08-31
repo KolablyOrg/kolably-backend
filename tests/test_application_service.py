@@ -199,7 +199,9 @@ async def test_apply_to_campaign_creates_pending_application_and_notifies_busine
     result = await application_service.apply_to_campaign(
         profile_id="p-creator",
         data=ApplicationCreateRequest(campaign_id="camp1", message="Pick me!"),
-        creator_repo=FakeCreatorRepo(),
+        # CAMPAIGN_ROW's creator_category is "food" — must qualify or this
+        # happy path itself trips the new requirements gate.
+        creator_repo=FakeCreatorRepo(row={**CREATOR_ROW, "niche": "food"}),
         campaign_repo=FakeCampaignRepo(),
         business_repo=FakeBusinessRepo(),
         app_repo=FakeApplicationRepo(),
@@ -217,7 +219,7 @@ async def test_apply_to_campaign_rejects_duplicate():
         await application_service.apply_to_campaign(
             profile_id="p-creator",
             data=ApplicationCreateRequest(campaign_id="camp1"),
-            creator_repo=FakeCreatorRepo(),
+            creator_repo=FakeCreatorRepo(row={**CREATOR_ROW, "niche": "food"}),
             campaign_repo=FakeCampaignRepo(),
             business_repo=FakeBusinessRepo(),
             app_repo=FakeApplicationRepo(existing=dict(APPLICATION_ROW)),
@@ -236,6 +238,108 @@ async def test_apply_to_campaign_rejects_non_active_campaign():
             app_repo=FakeApplicationRepo(),
         )
     assert exc.value.status_code == 400
+
+
+# ── server-side requirements gate (#52 — frontend disables Apply, but a
+# direct API call bypassed it entirely since nothing here re-checked) ──
+
+
+async def test_apply_to_campaign_rejects_when_below_follower_minimum():
+    with pytest.raises(HTTPException) as exc:
+        await application_service.apply_to_campaign(
+            profile_id="p-creator",
+            data=ApplicationCreateRequest(campaign_id="camp1"),
+            creator_repo=FakeCreatorRepo(row={**CREATOR_ROW, "niche": "food", "follower_count": 500}),
+            campaign_repo=FakeCampaignRepo(row={**CAMPAIGN_ROW, "follower_range_min": 5000}),
+            business_repo=FakeBusinessRepo(),
+            app_repo=FakeApplicationRepo(),
+        )
+    assert exc.value.status_code == 400
+    assert "5000 followers" in exc.value.detail
+
+
+async def test_apply_to_campaign_rejects_when_below_engagement_minimum():
+    with pytest.raises(HTTPException) as exc:
+        await application_service.apply_to_campaign(
+            profile_id="p-creator",
+            data=ApplicationCreateRequest(campaign_id="camp1"),
+            creator_repo=FakeCreatorRepo(row={**CREATOR_ROW, "niche": "food", "engagement_rate": 1.0}),
+            campaign_repo=FakeCampaignRepo(row={**CAMPAIGN_ROW, "min_engagement_rate": 3.0}),
+            business_repo=FakeBusinessRepo(),
+            app_repo=FakeApplicationRepo(),
+        )
+    assert exc.value.status_code == 400
+    assert "engagement rate" in exc.value.detail
+
+
+async def test_apply_to_campaign_rejects_when_missing_required_platform_handle():
+    with pytest.raises(HTTPException) as exc:
+        await application_service.apply_to_campaign(
+            profile_id="p-creator",
+            data=ApplicationCreateRequest(campaign_id="camp1"),
+            creator_repo=FakeCreatorRepo(row={**CREATOR_ROW, "niche": "food", "tiktok_handle": None}),
+            campaign_repo=FakeCampaignRepo(row={**CAMPAIGN_ROW, "platforms": ["instagram", "tiktok"]}),
+            business_repo=FakeBusinessRepo(),
+            app_repo=FakeApplicationRepo(),
+        )
+    assert exc.value.status_code == 400
+    assert "TikTok" in exc.value.detail
+
+
+async def test_apply_to_campaign_allows_platform_requirement_when_handle_present():
+    result = await application_service.apply_to_campaign(
+        profile_id="p-creator",
+        data=ApplicationCreateRequest(campaign_id="camp1"),
+        creator_repo=FakeCreatorRepo(row={**CREATOR_ROW, "niche": "food", "tiktok_handle": "@alice"}),
+        campaign_repo=FakeCampaignRepo(row={**CAMPAIGN_ROW, "platforms": ["instagram", "tiktok"]}),
+        business_repo=FakeBusinessRepo(),
+        app_repo=FakeApplicationRepo(),
+    )
+    assert result.status.value == "pending"
+
+
+async def test_apply_to_campaign_rejects_when_niche_does_not_match():
+    with pytest.raises(HTTPException) as exc:
+        await application_service.apply_to_campaign(
+            profile_id="p-creator",
+            data=ApplicationCreateRequest(campaign_id="camp1"),
+            creator_repo=FakeCreatorRepo(row={**CREATOR_ROW, "niche": "beauty", "categories": []}),
+            campaign_repo=FakeCampaignRepo(),  # creator_category="food"
+            business_repo=FakeBusinessRepo(),
+            app_repo=FakeApplicationRepo(),
+        )
+    assert exc.value.status_code == 400
+    assert "food niche" in exc.value.detail
+
+
+async def test_apply_to_campaign_allows_niche_match_via_categories_not_just_niche():
+    """buildRequirements() on the frontend accepts either creator.niche OR
+    creator.categories containing the campaign's creator_category — a
+    creator whose primary niche differs but who also tags themselves in
+    the requested category still qualifies."""
+    result = await application_service.apply_to_campaign(
+        profile_id="p-creator",
+        data=ApplicationCreateRequest(campaign_id="camp1"),
+        creator_repo=FakeCreatorRepo(row={**CREATOR_ROW, "niche": "beauty", "categories": ["food", "travel"]}),
+        campaign_repo=FakeCampaignRepo(),  # creator_category="food"
+        business_repo=FakeBusinessRepo(),
+        app_repo=FakeApplicationRepo(),
+    )
+    assert result.status.value == "pending"
+
+
+async def test_apply_to_campaign_allows_when_campaign_sets_no_requirements():
+    result = await application_service.apply_to_campaign(
+        profile_id="p-creator",
+        data=ApplicationCreateRequest(campaign_id="camp1"),
+        creator_repo=FakeCreatorRepo(),  # no niche, no follower_count, nothing set
+        campaign_repo=FakeCampaignRepo(
+            row={**CAMPAIGN_ROW, "creator_category": "", "follower_range_min": None, "min_engagement_rate": None}
+        ),
+        business_repo=FakeBusinessRepo(),
+        app_repo=FakeApplicationRepo(),
+    )
+    assert result.status.value == "pending"
 
 
 async def test_withdraw_application_deletes_pending_own_application():
