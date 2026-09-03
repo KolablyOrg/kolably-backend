@@ -34,6 +34,17 @@ class CampaignApplication:
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "CampaignApplication":
+        expires_at_raw = row.get("expires_at")
+        expires_at = None
+        if expires_at_raw:
+            if isinstance(expires_at_raw, datetime):
+                expires_at = expires_at_raw
+            elif isinstance(expires_at_raw, str):
+                try:
+                    expires_at = datetime.fromisoformat(expires_at_raw.replace("Z", "+00:00"))
+                except Exception:
+                    expires_at = None
+
         return cls(
             id=row["id"],
             campaign_id=row["campaign_id"],
@@ -46,7 +57,7 @@ class CampaignApplication:
             revision_reason=row.get("revision_reason"),
             created_at=row["created_at"],
             updated_at=row.get("updated_at"),
-            expires_at=row.get("expires_at"),
+            expires_at=expires_at,
             campaign=row.get("campaigns"),
             business=row.get("businesses"),
             creator=row.get("creators"),

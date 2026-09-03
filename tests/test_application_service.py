@@ -594,3 +594,46 @@ async def test_list_my_applications_returns_paginated_response():
     assert item.business.business_name == "Acme Co"
     assert item.business.logo_url == "https://img.com/logo.jpg"
 
+
+async def test_accept_business_invited_handles_iso_string_expires_at(_stub_notifications, _stub_chat):
+    """Regression test: PostgREST returns expires_at as an ISO string, which
+    previously caused AttributeError: 'str' object has no attribute 'tzinfo'."""
+    invited_row = {
+        **APPLICATION_ROW,
+        "direction": "business_invited",
+        "expires_at": "2099-01-01T00:00:00+00:00",
+    }
+    result = await application_service.accept_application(
+        application_id="app1",
+        profile_id="p-creator",
+        role="creator",
+        app_repo=FakeApplicationRepo(row=invited_row),
+        campaign_repo=FakeCampaignRepo(),
+        creator_repo=FakeCreatorRepo(),
+        business_repo=FakeBusinessRepo(),
+        collab_repo=FakeCollaborationRepo(),
+    )
+    assert result.status.value == "accepted"
+
+
+async def test_apply_to_campaign_matches_categories_case_insensitively_and_by_alias():
+    """A creator whose primary niche is 'Fitness' but has 'Fashion' in categories
+    must match a 'fashion' campaign; 'Food & Dining' must match 'food'."""
+    # Aakash's exact scenario: Primary niche Fitness, categories has Fashion
+    creator = Creator.from_row({**CREATOR_ROW, "niche": "Fitness", "categories": ["Fashion", "Tech"]})
+    camp_fashion = Campaign.from_row({**CAMPAIGN_ROW, "creator_category": "fashion"})
+    unmet = application_service._unmet_campaign_requirements(camp_fashion, creator)
+    assert unmet == []
+
+    # Category alias: Food & Dining matches food
+    creator_food = Creator.from_row({**CREATOR_ROW, "niche": "Food & Dining", "categories": []})
+    camp_food = Campaign.from_row({**CAMPAIGN_ROW, "creator_category": "food"})
+    unmet_food = application_service._unmet_campaign_requirements(camp_food, creator_food)
+    assert unmet_food == []
+
+    # Case insensitive exact match: "FASHION" matches "fashion"
+    creator_upper = Creator.from_row({**CREATOR_ROW, "niche": "FASHION", "categories": []})
+    unmet_upper = application_service._unmet_campaign_requirements(camp_fashion, creator_upper)
+    assert unmet_upper == []
+
+
