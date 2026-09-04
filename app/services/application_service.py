@@ -227,6 +227,56 @@ async def list_business_applications(
     }
 
 
+CATEGORY_SLUG_ALIASES: dict[str, set[str]] = {
+    "food": {"food", "food & dining", "food and dining", "dining"},
+    "fashion": {"fashion", "fashion & beauty", "fashion and beauty", "beauty"},
+    "tech": {"tech", "technology"},
+    "travel": {"travel", "travel & tourism", "travel and tourism", "tourism"},
+    "fitness": {"fitness", "fitness & health", "fitness and health", "health"},
+    "lifestyle": {"lifestyle"},
+    "entertainment": {"entertainment"},
+    "education": {"education"},
+    "real_estate": {"real_estate", "real estate"},
+    "automotive": {"automotive", "auto"},
+    "finance": {"finance"},
+    "other": {"other"},
+}
+
+
+def _matches_category(
+    campaign_category: str,
+    creator_niche: str | None,
+    creator_categories: list[str] | None,
+) -> bool:
+    target = campaign_category.strip().lower()
+    candidates: set[str] = set()
+    if creator_niche and creator_niche.strip():
+        candidates.add(creator_niche.strip().lower())
+    for cat in creator_categories or []:
+        if cat and str(cat).strip():
+            candidates.add(str(cat).strip().lower())
+
+    if not candidates:
+        return False
+
+    if target in candidates:
+        return True
+
+    aliases = CATEGORY_SLUG_ALIASES.get(target, {target})
+    for alias in aliases:
+        if alias in candidates:
+            return True
+        for cand in candidates:
+            if alias in cand or cand in alias:
+                return True
+
+    for cand in candidates:
+        if target in cand or cand in target:
+            return True
+
+    return False
+
+
 def _unmet_campaign_requirements(campaign: Campaign, creator: Creator) -> list[str]:
     """Mirrors CampaignModal.tsx's buildRequirements() on the frontend —
     same fields, same thresholds — so a requirement disables the Apply
@@ -258,10 +308,8 @@ def _unmet_campaign_requirements(campaign: Campaign, creator: Creator) -> list[s
         if display and not display[1]:
             reasons.append(f"a connected {display[0]} account")
 
-    if (
-        campaign.creator_category
-        and campaign.creator_category != creator.niche
-        and campaign.creator_category not in (creator.categories or [])
+    if campaign.creator_category and not _matches_category(
+        campaign.creator_category, creator.niche, creator.categories
     ):
         reasons.append(f"the {campaign.creator_category} niche")
 
@@ -509,13 +557,19 @@ async def accept_application(
     # in the background.
     if application.expires_at:
         expires_at = application.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-        if expires_at < datetime.now(UTC):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="This invitation has expired. Ask the brand to send a new one.",
-            )
+        if isinstance(expires_at, str):
+            try:
+                expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            except Exception:
+                expires_at = None
+        if expires_at is not None:
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at < datetime.now(UTC):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="This invitation has expired. Ask the brand to send a new one.",
+                )
 
     counts = await campaign_repo.fetch_application_counts([campaign.id])
     accepted_count = counts.get(campaign.id, {}).get("accepted_count", 0)
