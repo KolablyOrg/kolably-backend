@@ -13,6 +13,8 @@ Instagram Graph API calls are faked, no real network/DB calls.
 
 from datetime import UTC, datetime, timedelta
 
+import httpx
+
 from app.core.crypto import encrypt_token
 from app.core.exceptions import ExternalServiceError
 from app.models.creator import Creator
@@ -69,7 +71,7 @@ def _patch_instagram_service(monkeypatch):
         return [{"id": "m1", "media_type": "IMAGE"}]
 
     async def fake_calculate_engagement_and_views(access_token, media):
-        return 7.25, 1234
+        return 7.25, 1234, {}
 
     monkeypatch.setattr(creator_service.instagram_service, "refresh_long_lived_token", fake_refresh_long_lived_token)
     monkeypatch.setattr(creator_service.instagram_service, "fetch_profile", fake_fetch_profile)
@@ -164,3 +166,57 @@ async def test_calculate_engagement_rate_returns_none_when_every_item_fails(monk
 
 async def test_calculate_engagement_rate_returns_none_for_no_media():
     assert await instagram_service.calculate_engagement_rate("tok", []) is None
+
+
+async def test_calculate_engagement_and_views_returns_views_by_permalink_for_video_items(monkeypatch):
+    """The per-permalink view map is what `_refresh_instagram_stats` uses to
+    backfill stale `portfolio_items.view_count` rows (see
+    `creator_service._backfill_portfolio_view_counts`) — it must only
+    include video items (Instagram never reports views for photos) and use
+    the same view counts already fetched for the aggregate `total_views`
+    stat, at no extra API cost."""
+
+    async def fake_fetch_media_insights(access_token, media_id, media_type):
+        insights = {"reach": 100, "likes": 10, "comments": 5}
+        if media_type != "IMAGE":
+            insights["views"] = 42
+        return insights
+
+    monkeypatch.setattr(instagram_service, "fetch_media_insights", fake_fetch_media_insights)
+
+    media = [
+        {"id": "video-1", "media_type": "VIDEO", "permalink": "https://instagram.com/p/video-1/"},
+        {"id": "photo-1", "media_type": "IMAGE", "permalink": "https://instagram.com/p/photo-1/"},
+    ]
+    engagement_rate, total_views, views_by_permalink = await instagram_service.calculate_engagement_and_views(
+        "tok", media
+    )
+
+    assert total_views == 42  # only the video item reports views
+    assert views_by_permalink == {"https://instagram.com/p/video-1/": 42}
+
+
+async def test_calculate_engagement_and_views_skips_item_on_transport_level_failure(monkeypatch):
+    """Regression: a transport-level failure (blocked proxy, dropped
+    connection, timeout, ...) from `fetch_media_insights` previously wasn't
+    caught here — only `ExternalServiceError` (HTTP-status errors) was —
+    so it crashed the whole call instead of just being excluded like any
+    other single bad item."""
+    calls = []
+
+    async def fake_fetch_media_insights(access_token, media_id, media_type):
+        calls.append(media_id)
+        if media_id == "unreachable":
+            raise httpx.ConnectError("connection refused")
+        return {"reach": 100, "likes": 10, "comments": 5}
+
+    monkeypatch.setattr(instagram_service, "fetch_media_insights", fake_fetch_media_insights)
+
+    media = [
+        {"id": "unreachable", "media_type": "IMAGE", "permalink": "https://instagram.com/p/unreachable/"},
+        {"id": "good-post", "media_type": "IMAGE", "permalink": "https://instagram.com/p/good-post/"},
+    ]
+    result = await instagram_service.calculate_engagement_rate("tok", media)
+
+    assert calls == ["unreachable", "good-post"]
+    assert result == 15.0  # (10 + 5) / 100 * 100 — from the one good post only

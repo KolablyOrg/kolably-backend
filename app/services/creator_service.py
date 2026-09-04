@@ -2,6 +2,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 from fastapi import HTTPException, status
 
 from app.core.crypto import decrypt_token, decrypt_token_if_encrypted, encrypt_token
@@ -553,7 +554,9 @@ async def connect_instagram(
         )
 
     media = await instagram_service.fetch_media(access_token)
-    engagement_rate, views_count = await instagram_service.calculate_engagement_and_views(access_token, media)
+    engagement_rate, views_count, views_by_permalink = await instagram_service.calculate_engagement_and_views(
+        access_token, media
+    )
     expires_at = datetime.now(UTC) + timedelta(seconds=long_lived.get("expires_in", _DEFAULT_TOKEN_LIFETIME_SECONDS))
     now = datetime.now(UTC).isoformat()
 
@@ -570,7 +573,39 @@ async def connect_instagram(
         },
     )
 
+    # A reconnect can happen after an earlier connection already imported
+    # portfolio items (disconnect, then reconnect later) — refresh those
+    # with the fresh per-item view counts already fetched above, same as
+    # the ongoing sync path below (see `_backfill_portfolio_view_counts`).
+    await _backfill_portfolio_view_counts(creator.id, views_by_permalink, repo=repo)
+
     return _creator_to_response(updated)
+
+
+async def _backfill_portfolio_view_counts(
+    creator_id: str, views_by_permalink: dict[str, int], *, repo: CreatorRepository
+) -> None:
+    """Refresh `view_count` on already-imported portfolio items using
+    per-item view counts already fetched for the aggregate Instagram stats
+    call (`instagram_service.calculate_engagement_and_views`) — no extra
+    Graph API calls.
+
+    Portfolio items only ever get a `view_count` written at import/
+    re-import time (`import_instagram_portfolio`); nothing else kept it
+    fresh, so an item's view count went stale (or, for anything imported
+    before the view-count feature existed, stayed permanently unset) the
+    moment it diverged from Instagram's live numbers. Matching by
+    `post_link` (the stable Instagram permalink) makes this a plain,
+    targeted update — never an insert — for whichever of the creator's
+    portfolio items still show up among their recent media.
+    """
+    if not views_by_permalink:
+        return
+    items = await repo.get_portfolio_items_by_post_links(creator_id, list(views_by_permalink.keys()))
+    for item in items:
+        views = views_by_permalink.get(item.post_link)
+        if views is not None and views != item.view_count:
+            await repo.update_portfolio_item(item.id, {"view_count": views})
 
 
 async def _refresh_instagram_stats(creator: Creator, *, repo: CreatorRepository) -> Creator:
@@ -601,8 +636,11 @@ async def _refresh_instagram_stats(creator: Creator, *, repo: CreatorRepository)
     # One insights call per recent media item covers both engagement and
     # views, so `views_count` reflects Instagram directly rather than
     # whatever happens to be sitting in portfolio_items (which only gets
-    # populated for items the creator has explicitly imported).
-    engagement_rate, views_count = await instagram_service.calculate_engagement_and_views(access_token, media)
+    # populated/refreshed for items the creator has explicitly imported —
+    # see the backfill call below for the automatic-refresh fix).
+    engagement_rate, views_count, views_by_permalink = await instagram_service.calculate_engagement_and_views(
+        access_token, media
+    )
 
     updated = await repo.update_by_profile_id(
         creator.profile_id,
@@ -619,6 +657,13 @@ async def _refresh_instagram_stats(creator: Creator, *, repo: CreatorRepository)
     )
     if updated is None:
         raise _not_connected()
+
+    # Portfolio items otherwise only ever get a view_count at import/
+    # re-import time — this is what keeps them current automatically, on
+    # every on-demand sync and every night's batch job, reusing the
+    # per-item view counts already fetched above (no extra API calls).
+    await _backfill_portfolio_view_counts(creator.id, views_by_permalink, repo=repo)
+
     return updated
 
 
@@ -777,7 +822,7 @@ async def import_instagram_portfolio(
             insights = await instagram_service.fetch_media_insights(
                 access_token, media_item["id"], media_item["media_type"]
             )
-        except ExternalServiceError:
+        except (ExternalServiceError, httpx.HTTPError):
             logger.exception("Failed to fetch view-count insights for instagram media_id=%s", media_item.get("id"))
             continue
         built_item["view_count"] = insights.get("views")

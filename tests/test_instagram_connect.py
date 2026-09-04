@@ -7,6 +7,7 @@ directly). Instagram Graph API calls are faked, no real network/DB calls.
 
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from fastapi import HTTPException
 
@@ -147,7 +148,7 @@ def _patch_instagram_service(monkeypatch, refresh_calls=None):
         return IG_MEDIA
 
     async def fake_calculate_engagement_and_views(access_token, media):
-        return 12.5, 0
+        return 12.5, 0, {}
 
     monkeypatch.setattr(creator_service.instagram_service, "exchange_code_for_token", fake_exchange_code_for_token)
     monkeypatch.setattr(
@@ -313,6 +314,75 @@ async def test_sync_instagram_not_connected_422(monkeypatch):
     assert exc_info.value.status_code == 422
 
 
+async def test_sync_instagram_backfills_stale_portfolio_item_view_counts(monkeypatch):
+    """Regression: portfolio items only ever got a view_count written at
+    import/re-import time (`import_instagram_portfolio`) — nothing else
+    kept it fresh, so it silently went stale (or stayed permanently unset,
+    for anything imported before the view-count feature existed) the
+    moment it diverged from Instagram's live numbers. `sync_instagram` (and
+    the daily batch job, through the same `_refresh_instagram_stats` core)
+    now backfills matching portfolio items using the per-item view counts
+    already fetched for the aggregate stats call, at no extra API cost."""
+    _patch_instagram_service(monkeypatch)
+
+    async def fake_calculate_engagement_and_views(access_token, media):
+        return 12.5, 999, {IG_MEDIA[0]["permalink"]: 250}
+
+    monkeypatch.setattr(
+        creator_service.instagram_service, "calculate_engagement_and_views", fake_calculate_engagement_and_views
+    )
+
+    connected = {**CREATOR_ROW, "instagram_access_token": encrypt_token("some-tok")}
+    stale_row = {
+        "id": "pi-stale",
+        "creator_id": "creator-1",
+        "media_url": "https://cdn.instagram.com/reel.mp4",
+        "post_link": IG_MEDIA[0]["permalink"],
+        "media_type": "video",
+        "like_count": 0,
+        "comment_count": 0,
+        "view_count": 5,  # stale — Instagram now reports 250 (see fake above)
+        "created_at": "2025-01-01T00:00:00+00:00",
+    }
+    repo = FakeCreatorRepo(creator=connected, existing_portfolio=[stale_row])
+
+    await creator_service.sync_instagram(profile_id="profile-1", repo=repo)
+
+    assert repo.portfolio_updated == [("pi-stale", {"view_count": 250})]
+
+
+async def test_sync_instagram_leaves_up_to_date_portfolio_item_view_counts_untouched(monkeypatch):
+    """The backfill is a targeted update, not an unconditional write — a
+    portfolio item whose stored view_count already matches Instagram's
+    current number is left alone."""
+    _patch_instagram_service(monkeypatch)
+
+    async def fake_calculate_engagement_and_views(access_token, media):
+        return 12.5, 999, {IG_MEDIA[0]["permalink"]: 250}
+
+    monkeypatch.setattr(
+        creator_service.instagram_service, "calculate_engagement_and_views", fake_calculate_engagement_and_views
+    )
+
+    connected = {**CREATOR_ROW, "instagram_access_token": encrypt_token("some-tok")}
+    current_row = {
+        "id": "pi-current",
+        "creator_id": "creator-1",
+        "media_url": "https://cdn.instagram.com/reel.mp4",
+        "post_link": IG_MEDIA[0]["permalink"],
+        "media_type": "video",
+        "like_count": 0,
+        "comment_count": 0,
+        "view_count": 250,
+        "created_at": "2025-01-01T00:00:00+00:00",
+    }
+    repo = FakeCreatorRepo(creator=connected, existing_portfolio=[current_row])
+
+    await creator_service.sync_instagram(profile_id="profile-1", repo=repo)
+
+    assert repo.portfolio_updated == []
+
+
 async def test_disconnect_instagram_clears_stored_fields(monkeypatch):
     connected = {
         **CREATOR_ROW,
@@ -392,6 +462,30 @@ async def test_import_instagram_portfolio_refreshes_existing_item_instead_of_dup
     updated_id, updated_data = repo.portfolio_updated[0]
     assert updated_id == "pi-stale"
     assert updated_data["media_url"] == "https://cdn.instagram.com/reel-thumb.jpg"
+
+
+async def test_import_instagram_portfolio_skips_item_on_transport_level_failure(monkeypatch):
+    """Regression: `fetch_media_insights` can also fail below the HTTP
+    layer — a blocked proxy, a dropped connection, a timeout — none of
+    which raise `ExternalServiceError` (that's only ever raised for
+    HTTP-status errors). Previously only `ExternalServiceError` was caught
+    here, so a transport-level failure crashed the whole import instead of
+    just leaving that one item's view_count unset, same as any other
+    single-item insights failure."""
+    _patch_instagram_service(monkeypatch)
+
+    async def fake_fetch_media_insights(access_token, media_id, media_type):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(instagram_service, "fetch_media_insights", fake_fetch_media_insights)
+
+    connected = {**CREATOR_ROW, "instagram_access_token": encrypt_token("some-tok")}
+    repo = FakeCreatorRepo(creator=connected)
+
+    items = await creator_service.import_instagram_portfolio(profile_id="profile-1", repo=repo)
+
+    assert len(items) == 1
+    assert items[0]["view_count"] is None
 
 
 async def test_preview_instagram_media_does_not_insert_anything(monkeypatch):

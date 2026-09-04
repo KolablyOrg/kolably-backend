@@ -191,43 +191,56 @@ async def fetch_media_insights(access_token: str, media_id: str, media_type: str
     return {item["name"]: item["values"][0]["value"] for item in result.get("data", [])}
 
 
-async def calculate_engagement_and_views(access_token: str, media: list[dict]) -> tuple[float | None, int]:
+async def calculate_engagement_and_views(
+    access_token: str, media: list[dict]
+) -> tuple[float | None, int, dict[str, int]]:
     """Average (likes + comments) / reach across recent media (as a
-    percentage), plus the summed `views` across the same media — one
-    insights call per item covers both, so nothing using both stats (see
-    `creator_service._refresh_instagram_stats`/`connect_instagram`) needs to
-    fetch insights twice.
+    percentage), the summed `views` across the same media, and a
+    `{permalink: views}` map for the video items among them — one insights
+    call per item covers all three, so nothing using these stats (see
+    `creator_service._refresh_instagram_stats`/`connect_instagram`, which
+    also use the per-permalink map to refresh stale `portfolio_items.
+    view_count` rows via `_backfill_portfolio_view_counts`) needs to fetch
+    insights twice.
 
     Engagement is `None` if there's no media to average (nothing
     self-reported to overwrite with); views is always an int, 0 if none.
+    The permalink map only includes video (non-photo) items, matching the
+    only media type Instagram actually reports a view count for.
 
     Each media item's insights are fetched independently and a failure on
     one item (an unsupported metric for that media type, a story that's
-    expired, a transient Graph API hiccup, ...) is skipped rather than
-    raising — otherwise a single bad post would null out the engagement
-    rate for an account whose other posts have perfectly good data.
+    expired, a transient Graph API hiccup, a network-level failure such as
+    a timeout or a blocked proxy, ...) is skipped rather than raising —
+    otherwise a single bad post would null out the engagement rate for an
+    account whose other posts have perfectly good data.
     """
     if not media:
-        return None, 0
+        return None, 0, {}
 
     ratios = []
     total_views = 0
+    views_by_permalink: dict[str, int] = {}
     for item in media:
         try:
             insights = await fetch_media_insights(access_token, item["id"], item["media_type"])
-        except ExternalServiceError:
+        except (ExternalServiceError, httpx.HTTPError):
             continue
         reach = insights.get("reach")
         if reach:
             ratios.append((insights.get("likes", 0) + insights.get("comments", 0)) / reach)
-        total_views += insights.get("views") or 0
+        views = insights.get("views") or 0
+        total_views += views
+        permalink = item.get("permalink")
+        if permalink and item.get("media_type") != "IMAGE":
+            views_by_permalink[permalink] = views
 
     engagement_rate = round((sum(ratios) / len(ratios)) * 100, 2) if ratios else None
-    return engagement_rate, total_views
+    return engagement_rate, total_views, views_by_permalink
 
 
 async def calculate_engagement_rate(access_token: str, media: list[dict]) -> float | None:
     """Engagement-only wrapper around `calculate_engagement_and_views`, for
     callers (the direct-signup flow) that don't need the views total."""
-    engagement_rate, _ = await calculate_engagement_and_views(access_token, media)
+    engagement_rate, _, _ = await calculate_engagement_and_views(access_token, media)
     return engagement_rate
