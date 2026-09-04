@@ -345,13 +345,22 @@ async def get_business_stats(
     *,
     repo: BusinessRepository | None = None,
     member_repo: BusinessMemberRepository | None = None,
+    campaign_repo: CampaignRepository | None = None,
 ) -> BusinessStatsResponse:
     repo = repo or BusinessRepository()
+    campaign_repo = campaign_repo or CampaignRepository()
     business_id = await business_access.get_business_id_for_profile(
         profile_id, business_repo=repo, member_repo=member_repo
     )
 
     if not business_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business profile not found",
+        )
+
+    business = await repo.get_by_id(business_id)
+    if not business:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Business profile not found",
@@ -368,6 +377,14 @@ async def get_business_stats(
             for sub in subs:
                 total_reach += sub.get("views", 0) or 0
 
+    effective_plan = plans.resolve_plan(
+        business.plan, business.subscription_status, business.current_period_end
+    )
+    limits = plans.PLAN_LIMITS[effective_plan]
+    campaigns_used_this_month = await campaign_repo.count_created_since(
+        business_id, plans.month_start()
+    )
+
     return BusinessStatsResponse(
         total_reach=total_reach,
         reach_change_pct=0.0,
@@ -375,6 +392,9 @@ async def get_business_stats(
         engagement_series=[0.0] * 7,
         campaigns_posted_count=len(campaign_ids),
         creators_worked_with_count=creators_worked_with_count,
+        campaigns_used_this_month=campaigns_used_this_month,
+        campaigns_limit_this_month=limits.max_campaigns_per_month,
+        effective_plan=effective_plan.value,
     )
 
 

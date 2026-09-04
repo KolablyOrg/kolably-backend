@@ -63,6 +63,37 @@ to set its own plan is the whole feature bypassed in one request.
 
 ---
 
+## What a brand actually sees
+
+**Before hitting the limit** — `GET /businesses/me/stats` now returns
+`campaigns_used_this_month`, `campaigns_limit_this_month` (null = unlimited)
+and `effective_plan`, so the UI can show "1 of 3 left this month". Being
+blocked with no prior warning is what generates support tickets.
+
+**On hitting it** — campaign creation returns 402 and both apps show a
+dedicated upgrade prompt instead of the usual error toast:
+
+- **Web** (`CampaignWizard`): a full panel — "You've used this month's
+  campaigns" — with *Back to campaign* and *Contact us to upgrade*. Entered
+  details are preserved; going back returns them to the wizard intact.
+- **Mobile** (`business-campaign-create`): a native alert with the same two
+  choices. Falls back to showing the support address as a toast if no mail
+  client is configured.
+
+Both read the message from the server's 402 body rather than restating the
+number client-side, so the copy can't drift from `plans.py`.
+
+The CTA is an email, not a checkout link — there is no self-serve payment
+page, and linking to one that doesn't exist would be worse than an honest
+mailto. Shared helpers: `src/lib/support.ts`, `mobile/utils/support.ts`.
+
+⚠️ Those two files hardcode **different** support addresses
+(`info@kolably.com` on web, `support@kolably.com` on mobile). That
+inconsistency predates this work; it's now in one place per app, so it's a
+one-line fix once someone decides which is correct.
+
+---
+
 ## What clients should read
 
 `GET /businesses/{id}` (and the business object on `/auth/me`) now returns:

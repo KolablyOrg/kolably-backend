@@ -100,6 +100,14 @@ class BusinessStatsResponse(BaseModel):
     engagement_series: list[float]
     campaigns_posted_count: int
     creators_worked_with_count: int
+    # ── Monthly campaign allowance ────────────────────────────────────
+    # Surfaced so the UI can show "1 of 3 left this month" *before* a brand
+    # hits the wall. Being blocked at the moment you click Create, with no
+    # prior warning, is the version of this that generates support tickets.
+    campaigns_used_this_month: int = 0
+    #: None means unlimited (pro). Not 0 — see plans.is_within_limit.
+    campaigns_limit_this_month: int | None = None
+    effective_plan: Literal["free", "pro"] = "free"
 
 
 class CreatorActivityBannerResponse(BaseModel):

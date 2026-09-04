@@ -416,8 +416,23 @@ async def test_update_business_empty_payload_returns_current_without_write():
     assert repo.update_calls == []
 
 
+class FakeCampaignRepoForStats:
+    """Only the one method `get_business_stats` needs. Injected explicitly
+    so the test never constructs a real CampaignRepository (which would try
+    to reach Supabase)."""
+
+    def __init__(self, created_this_month: int = 0):
+        self._created_this_month = created_this_month
+
+    async def count_created_since(self, business_id: str, since) -> int:
+        return self._created_this_month
+
+
 async def test_get_business_stats_includes_campaigns_posted_and_creators_worked_with_counts():
     repo = FakeBusinessRepo(
+        # `row` is required now: stats resolves the business's plan to report
+        # the monthly campaign allowance, so it reads the row, not just the id.
+        row=dict(BUSINESS_ROW),
         business_id="b1",
         campaign_ids=["camp1", "camp2"],
         collab_ids=["collab1"],
@@ -425,11 +440,44 @@ async def test_get_business_stats_includes_campaigns_posted_and_creators_worked_
         distinct_creators_count=3,
     )
 
-    result = await business_service.get_business_stats(profile_id="p1", repo=repo)
+    result = await business_service.get_business_stats(
+        profile_id="p1", repo=repo, campaign_repo=FakeCampaignRepoForStats(created_this_month=2)
+    )
 
     assert result.total_reach == 100
     assert result.campaigns_posted_count == 2
     assert result.creators_worked_with_count == 3
+
+
+async def test_get_business_stats_reports_the_monthly_campaign_allowance():
+    """Backs the "1 of 3 left this month" hint in the brand UI. Showing the
+    allowance before a brand hits it is what stops the 402 being a
+    surprise."""
+    repo = FakeBusinessRepo(row=dict(BUSINESS_ROW), business_id="b1")
+
+    result = await business_service.get_business_stats(
+        profile_id="p1", repo=repo, campaign_repo=FakeCampaignRepoForStats(created_this_month=2)
+    )
+
+    assert result.effective_plan == "free"
+    assert result.campaigns_used_this_month == 2
+    assert result.campaigns_limit_this_month == 3
+
+
+async def test_get_business_stats_reports_unlimited_for_pro():
+    """None, not a big number: the UI has to distinguish "unlimited" from
+    "a large quota" to know whether to show a counter at all."""
+    repo = FakeBusinessRepo(
+        row={**BUSINESS_ROW, "plan": "pro", "subscription_status": "active"},
+        business_id="b1",
+    )
+
+    result = await business_service.get_business_stats(
+        profile_id="p1", repo=repo, campaign_repo=FakeCampaignRepoForStats(created_this_month=99)
+    )
+
+    assert result.effective_plan == "pro"
+    assert result.campaigns_limit_this_month is None
 
 
 # ── KYB (Know-Your-Business) Verification ───────────────────────────────
