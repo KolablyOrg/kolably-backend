@@ -16,6 +16,7 @@ from app.models.creator import Creator
 from app.schemas.campaign import (
     CampaignCreateRequest,
     CampaignDeliverablesRequest,
+    CampaignTargetingRequest,
     CampaignUpdateRequest,
     DeliverableItem,
 )
@@ -1148,9 +1149,113 @@ async def test_create_campaign_blocked_when_paid_plan_was_cancelled():
     assert exc_info.value.status_code == 402
 
 
+# ── max creators per campaign gate ──────────────────────────────────────
+async def test_update_campaign_targeting_blocked_when_free_plan_wants_more_than_one_creator():
+    """402, not 403 — same reasoning as the monthly campaign quota: this is
+    a payment-shaped limit the client can offer an upgrade for, not a
+    generic access error."""
+    repo = FakeCampaignRepo()
+    business_repo = FakeBusinessRepo(business_id="b1", plan="free")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await campaign_service.update_campaign_targeting(
+            "camp1",
+            "p-business",
+            CampaignTargetingRequest(
+                creator_category="food",
+                location="Springfield",
+                max_creators=2,
+            ),
+            campaign_repo=repo,
+            business_repo=business_repo,
+        )
+
+    assert exc_info.value.status_code == 402
+    assert repo.updated is None  # nothing was written
+
+
+async def test_update_campaign_targeting_allows_exactly_one_creator_on_free_plan():
+    repo = FakeCampaignRepo()
+    business_repo = FakeBusinessRepo(business_id="b1", plan="free")
+
+    result = await campaign_service.update_campaign_targeting(
+        "camp1",
+        "p-business",
+        CampaignTargetingRequest(
+            creator_category="food",
+            location="Springfield",
+            max_creators=1,
+        ),
+        campaign_repo=repo,
+        business_repo=business_repo,
+    )
+
+    assert repo.updated["max_creators"] == 1
+    assert result.max_creators == 1
+
+
+async def test_update_campaign_targeting_allows_more_creators_on_paid_plan():
+    repo = FakeCampaignRepo()
+    business_repo = FakeBusinessRepo(business_id="b1", plan="pro", subscription_status="active")
+
+    result = await campaign_service.update_campaign_targeting(
+        "camp1",
+        "p-business",
+        CampaignTargetingRequest(
+            creator_category="food",
+            location="Springfield",
+            max_creators=20,
+        ),
+        campaign_repo=repo,
+        business_repo=business_repo,
+    )
+
+    assert repo.updated["max_creators"] == 20
+    assert result.max_creators == 20
+
+
+async def test_update_campaign_general_blocked_when_free_plan_wants_more_than_one_creator():
+    repo = FakeCampaignRepo()
+    business_repo = FakeBusinessRepo(business_id="b1", plan="free")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await campaign_service.update_campaign_general(
+            "camp1",
+            "p-business",
+            CampaignUpdateRequest(max_creators=3),
+            campaign_repo=repo,
+            business_repo=business_repo,
+        )
+
+    assert exc_info.value.status_code == 402
+    assert repo.updated is None  # nothing was written
+
+
+async def test_update_campaign_general_free_plan_edit_not_touching_max_creators_is_unaffected():
+    """The gate only fires when max_creators is actually part of the patch —
+    exclude_unset means a free-plan brand editing something unrelated (the
+    title, say) must never be blocked by a field it didn't send."""
+    repo = FakeCampaignRepo()
+    business_repo = FakeBusinessRepo(business_id="b1", plan="free")
+
+    result = await campaign_service.update_campaign_general(
+        "camp1",
+        "p-business",
+        CampaignUpdateRequest(title="Updated title"),
+        campaign_repo=repo,
+        business_repo=business_repo,
+    )
+
+    assert repo.updated == {"title": "Updated title"}
+    assert result.title == "Updated title"
+
+
 async def test_update_campaign_general_persists_brief_fields():
     repo = FakeCampaignRepo()
-    business_repo = FakeBusinessRepo(business_id="b1")
+    # PRO: this test's max_creators=20 is incidental to what it actually
+    # verifies (that general brief fields persist) — the free-plan cap on
+    # max_creators has its own tests below.
+    business_repo = FakeBusinessRepo(business_id="b1", plan="pro", subscription_status="active")
 
     result = await campaign_service.update_campaign_general(
         "camp1",

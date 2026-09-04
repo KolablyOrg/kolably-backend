@@ -65,6 +65,14 @@ def test_free_gets_three_campaigns_a_month_and_pro_is_unlimited():
     assert PLAN_LIMITS[BusinessPlan.PRO].max_campaigns_per_month is None
 
 
+def test_free_gets_one_creator_per_campaign_and_pro_is_unlimited():
+    """Same reasoning as the campaign-count test above — this is the actual
+    product promise ("1 creator per campaign on the free plan"), asserted
+    directly so changing it is a deliberate act, not a side effect."""
+    assert PLAN_LIMITS[BusinessPlan.FREE].max_creators_per_campaign == 1
+    assert PLAN_LIMITS[BusinessPlan.PRO].max_creators_per_campaign is None
+
+
 def test_expired_manual_subscription_lapses_to_free():
     """The safety net for manual activation: subscriptions are switched on
     by a human, and humans forget to switch them off. An expiry in the past

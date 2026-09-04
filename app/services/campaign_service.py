@@ -254,6 +254,50 @@ async def _assert_campaign_quota_available(
     )
 
 
+async def _assert_max_creators_allowed(
+    business_id: str,
+    max_creators: int,
+    *,
+    business_repo: BusinessRepository | None = None,
+) -> None:
+    """Enforce the free-plan cap on creators per campaign.
+
+    Free brands can work with at most 1 creator per campaign; PRO removes
+    the cap entirely. Same 402-not-403 reasoning as
+    _assert_campaign_quota_available: the caller isn't forbidden, they've
+    hit a payment-shaped limit that upgrading resolves, so the client can
+    show an upgrade prompt instead of a generic access error.
+
+    Called from every place max_creators can be written (update_campaign_
+    targeting and update_campaign_general) rather than only at creation —
+    campaigns are created with max_creators=1 by default (see
+    create_campaign_step1), so the only way a free brand could ever exceed
+    the cap is by raising it afterwards.
+    """
+    business_repo = business_repo or BusinessRepository()
+    business = await business_repo.get_by_id(business_id)
+    if not business:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Business not found",
+        )
+
+    limits = plans.limits_for(
+        business.plan, business.subscription_status, business.current_period_end
+    )
+    if limits.max_creators_per_campaign is None or max_creators <= limits.max_creators_per_campaign:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail=(
+            f"Free plan campaigns can include up to {limits.max_creators_per_campaign} creator"
+            f"{'s' if limits.max_creators_per_campaign != 1 else ''}. Upgrade to work with more "
+            "creators on a single campaign."
+        ),
+    )
+
+
 async def create_campaign_step1(
     profile_id: str,
     data: CampaignCreateRequest,
@@ -358,6 +402,7 @@ async def update_campaign_targeting(
         business_repo=business_repo,
         member_repo=member_repo,
     )
+    await _assert_max_creators_allowed(business_id, data.max_creators, business_repo=business_repo)
 
     # mode="json" so enums/datetimes are JSON-safe for PostgREST.
     update_data: dict[str, Any] = data.model_dump(mode="json", exclude_unset=True)
@@ -397,6 +442,9 @@ async def update_campaign_general(
     update_data: dict[str, Any] = data.model_dump(mode="json", exclude_unset=True)
     if not update_data:
         return _campaign_to_response(campaign)
+
+    if "max_creators" in update_data:
+        await _assert_max_creators_allowed(business_id, update_data["max_creators"], business_repo=business_repo)
 
     updated = await campaign_repo.update_campaign(campaign_id, update_data)
     if not updated:

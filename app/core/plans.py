@@ -6,12 +6,14 @@ Brand subscription plans: tiers, quotas, and entitlement checks.
 There is no payment integration and deliberately so — a payment gateway
 needs GST registration, which isn't in place yet. Until then:
 
-  * Every brand starts on FREE: **3 campaigns per calendar month**.
+  * Every brand starts on FREE: **3 campaigns per calendar month**, and
+    each campaign can include **at most 1 creator**.
   * Payment is taken offline. A superadmin then flips the business to PRO
     via `PATCH /businesses/{id}/plan`, which records
     `billing_provider='manual'`.
-  * PRO unlocks **unlimited campaigns**. That is the only thing it unlocks
-    right now — no other feature is gated, on purpose.
+  * PRO unlocks **unlimited campaigns** and **unlimited creators per
+    campaign**. Those are the only two things it unlocks right now — no
+    other feature is gated, on purpose.
 
 The numbers here are real, not placeholders. When a gateway is eventually
 added, none of this changes: an adapter writes the same `plan` /
@@ -61,10 +63,16 @@ class PlanLimits:
     # are the counter.
     max_campaigns_per_month: int | None
 
+    # Creators a single campaign may accept (campaigns.max_creators).
+    # Enforced wherever max_creators is written — see
+    # campaign_service._assert_max_creators_allowed — not just at creation,
+    # since a free brand could otherwise raise it later via a plain edit.
+    max_creators_per_campaign: int | None
+
 
 PLAN_LIMITS: dict[BusinessPlan, PlanLimits] = {
-    BusinessPlan.FREE: PlanLimits(max_campaigns_per_month=3),
-    BusinessPlan.PRO: PlanLimits(max_campaigns_per_month=None),
+    BusinessPlan.FREE: PlanLimits(max_campaigns_per_month=3, max_creators_per_campaign=1),
+    BusinessPlan.PRO: PlanLimits(max_campaigns_per_month=None, max_creators_per_campaign=None),
 }
 
 
