@@ -504,12 +504,6 @@ async def _load_application_and_campaign(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Application not found",
         )
-    if application.status != ApplicationStatus.PENDING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This application has already been decided",
-        )
-
     campaign = await campaign_repo.get_by_id(application.campaign_id)
     if not campaign:
         raise HTTPException(
@@ -549,6 +543,12 @@ async def accept_application(
         business_repo=business_repo,
         member_repo=member_repo,
     )
+
+    if application.status != ApplicationStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This application has already been decided",
+        )
 
     # Invites carry a deadline (see campaign_service.invite_creator). It's
     # enforced here rather than by a scheduled sweep: the only moment expiry
@@ -651,6 +651,12 @@ async def reject_application(
         member_repo=member_repo,
     )
 
+    if application.status != ApplicationStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This application has already been decided",
+        )
+
     updated = await app_repo.update_status(application_id, ApplicationStatus.REJECTED.value)
     if not updated:
         raise HTTPException(
@@ -713,6 +719,12 @@ async def request_revision(
         business_repo=business_repo,
         member_repo=member_repo,
     )
+
+    if application.status != ApplicationStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This application has already been decided",
+        )
 
     updated = await app_repo.update_application(
         application_id,

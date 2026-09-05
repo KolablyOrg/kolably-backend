@@ -5,7 +5,7 @@ Invoice-related Pydantic schemas.
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class InvoiceLineItem(BaseModel):
@@ -15,7 +15,17 @@ class InvoiceLineItem(BaseModel):
 
 class InvoiceCreateRequest(BaseModel):
     collaboration_id: str
-    line_items: list[InvoiceLineItem] = Field(..., min_length=1)
+    amount: float | None = None
+    line_items: list[InvoiceLineItem] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def populate_line_items(self) -> "InvoiceCreateRequest":
+        if not self.line_items:
+            if self.amount is not None:
+                self.line_items = [InvoiceLineItem(title="Collaboration Fee", amount=self.amount)]
+            else:
+                raise ValueError("Either line_items or amount must be provided")
+        return self
 
 
 class InvoicePartySnapshot(BaseModel):

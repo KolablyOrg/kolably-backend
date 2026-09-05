@@ -4,10 +4,11 @@ migrations/20260814000003_create_waitlist_signups.sql's comment) — no
 mailing-list service is wired up yet.
 """
 
+import re
 from typing import Literal
 
 from fastapi import APIRouter
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, Field, field_validator
 
 from app.repositories.base import BaseRepository
 
@@ -15,8 +16,16 @@ router = APIRouter()
 
 
 class WaitlistJoinRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(..., min_length=3)
     role: Literal["creator", "business"]
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        cleaned = v.strip().lower()
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", cleaned):
+            raise ValueError("Invalid email format")
+        return cleaned
 
 
 class WaitlistJoinResponse(BaseModel):

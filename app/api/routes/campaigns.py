@@ -2,6 +2,8 @@
 Campaign routes — CRUD, 4-step create/publish flow, feed, categories, and invite.
 """
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user, get_optional_user, require_role
@@ -51,12 +53,12 @@ async def create_campaign(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def update_campaign_deliverables(
-    campaign_id: str,
+    campaign_id: UUID,
     data: CampaignDeliverablesRequest,
     user: UserInToken = Depends(get_current_user),
 ):
     """Step 2 — set deliverables and compensation."""
-    return await campaign_service.update_campaign_deliverables(campaign_id, user.id, data)
+    return await campaign_service.update_campaign_deliverables(str(campaign_id), user.id, data)
 
 
 # ── Step 3: Targeting ─────────────────────────────────
@@ -68,12 +70,12 @@ async def update_campaign_deliverables(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def update_campaign_targeting(
-    campaign_id: str,
+    campaign_id: UUID,
     data: CampaignTargetingRequest,
     user: UserInToken = Depends(get_current_user),
 ):
     """Step 3 — set creator targeting criteria."""
-    return await campaign_service.update_campaign_targeting(campaign_id, user.id, data)
+    return await campaign_service.update_campaign_targeting(str(campaign_id), user.id, data)
 
 
 # ── Step 4: Finalise & Publish ────────────────────────
@@ -85,12 +87,12 @@ async def update_campaign_targeting(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def update_campaign(
-    campaign_id: str,
+    campaign_id: UUID,
     data: CampaignUpdateRequest,
     user: UserInToken = Depends(get_current_user),
 ):
     """Step 4 — update cover image, deadline, or any other field."""
-    return await campaign_service.update_campaign_general(campaign_id, user.id, data)
+    return await campaign_service.update_campaign_general(str(campaign_id), user.id, data)
 
 
 @router.post(
@@ -99,11 +101,11 @@ async def update_campaign(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def publish_campaign(
-    campaign_id: str,
+    campaign_id: UUID,
     user: UserInToken = Depends(get_current_user),
 ):
     """Publish a campaign — flips status to active after validation."""
-    return await campaign_service.publish_campaign(campaign_id, user.id)
+    return await campaign_service.publish_campaign(str(campaign_id), user.id)
 
 
 @router.patch(
@@ -112,11 +114,11 @@ async def publish_campaign(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def close_campaign(
-    campaign_id: str,
+    campaign_id: UUID,
     user: UserInToken = Depends(get_current_user),
 ):
     """Close an active campaign — stops new applications and invites."""
-    return await campaign_service.close_campaign(campaign_id, user.id)
+    return await campaign_service.close_campaign(str(campaign_id), user.id)
 
 
 @router.patch(
@@ -125,11 +127,11 @@ async def close_campaign(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def complete_campaign(
-    campaign_id: str,
+    campaign_id: UUID,
     user: UserInToken = Depends(get_current_user),
 ):
     """Mark a campaign as completed (from active or closed)."""
-    return await campaign_service.complete_campaign(campaign_id, user.id)
+    return await campaign_service.complete_campaign(str(campaign_id), user.id)
 
 
 @router.get(
@@ -138,11 +140,11 @@ async def complete_campaign(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def get_campaign_analytics(
-    campaign_id: str,
+    campaign_id: UUID,
     user: UserInToken = Depends(get_current_user),
 ):
     """Per-campaign analytics for the owning business — real data only."""
-    return await campaign_service.get_campaign_analytics(campaign_id, user.id)
+    return await campaign_service.get_campaign_analytics(str(campaign_id), user.id)
 
 
 # ── Feed & Discovery ──────────────────────────────────
@@ -206,11 +208,11 @@ async def get_budget_bounds():
 
 @router.get("/{campaign_id}", response_model=CampaignResponse)
 async def get_campaign(
-    campaign_id: str,
+    campaign_id: UUID,
     user: UserInToken | None = Depends(get_optional_user),
 ):
     """Get full campaign details. Draft campaigns are visible only to the owner."""
-    return await campaign_service.get_campaign(campaign_id, user=user)
+    return await campaign_service.get_campaign(str(campaign_id), user=user)
 
 
 @router.delete(
@@ -219,11 +221,11 @@ async def get_campaign(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def delete_campaign(
-    campaign_id: str,
+    campaign_id: UUID,
     user: UserInToken = Depends(get_current_user),
 ):
     """Delete a campaign (owner only)."""
-    return await campaign_service.delete_campaign(campaign_id, user.id)
+    return await campaign_service.delete_campaign(str(campaign_id), user.id)
 
 
 # ── Nested: Applications & Invite ─────────────────────
@@ -235,13 +237,15 @@ async def delete_campaign(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def list_campaign_applications(
-    campaign_id: str,
+    campaign_id: UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     user: UserInToken = Depends(get_current_user),
 ):
     """List applications for a campaign (business owner only)."""
-    return await campaign_service.list_campaign_applications(campaign_id, user.id, page=page, page_size=page_size)
+    return await campaign_service.list_campaign_applications(
+        str(campaign_id), user.id, page=page, page_size=page_size
+    )
 
 
 @router.post(
@@ -250,13 +254,13 @@ async def list_campaign_applications(
     dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
 )
 async def invite_creator(
-    campaign_id: str,
+    campaign_id: UUID,
     data: InviteRequest,
     user: UserInToken = Depends(get_current_user),
 ):
     """Invite a creator to apply to this campaign."""
     return await campaign_service.invite_creator(
-        campaign_id=campaign_id,
+        campaign_id=str(campaign_id),
         profile_id=user.id,
         creator_id=data.creator_id,
         message=data.message,

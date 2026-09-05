@@ -5,10 +5,10 @@ from app.repositories.base import BaseRepository
 
 
 def _sanitize_search_term(term: str) -> str:
-    """Strip PostgREST `or_()` grammar breakers and LIKE wildcards from user input."""
-    cleaned = term.strip()
-    for ch in (",", "(", ")", ".", "%", "_", "*", '"', "'", "&"):
-        cleaned = cleaned.replace(ch, " ")
+    """Strip PostgREST `or_()` grammar breakers, SQL operators, quotes, and wildcards."""
+    import re
+
+    cleaned = re.sub(r"[^\w\s]", " ", term)
     return " ".join(cleaned.split())
 
 
