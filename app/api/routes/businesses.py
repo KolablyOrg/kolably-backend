@@ -49,7 +49,11 @@ async def list_businesses(
     )
 
 
-@router.get("/me/stats", response_model=BusinessStatsResponse)
+@router.get(
+    "/me/stats",
+    response_model=BusinessStatsResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
 async def get_business_stats(
     user: UserInToken = Depends(get_current_user),
 ):
@@ -57,7 +61,11 @@ async def get_business_stats(
     return await business_service.get_business_stats(profile_id=user.id)
 
 
-@router.get("/me/creator-activity", response_model=CreatorActivityBannerResponse)
+@router.get(
+    "/me/creator-activity",
+    response_model=CreatorActivityBannerResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
 async def get_creator_activity(
     user: UserInToken = Depends(get_current_user),
 ):
@@ -65,7 +73,11 @@ async def get_creator_activity(
     return await business_service.get_creator_activity_banner(profile_id=user.id)
 
 
-@router.get("/me/campaigns", response_model=PaginatedResponse[CampaignSummary])
+@router.get(
+    "/me/campaigns",
+    response_model=PaginatedResponse[CampaignSummary],
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
 async def list_my_campaigns(
     status: str | None = Query(None),
     page: int = Query(1, ge=1),
@@ -81,7 +93,11 @@ async def list_my_campaigns(
     )
 
 
-@router.get("/me/applications", response_model=PaginatedResponse[ApplicationWithCreator])
+@router.get(
+    "/me/applications",
+    response_model=PaginatedResponse[ApplicationWithCreator],
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
 async def list_my_applications(
     status: str | None = Query(None),
     page: int = Query(1, ge=1),
@@ -97,7 +113,11 @@ async def list_my_applications(
     )
 
 
-@router.get("/me/verification", response_model=KybStatusResponse)
+@router.get(
+    "/me/verification",
+    response_model=KybStatusResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
 async def get_verification_status(
     user: UserInToken = Depends(get_current_user),
 ):
@@ -105,23 +125,35 @@ async def get_verification_status(
     return await business_service.get_kyb_status(profile_id=user.id)
 
 
-@router.get("/me/shortlist", response_model=list[ShortlistItemResponse])
+@router.get(
+    "/me/shortlist",
+    response_model=list[ShortlistItemResponse],
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
 async def list_shortlist(user: UserInToken = Depends(get_current_user)):
     """List creators saved by the current business for later comparison/invites."""
     return await business_service.list_shortlist(profile_id=user.id)
 
 
-@router.put("/me/shortlist/{creator_id}", response_model=ShortlistItemResponse)
+@router.put(
+    "/me/shortlist/{creator_id}",
+    response_model=ShortlistItemResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
 async def update_shortlist(
     creator_id: str,
-    data: ShortlistUpdateRequest,
+    data: ShortlistUpdateRequest = ShortlistUpdateRequest(),
     user: UserInToken = Depends(get_current_user),
 ):
     """Save or update a creator in the current business's shortlist."""
     return await business_service.update_shortlist(profile_id=user.id, creator_id=creator_id, data=data)
 
 
-@router.delete("/me/shortlist/{creator_id}", response_model=MessageResponse)
+@router.delete(
+    "/me/shortlist/{creator_id}",
+    response_model=MessageResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
 async def remove_from_shortlist(
     creator_id: str,
     user: UserInToken = Depends(get_current_user),
@@ -131,7 +163,11 @@ async def remove_from_shortlist(
     return {"message": "Creator removed from shortlist"}
 
 
-@router.post("/me/verification", response_model=KybStatusResponse)
+@router.post(
+    "/me/verification",
+    response_model=KybStatusResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.SUPERADMIN))],
+)
 async def submit_verification(
     data: KybSubmitRequest,
     user: UserInToken = Depends(get_current_user),

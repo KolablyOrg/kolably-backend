@@ -5,7 +5,7 @@ Auth-related Pydantic schemas — request/response models for all auth endpoints
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 # ── Signup Requests ───────────────────────────────────
@@ -41,8 +41,13 @@ class BusinessSignupRequest(BaseModel):
 
 # ── Login ─────────────────────────────────────────────
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(..., min_length=1)
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip()
 
 
 # ── Google Sign-In ────────────────────────────────────

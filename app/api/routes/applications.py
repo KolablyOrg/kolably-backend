@@ -2,6 +2,8 @@
 Application routes — creators apply to campaigns, businesses accept/reject.
 """
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query
 
 from app.core.dependencies import get_current_user, require_instagram_connected, require_role
@@ -58,55 +60,67 @@ async def apply_to_campaign(
     dependencies=[Depends(require_role(UserRole.CREATOR))],
 )
 async def withdraw_application(
-    application_id: str,
+    application_id: UUID,
     user: UserInToken = Depends(get_current_user),
 ):
     """Withdraw a pending application the creator sent."""
     return await application_service.withdraw_application(
-        application_id=application_id,
+        application_id=str(application_id),
         profile_id=user.id,
     )
 
 
-@router.patch("/{application_id}/accept", response_model=ApplicationResponse)
+@router.patch(
+    "/{application_id}/accept",
+    response_model=ApplicationResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.CREATOR))],
+)
 async def accept_application(
-    application_id: str,
+    application_id: UUID,
     user: UserInToken = Depends(get_current_user),
 ):
     """Accept an application — the business decides on creator-initiated
     applications, the creator decides on business-sent invites. Creates the
     resulting Collaboration."""
     return await application_service.accept_application(
-        application_id=application_id,
+        application_id=str(application_id),
         profile_id=user.id,
         role=user.role.value,
     )
 
 
-@router.patch("/{application_id}/reject", response_model=ApplicationResponse)
+@router.patch(
+    "/{application_id}/reject",
+    response_model=ApplicationResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.CREATOR))],
+)
 async def reject_application(
-    application_id: str,
+    application_id: UUID,
     data: ApplicationRejectRequest | None = None,
     user: UserInToken = Depends(get_current_user),
 ):
     """Reject an application/invite — same direction-based authorization as accept."""
     return await application_service.reject_application(
-        application_id=application_id,
+        application_id=str(application_id),
         profile_id=user.id,
         role=user.role.value,
         reason=data.reason if data else None,
     )
 
 
-@router.patch("/{application_id}/request-revision", response_model=ApplicationResponse)
+@router.patch(
+    "/{application_id}/request-revision",
+    response_model=ApplicationResponse,
+    dependencies=[Depends(require_role(UserRole.BUSINESS, UserRole.CREATOR))],
+)
 async def request_revision(
-    application_id: str,
+    application_id: UUID,
     data: ApplicationRevisionRequest,
     user: UserInToken = Depends(get_current_user),
 ):
     """Request a revision — same direction-based authorization as accept/reject."""
     return await application_service.request_revision(
-        application_id=application_id,
+        application_id=str(application_id),
         profile_id=user.id,
         role=user.role.value,
         data=data,
@@ -119,13 +133,13 @@ async def request_revision(
     dependencies=[Depends(require_role(UserRole.CREATOR))],
 )
 async def resubmit_application(
-    application_id: str,
+    application_id: UUID,
     data: ApplicationUpdateRequest,
     user: UserInToken = Depends(get_current_user),
 ):
     """Creator resubmits after a revision request — resets status to pending."""
     return await application_service.resubmit_application(
-        application_id=application_id,
+        application_id=str(application_id),
         profile_id=user.id,
         data=data,
     )
@@ -133,8 +147,8 @@ async def resubmit_application(
 
 @router.get("/{application_id}", response_model=ApplicationResponse)
 async def get_application(
-    application_id: str,
+    application_id: UUID,
     user: UserInToken = Depends(get_current_user),
 ):
     """Get application details."""
-    return await application_service.get_application(application_id)
+    return await application_service.get_application(str(application_id))

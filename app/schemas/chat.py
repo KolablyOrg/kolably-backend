@@ -5,7 +5,7 @@ Chat / messaging Pydantic schemas.
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 
 class ParticipantSummary(BaseModel):
@@ -27,12 +27,22 @@ class ParticipantSummary(BaseModel):
 class MessageCreateRequest(BaseModel):
     content: str = Field(..., min_length=1)
 
+    @field_validator("content")
+    @classmethod
+    def validate_content_not_empty(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("Message content cannot be empty or whitespace only")
+        return cleaned
+
 
 class ConversationCreateRequest(BaseModel):
     """Get-or-create: returns the existing conversation between the two
     participants for `collaboration_id` if one exists, else creates one."""
 
-    participant_id: str
+    model_config = {"populate_by_name": True}
+
+    participant_id: str = Field(..., validation_alias=AliasChoices("participant_id", "recipient_id"))
     collaboration_id: str | None = None
 
 

@@ -26,7 +26,16 @@ async def update_last_seen(
 
             logging.getLogger(__name__).warning("Redis presence write failed", exc_info=True)
 
-    profile = await (repo or ProfileRepository()).update_last_seen_at(profile_id, now)
+    try:
+        profile = await (repo or ProfileRepository()).update_last_seen_at(profile_id, now)
+    except HTTPException:
+        raise
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning("Database presence write failed", exc_info=True)
+        return {"last_seen_at": now}
+
     if profile is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found")
     return {"last_seen_at": profile.last_seen_at or now}

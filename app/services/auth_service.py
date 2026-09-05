@@ -401,10 +401,10 @@ async def login(
                 "password": data.password,
             }
         )
-    except AuthApiError as e:
+    except AuthApiError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
+            detail="Invalid email or password",
         )
 
     if not auth_response.user or not auth_response.session:

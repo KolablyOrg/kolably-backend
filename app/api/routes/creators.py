@@ -96,7 +96,11 @@ async def unsave_campaign(
     await creator_service.unsave_campaign(profile_id=user.id, campaign_id=campaign_id)
 
 
-@router.get("/me/instagram/auth-url", response_model=InstagramAuthUrlResponse)
+@router.get(
+    "/me/instagram/auth-url",
+    response_model=InstagramAuthUrlResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def get_instagram_auth_url(
     redirect_uri: str = Query(..., description="Where Instagram should redirect back to after consent"),
     user: UserInToken = Depends(get_current_user),
@@ -105,7 +109,11 @@ async def get_instagram_auth_url(
     return await creator_service.get_instagram_auth_url(redirect_uri)
 
 
-@router.post("/me/instagram/connect", response_model=CreatorResponse)
+@router.post(
+    "/me/instagram/connect",
+    response_model=CreatorResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def connect_instagram(
     data: InstagramConnectRequest,
     user: UserInToken = Depends(get_current_user),
@@ -123,7 +131,11 @@ async def connect_instagram(
     )
 
 
-@router.post("/me/instagram/sync", response_model=CreatorResponse)
+@router.post(
+    "/me/instagram/sync",
+    response_model=CreatorResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def sync_instagram(
     user: UserInToken = Depends(get_current_user),
 ):
@@ -131,7 +143,11 @@ async def sync_instagram(
     return await creator_service.sync_instagram(profile_id=user.id)
 
 
-@router.delete("/me/instagram/disconnect", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/me/instagram/disconnect",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def disconnect_instagram(
     user: UserInToken = Depends(get_current_user),
 ):
@@ -139,7 +155,11 @@ async def disconnect_instagram(
     await creator_service.disconnect_instagram(profile_id=user.id)
 
 
-@router.get("/me/instagram/media-preview", response_model=list[InstagramMediaPreviewItem])
+@router.get(
+    "/me/instagram/media-preview",
+    response_model=list[InstagramMediaPreviewItem],
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def preview_instagram_media(
     user: UserInToken = Depends(get_current_user),
 ):
@@ -148,7 +168,11 @@ async def preview_instagram_media(
     return await creator_service.preview_instagram_media(profile_id=user.id)
 
 
-@router.post("/me/instagram/import-portfolio", response_model=list[PortfolioItemResponse])
+@router.post(
+    "/me/instagram/import-portfolio",
+    response_model=list[PortfolioItemResponse],
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def import_instagram_portfolio(
     data: InstagramImportRequest = InstagramImportRequest(),
     user: UserInToken = Depends(get_current_user),
@@ -159,7 +183,11 @@ async def import_instagram_portfolio(
 
 
 # ── Payout & Tax Setup ──────────────────────────────────
-@router.get("/me/payout", response_model=PayoutResponse)
+@router.get(
+    "/me/payout",
+    response_model=PayoutResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def get_payout_details(
     user: UserInToken = Depends(get_current_user),
 ):
@@ -167,7 +195,11 @@ async def get_payout_details(
     return await creator_service.get_payout_details(profile_id=user.id)
 
 
-@router.post("/me/payout", response_model=PayoutResponse)
+@router.post(
+    "/me/payout",
+    response_model=PayoutResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def save_payout_details(
     data: PayoutSetupRequest,
     user: UserInToken = Depends(get_current_user),
@@ -177,7 +209,11 @@ async def save_payout_details(
 
 
 # ── Identity Verification ──────────────────────────────
-@router.get("/me/identity", response_model=IdentityStatusResponse)
+@router.get(
+    "/me/identity",
+    response_model=IdentityStatusResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def get_identity_status(
     user: UserInToken = Depends(get_current_user),
 ):
@@ -185,7 +221,11 @@ async def get_identity_status(
     return await creator_service.get_identity_status(profile_id=user.id)
 
 
-@router.post("/me/identity", response_model=IdentityStatusResponse)
+@router.post(
+    "/me/identity",
+    response_model=IdentityStatusResponse,
+    dependencies=[Depends(require_role(UserRole.CREATOR))],
+)
 async def submit_identity_verification(
     data: IdentitySubmitRequest,
     user: UserInToken = Depends(get_current_user),
